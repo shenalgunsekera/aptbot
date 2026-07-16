@@ -3,13 +3,28 @@ import { buildBot } from './build.js';
 import { Notifier } from './notifier.js';
 
 /**
- * Long-polling entrypoint — for local development (`pnpm --filter @union/bot dev`).
+ * Long-polling entrypoint.
  *
- * In production the bot runs as a Vercel webhook (see apps/panel), and the
- * notifier + sweepers become cron endpoints. This file is the "run it as one
- * always-on process" path: same handlers via buildBot, plus the two background
- * loops that Vercel replaces with cron.
+ * ⚠️ THIS DELETES THE PRODUCTION WEBHOOK. Starting long polling requires the bot
+ * to have NO webhook, so grammY calls deleteWebhook on start — which instantly
+ * kills the live bot on Vercel. Run in watch mode, and every file change
+ * restarts it and re-kills production.
+ *
+ * Because that footgun cost real downtime, this entrypoint now REFUSES to run
+ * unless you explicitly opt in with ALLOW_LOCAL_POLLING=true. Production is the
+ * Vercel webhook (apps/panel/api/telegram); you should almost never need this.
  */
+if (process.env.ALLOW_LOCAL_POLLING !== 'true') {
+  console.error(
+    '\n  ⛔ Refusing to start the bot in local polling mode.\n\n' +
+      '  Polling DELETES the production webhook and takes the live bot offline.\n' +
+      '  Production runs on Vercel — you do not need to run the bot locally.\n\n' +
+      '  If you truly need local polling (it WILL break production until you\n' +
+      '  re-set the webhook), run with:  ALLOW_LOCAL_POLLING=true\n',
+  );
+  process.exit(1);
+}
+
 const token = process.env.TELEGRAM_BOT_TOKEN;
 if (!token) {
   console.error('TELEGRAM_BOT_TOKEN is not set — get one from @BotFather and put it in .env');
