@@ -16,12 +16,32 @@ export async function start(ctx: Ctx): Promise<void> {
   const p = await currentPlayer(ctx);
 
   if (p?.status === 'active') {
+    // Already set up — say so clearly, show which accounts are linked, and point
+    // them at what they can do. No re-registration.
+    const accts = await sql<{ name: string; uid: string }[]>`
+      select pf.name, pp.platform_uid as uid
+        from player_platforms pp join platforms pf on pf.id = pp.platform_id
+       where pp.player_id = ${p.id} and pp.platform_uid is not null
+       order by pf.sort_order`;
+    const acctLines = accts.length
+      ? '\n\nYour accounts:\n' + accts.map((a) => `  • ${a.name}: ${a.uid}`).join('\n')
+      : '';
     await ctx.reply(
-      `Welcome back${p.display_name ? ', ' + p.display_name : ''}!\n\n` +
+      `You're all set${p.display_name ? ', ' + p.display_name : ''} — you already have an account.${acctLines}\n\n` +
         `💵 /add — add money\n` +
         `💸 /cashout — cash out\n` +
+        `📄 /payments — your payments & receipts\n` +
         `📋 /me — your account\n` +
-        `✅ /confirm — confirm a payment you got`,
+        `💬 /support — message our team`,
+    );
+    return;
+  }
+
+  if (p && (p.status === 'frozen' || p.status === 'banned')) {
+    await ctx.reply(
+      p.status === 'frozen'
+        ? "Your account is on hold while we look into something. Your money is safe — someone will be in touch."
+        : "This account has been closed. Reach out if you think that's a mistake.",
     );
     return;
   }

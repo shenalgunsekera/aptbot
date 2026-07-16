@@ -259,12 +259,14 @@ async function sendReceiptToReviewer(fillId: string, fileId: string): Promise<vo
     method: f.method, name: f.depositor_name,
   };
 
+  // The admin group ALWAYS gets the receipt image + a verify button — admins
+  // oversee and can confirm any payment, P2P or club-mediated.
+  await sql`select notify_admins('fill.receipt_admin', 'fill', ${fillId}::uuid, ${sql.json(payload)}::jsonb)`;
+
+  // For a P2P payment the payee also gets it, since it is their money and their
+  // confirmation that normally releases it.
   if (f.withdraw_id && f.payee_id) {
-    // P2P: the payee sees the image and confirms.
     await sql`select notify_player(${f.payee_id}::uuid, 'fill.receipt_payee', 'fill', ${fillId}::uuid, ${sql.json(payload)}::jsonb)`;
-  } else {
-    // Club-mediated: an admin verifies against the club's account.
-    await sql`select notify_admins('fill.receipt_admin', 'fill', ${fillId}::uuid, ${sql.json(payload)}::jsonb)`;
   }
 }
 
