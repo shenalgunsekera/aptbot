@@ -1,0 +1,41 @@
+name: sweep
+
+# Vercel Hobby only allows daily crons, but the sweepers (expired locks, holds,
+# escalations) and the notification outbox need to run every few minutes. So we
+# drive them from GitHub Actions instead — free, and it just calls the same
+# /api/cron endpoint Vercel's own daily cron does.
+#
+# Setup (once): in the repo → Settings → Secrets and variables → Actions, add
+#   CRON_URL     = https://<your-app>.vercel.app/api/cron
+#   CRON_SECRET  = the same value you set in Vercel's env vars
+#
+# Note: GitHub's scheduler runs on a best-effort basis and can lag a few minutes
+# under load. That's fine here — a lock returning to the queue a few minutes late
+# hurts nobody. For tighter timing, cron-job.org (free, 1-minute) or Vercel Pro.
+
+on:
+  schedule:
+    # Every 15 minutes. Deliberately not tighter: Neon's free tier auto-suspends
+    # the database after ~5 min idle, and a shorter interval would keep it awake
+    # 24/7 and burn through Neon's free compute hours. At 15 min Neon can sleep
+    # between runs. This only affects how fast an expired deposit lock returns to
+    # the queue (~15 min worst case) — holds (72h) and escalations (24h) don't
+    # care, and player notifications are instant because they drain on the webhook.
+    - cron: '*/15 * * * *'
+  workflow_dispatch: {}       # lets you trigger it by hand from the Actions tab
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Hit the sweep endpoint
+        run: |
+          if [ -z "${{ secrets.CRON_URL }}" ]; then
+            echo "CRON_URL secret not set — skipping"; exit 0
+          fi
+          code=$(curl -s -o /tmp/out -w "%{http_code}" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.CRON_URL }}")
+          echo "HTTP $code"; cat /tmp/out
+          # Don't fail the workflow on a transient blip — the next run covers it.
+          [ "$code" = "200" ] || echo "non-200 (will retry next run)"

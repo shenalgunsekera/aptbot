@@ -75,13 +75,32 @@ curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://<your-app>.verc
 The bot is now live. No process to keep running — Telegram POSTs each message to
 Vercel.
 
-## 5. The cron is automatic
+## 5. The background sweep (free — no Pro needed)
 
-`vercel.json` registers `/api/cron` to run every minute. It runs the sweepers
-(expired locks, holds, escalations) and drains the notification outbox. **Vercel
-Cron needs the Pro plan** for per-minute; on Hobby it runs daily, which is too
-slow for a 30-minute match timeout. If you're on Hobby, either upgrade or set the
-match timeout much longer in Settings.
+The sweepers (expired locks, holds, escalations) and the notification catch-all
+run via `/api/cron`. Two things drive it:
+
+- **Vercel's own cron** (`vercel.json`) runs it **once a day** — a backstop that
+  the free Hobby plan allows.
+- **GitHub Actions** (`.github/workflows/cron.yml`) runs it **every 15 minutes** —
+  the real cadence. Free, in your repo.
+
+After deploy, add two repo secrets (GitHub → Settings → Secrets and variables →
+Actions):
+
+```
+CRON_URL     = https://<your-app>.vercel.app/api/cron
+CRON_SECRET  = the same value you set in Vercel's env
+```
+
+Why 15 minutes and not faster: Neon's free tier auto-suspends the database after
+~5 min idle, so a tighter cron would keep it awake 24/7 and eat Neon's free
+compute hours. Nothing suffers at 15 min — holds are 72h, escalations 24h, and
+**player notifications are instant regardless** because they send inline on each
+webhook. Only expired-lock recovery loosens to ~15 min, which no one feels.
+
+Want it snappier? cron-job.org (free, true 1-minute) or Vercel Pro — but you'll
+want a paid Neon plan too if you keep the DB always awake.
 
 ## 6. Firebase — authorise your domain
 

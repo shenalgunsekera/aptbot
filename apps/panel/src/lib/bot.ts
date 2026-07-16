@@ -41,5 +41,56 @@ export async function telegramWebhook(req: Request): Promise<Response> {
     return new Response('unauthorized', { status: 401 });
   }
   const handler = webhookCallback(bot, 'std/http');
-  return handler(req);
+  const res = await handler(req);
+
+  // Drain the notification outbox right here, so messages queued by whatever the
+  // player just did (confirming a payment, submitting proof) go out in seconds
+  // rather than waiting for the next cron. Most money moves happen through the
+  // bot, so this covers the latency-sensitive cases; cron catches the rest
+  // (panel actions, retries). Best-effort — never let it break the webhook ack.
+  try {
+    await drainNotifications(bot, 10);
+  } catch (err) {
+    console.error('[telegram] inline drain failed:', err);
+  }
+  return res;
+}
+
+/**
+ * Deliver a batch of pending notifications. Shared by the webhook (inline, for
+ * low latency) and the cron (catch-all). Kept small per call so it never
+ * dominates a request.
+ */
+export async function drainNotifications(bot: BotT, limit = 25): Promise<number> {
+  const { db } = await import('@union/core');
+  const { renderNotification } = await import('@union/bot/build');
+  const sql = db();
+
+  const [cfg] = await sql<{ admin_group_chat_id: number | null }[]>`
+    select admin_group_chat_id from config where id`;
+  const rows = await sql<any[]>`
+    select n.*, p.telegram_id as player_tg, a.telegram_id as admin_tg
+      from notifications n
+      left join players p on p.id = n.player_id
+      left join admins a on a.id = n.admin_id
+     where n.status = 'pending' and n.send_after <= now()
+     order by n.id limit ${limit} for update of n skip locked`;
+
+  let sent = 0;
+  for (const n of rows) {
+    const chatId = n.audience === 'admins' ? cfg?.admin_group_chat_id : (n.player_tg ?? n.admin_tg);
+    const msg = renderNotification(n);
+    if (!chatId || !msg) { await sql`update notifications set status='skipped' where id=${n.id}`; continue; }
+    try {
+      await bot.api.sendMessage(chatId, msg.text, { parse_mode: 'Markdown', ...(msg.keyboard ? { reply_markup: msg.keyboard } : {}) });
+      await sql`update notifications set status='sent', sent_at=now() where id=${n.id}`;
+      sent++;
+    } catch (err) {
+      const desc = String((err as any)?.description ?? err);
+      const giveUp = /blocked|deactivated|chat not found|kicked/i.test(desc) || n.attempts >= 4;
+      await sql`update notifications set status=${giveUp ? 'failed' : 'pending'}, attempts=${n.attempts + 1},
+                last_error=${desc.slice(0, 300)}, send_after=now()+interval '2 minutes' where id=${n.id}`;
+    }
+  }
+  return sent;
 }
