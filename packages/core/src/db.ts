@@ -15,8 +15,17 @@ export function db(): Sql {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error('DATABASE_URL is not set');
 
+  // Neon's POOLED endpoint runs PgBouncer in transaction mode, which does not
+  // support prepared statements — the default in postgres.js. On Vercel that
+  // surfaces as a server-side 500 on the very first query. Detect the pooler
+  // (or an explicit opt-in) and turn prepared statements off.
+  const pooled = /-pooler\.|pgbouncer=true/.test(url) || process.env.PG_PREPARE === 'false';
+
   _sql = postgres(url, {
-    max: Number(process.env.PG_POOL_MAX ?? 10),
+    // Serverless wants a tiny pool: every warm function holds its own, and Neon
+    // has a connection ceiling. Default low; PG_POOL_MAX overrides.
+    max: Number(process.env.PG_POOL_MAX ?? (pooled ? 1 : 10)),
+    ...(pooled ? { prepare: false } : {}),
     onnotice: () => {},
     transform: { undefined: null },
     types: {

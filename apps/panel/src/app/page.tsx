@@ -1,6 +1,8 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { db } from '@union/core';
 import { Shell } from '../components/shell';
+import { getSession } from '../lib/auth';
 import { Money, Ago } from '../components/ui';
 
 export const dynamic = 'force-dynamic';
@@ -20,6 +22,11 @@ interface Float {
 interface InboxRow { kind: string; ref_id: string; created_at: string; detail: Record<string, any>; priority: number; }
 
 export default async function Overview() {
+  // Check auth BEFORE any DB query — an unauthenticated hit should land on
+  // /login, not run queries (and not crash if the DB is unreachable).
+  const session = await getSession();
+  if (!session) redirect('/login');
+
   const sql = db();
   const floats = await sql<Float[]>`select * from v_float_position`;
   const inbox = await sql<InboxRow[]>`select * from v_admin_inbox order by priority, created_at limit 30`;
