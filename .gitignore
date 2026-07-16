@@ -1,0 +1,25 @@
+node_modules/
+dist/
+build/
+.next/
+out/
+
+# Secrets — bot tokens, service-account keys, DB creds.
+.env
+.env.*
+!.env.example
+*-service-account.json
+firebase-adminsdk-*.json
+
+# Logs / OS / editor
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Test + coverage
+coverage/
+.tsbuildinfo
+*.tsbuildinfo

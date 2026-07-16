@@ -1,0 +1,30 @@
+{
+  "name": "clubgg-union",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Peer-to-peer settlement system for a ClubGG poker union",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "db:up": "docker compose up -d db && node scripts/wait-for-db.mjs",
+    "db:down": "docker compose down",
+    "db:nuke": "docker compose down -v",
+    "db:migrate": "node scripts/migrate.mjs",
+    "db:reset": "pnpm db:nuke && pnpm db:up && pnpm db:migrate && pnpm db:seed",
+    "db:seed": "node scripts/seed.mjs",
+    "db:psql": "docker compose exec -T db psql -U union -d union",
+    "_comment_test": "--test-concurrency=1 is required: the test files share one database and each resets it, so running files in parallel makes them truncate each other mid-test.",
+    "test:db": "node --test --test-concurrency=1 db/tests/ledger.test.mjs db/tests/concurrency.test.mjs",
+    "demo:p2p": "node scripts/demo-p2p.mjs",
+    "demo:auto": "tsx scripts/demo-autoloader.mjs",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint"
+  },
+  "devDependencies": {
+    "postgres": "^3.4.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "packageManager": "pnpm@9.15.9"
+}

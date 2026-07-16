@@ -1,0 +1,24 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: union_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: union
+      POSTGRES_PASSWORD: union_dev_pw
+      POSTGRES_DB: union
+      # Deterministic ordering in tests; the ledger never depends on collation,
+      # but FIFO tie-breaks read more predictably under C collation.
+      POSTGRES_INITDB_ARGS: "--lc-collate=C --lc-ctype=C"
+    ports:
+      - "54329:5432"
+    volumes:
+      - union_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U union -d union"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  union_pgdata:
