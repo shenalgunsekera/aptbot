@@ -17,6 +17,7 @@ import {
 } from './commands/cashout.js';
 import { confirmList, handleConfirm, handleDidntArrive, disputeReason } from './commands/confirm.js';
 import { payments } from './commands/payments.js';
+import { supportStart, relayInquiryToAdmins, maybeRelayAdminReply } from './commands/support.js';
 import { loaderClaim, loaderDone, loaderShort, loaderFail, fillVerify } from './admin-actions.js';
 import { pgSessionStorage } from './session-store.js';
 
@@ -69,7 +70,8 @@ export function buildBot(token: string): Bot<Ctx> {
   bot.command('me', dmOnly(me));
   bot.command(['payments', 'history', 'receipts'], dmOnly(payments));
   bot.command('confirm', dmOnly(confirmList));
-  
+  bot.command(['support', 'help_me', 'contact'], dmOnly(supportStart));
+
   // The admin group adopts the chat it is added to (never creates one). Only an
   // enabled admin's telegram_id can set it — the DB function is the whole check.
   bot.command('setadmingroup', async (ctx) => {
@@ -81,7 +83,31 @@ export function buildBot(token: string): Bot<Ctx> {
       select admin_group_claim(${ctx.chat.id}::bigint, ${ctx.from!.id}::bigint)`;
     await ctx.reply(row?.admin_group_claim
       ? '✅ This group is now the admin group. All notifications and jobs will come here.'
-      : '⛔ Only an admin can do that.');
+      : '⛔ Only an admin can do that. (Your Telegram account must be linked as an admin first.)');
+  });
+
+  // ─── Only admins may add the bot to a group ──────────────────────────────────
+  // When the bot is added somewhere, check who added it. If they are not an
+  // enabled admin, leave immediately — the bot works only in player DMs and the
+  // one admin group an admin explicitly sets.
+  bot.on('my_chat_member', async (ctx) => {
+    const status = ctx.myChatMember.new_chat_member.status;
+    const chat = ctx.chat;
+    if (chat.type === 'private') return;
+    if (status !== 'member' && status !== 'administrator') return;   // only care about being added
+
+    const addedBy = ctx.from?.id;
+    const [adm] = await db()<{ id: string }[]>`
+      select id from admins where telegram_id = ${addedBy ?? 0}::bigint and not disabled`;
+
+    if (!adm) {
+      try {
+        await ctx.api.sendMessage(chat.id, 'This bot is for authorised admins only. Leaving.');
+        await ctx.api.leaveChat(chat.id);
+      } catch { /* already gone */ }
+      return;
+    }
+    await ctx.reply('👋 Added. An admin can run /setadmingroup here to make this the admin group.');
   });
   
   // ─── Callbacks ───────────────────────────────────────────────────────────────
@@ -174,11 +200,22 @@ export function buildBot(token: string): Bot<Ctx> {
   
   // ─── Free text — routed by conversation step ─────────────────────────────────
   bot.on('message:text', async (ctx) => {
-    if (ctx.chat?.type !== 'private') return;   // ignore group chatter
+    // In the admin GROUP: an admin replying to a forwarded question relays it
+    // back to the player. Everything else in a group is ignored.
+    if (ctx.chat?.type !== 'private') {
+      await maybeRelayAdminReply(ctx);
+      return;
+    }
+
     const step = ctx.session.step;
     const text = ctx.message.text.trim();
     if (text.startsWith('/')) return;
-  
+
+    // A pending support question: capture it and send it to the team.
+    if ((ctx.session as any)._support) {
+      return void (await relayInquiryToAdmins(ctx, text));
+    }
+
     switch (step.name) {
       case 'register:name': return void (await registerName(ctx, text));
       case 'register:platform_uid': return void (await registerUid(ctx, step.platformId, text));
@@ -188,7 +225,8 @@ export function buildBot(token: string): Bot<Ctx> {
       case 'out:handle': return void (await cashoutHandle(ctx, step.platformId, step.amount, step.methodId, text));
       case 'dispute:reason': return void (await disputeReason(ctx, step.fillId, text));
       default:
-        await ctx.reply("Not sure what you mean — try /help.");
+        // Anything else in a DM is treated as a question for the team.
+        await relayInquiryToAdmins(ctx, text);
     }
   });
   

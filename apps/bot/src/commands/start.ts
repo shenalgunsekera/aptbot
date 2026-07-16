@@ -27,8 +27,28 @@ export async function start(ctx: Ctx): Promise<void> {
   }
 
   if (p && p.status === 'pending') {
+    // Resume registration wherever it stalled — a session lost mid-flow must
+    // never leave a player stuck. No name yet → ask for it. Name but no platform
+    // account claimed → ask that. Otherwise they really are waiting on an admin.
+    if (!p.display_name || !p.display_name.trim()) {
+      ctx.session.step = { name: 'register:name' };
+      await ctx.reply(
+        `👋 Welcome back — let's finish setting you up.\n\nWhat name should we know you by?`,
+      );
+      return;
+    }
+    const [claim] = await sql<{ n: number }[]>`
+      select count(*)::int as n from player_platforms where player_id = ${p.id}`;
+    if (!claim || claim.n === 0) {
+      const platforms = await sql<Platform[]>`select * from platforms where enabled order by sort_order`;
+      const kb = new InlineKeyboard();
+      for (const pf of platforms) kb.text(pf.name, `reg:pf:${pf.id}`).row();
+      ctx.session.step = { name: 'idle' };
+      await ctx.reply(`Almost there, ${p.display_name}! Where do you play?`, { reply_markup: kb });
+      return;
+    }
     await ctx.reply(
-      "You're registered! We just need someone to confirm your account. " +
+      "You're all registered! We just need someone to confirm your account. " +
         "You'll get a message here the moment that's done.",
     );
     return;
