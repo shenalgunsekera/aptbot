@@ -87,10 +87,7 @@ export class Notifier {
     }
     let ok = false;
     for (const a of admins) {
-      try {
-        await this.bot.api.sendMessage(a.telegram_id, msg.text, { parse_mode: 'Markdown', ...(msg.keyboard ? { reply_markup: msg.keyboard } : {}) });
-        ok = true;
-      } catch { /* try the rest */ }
+      try { await sendRendered(this.bot, a.telegram_id, msg); ok = true; } catch { /* try the rest */ }
     }
     await sql`update notifications set status=${ok ? 'sent' : 'failed'}, sent_at=now() where id=${n.id}`;
   }
@@ -98,7 +95,7 @@ export class Notifier {
   private async deliver(n: Notification, chatId: number, msg: Rendered): Promise<void> {
     const sql = db();
     try {
-      await this.bot.api.sendMessage(chatId, msg.text, { parse_mode: 'Markdown', ...(msg.keyboard ? { reply_markup: msg.keyboard } : {}) });
+      await sendRendered(this.bot, chatId, msg);
       await sql`update notifications set status='sent', sent_at=now() where id=${n.id}`;
     } catch (err) {
       const description = String((err as { description?: string })?.description ?? err);
@@ -116,7 +113,25 @@ export class Notifier {
   }
 }
 
-interface Rendered { text: string; keyboard?: InlineKeyboard }
+interface Rendered { text: string; keyboard?: InlineKeyboard; photo?: string }
+
+/**
+ * Send a rendered notification — as a PHOTO when it carries one (so a receipt
+ * image shows inline in Telegram, not just a link), otherwise as text. Shared by
+ * the live notifier and the cron drain so both behave identically.
+ *
+ * `photo` is a Telegram file_id (preferred — instant, no re-upload) or a public
+ * URL (Firebase Storage). Telegram caption max is 1024 chars, so the text is
+ * clipped for the caption case.
+ */
+export async function sendRendered(bot: Bot<Ctx>, chatId: number, msg: Rendered): Promise<void> {
+  const opts = { parse_mode: 'Markdown' as const, ...(msg.keyboard ? { reply_markup: msg.keyboard } : {}) };
+  if (msg.photo) {
+    await bot.api.sendPhoto(chatId, msg.photo, { caption: msg.text.slice(0, 1024), ...opts });
+  } else {
+    await bot.api.sendMessage(chatId, msg.text, opts);
+  }
+}
 
 export function renderNotification(n: Notification): Rendered | null {
   const p = n.payload as Record<string, any>;
@@ -132,6 +147,28 @@ export function renderNotification(n: Notification): Rendered | null {
         keyboard: new InlineKeyboard()
           .text('✅ Yes, I got it', `cf:yes:${n.ref_id}`)
           .text("❌ Didn't arrive", `cf:no:${n.ref_id}`),
+      };
+
+    // The receipt IMAGE, sent to the payee so they see proof before confirming.
+    case 'fill.receipt_payee':
+      return {
+        photo: p.file_id || p.url,
+        text: `*💰 Payment received — here's their receipt*\n\nAmount: *${m(p.amount, p.currency)}*\n` +
+          `Transaction ID: \`${p.payment_ref}\`\n\nCheck it matches your ${p.method}, then confirm.`,
+        keyboard: new InlineKeyboard()
+          .text('✅ Yes, I got it', `cf:yes:${p.fill_id}`)
+          .text("❌ Didn't arrive", `cf:no:${p.fill_id}`),
+      };
+
+    // The receipt IMAGE, sent to the admin group so they can verify a
+    // club-mediated payment (PayPal etc.) by looking at the actual proof.
+    case 'fill.receipt_admin':
+      return {
+        photo: p.file_id || p.url,
+        text: `*🏦 Payment to verify — receipt attached*\n\n${p.name ? 'From: *' + p.name + '*\n' : ''}` +
+          `Amount: *${m(p.amount, p.currency)}* (${p.method})\nTransaction ID: \`${p.payment_ref}\`\n\n` +
+          `Check it landed, then release.`,
+        keyboard: new InlineKeyboard().text('✅ Verify & release', `fl:verify:${p.fill_id}`),
       };
     case 'fill.released':
       return { text: `✅ *${m(p.credit, p.currency)} is on its way to your table.*` };

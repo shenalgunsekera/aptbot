@@ -225,8 +225,47 @@ export async function addReceipt(ctx: Ctx, fillId: string): Promise<void> {
     return;
   }
 
+  // Push the receipt IMAGE to whoever needs to act on it, so they see the actual
+  // proof in Telegram — not just a reference. Payee for a P2P fill, the admin
+  // group for a club-mediated one. Queued to the outbox (drains on this webhook).
+  await sendReceiptToReviewer(fillId, fileId);
+
   ctx.session.step = { name: 'idle' };
   await ctx.reply(finishedMessage());
+}
+
+/** Queue the receipt image + action buttons to the right reviewer. */
+async function sendReceiptToReviewer(fillId: string, fileId: string): Promise<void> {
+  const sql = db();
+  const [f] = await sql<{
+    withdraw_id: string | null; amount: number; currency: string;
+    payment_ref: string | null; method: string; payee_id: string | null;
+    depositor_name: string | null; url: string | null;
+  }[]>`
+    select f.withdraw_id, f.amount, f.currency, f.payment_ref,
+           pm.name as method, w.player_id as payee_id, dp.display_name as depositor_name,
+           (select r.url from receipts r where r.ref_type='fill' and r.ref_id=f.id order by r.created_at desc limit 1) as url
+      from fills f
+      join payment_methods pm on pm.id = f.method_id
+      left join withdraw_requests w on w.id = f.withdraw_id
+      left join deposit_requests d on d.id = f.deposit_id
+      left join players dp on dp.id = d.player_id
+     where f.id = ${fillId}`;
+  if (!f) return;
+
+  const payload = {
+    fill_id: fillId, file_id: fileId, url: f.url,
+    amount: f.amount, currency: f.currency, payment_ref: f.payment_ref,
+    method: f.method, name: f.depositor_name,
+  };
+
+  if (f.withdraw_id && f.payee_id) {
+    // P2P: the payee sees the image and confirms.
+    await sql`select notify_player(${f.payee_id}::uuid, 'fill.receipt_payee', 'fill', ${fillId}::uuid, ${sql.json(payload)}::jsonb)`;
+  } else {
+    // Club-mediated: an admin verifies against the club's account.
+    await sql`select notify_admins('fill.receipt_admin', 'fill', ${fillId}::uuid, ${sql.json(payload)}::jsonb)`;
+  }
 }
 
 export async function addSkipReceipt(ctx: Ctx): Promise<void> {

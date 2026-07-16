@@ -66,6 +66,21 @@ export async function payments(ctx: Ctx): Promise<void> {
   for (const chunk of chunkMarkdown(full, 3800)) {
     await ctx.reply(chunk, { parse_mode: 'Markdown', link_preview_options: { is_disabled: true } });
   }
+
+  // Then send the actual receipt IMAGES, so the player sees them — not just
+  // links. One photo per payment that has a receipt, with a short caption.
+  const seen = new Set<string>();
+  for (const w of outs) {
+    for (const pay of (w.payments ?? []) as any[]) {
+      if (!pay.receipt || seen.has(pay.receipt)) continue;
+      seen.add(pay.receipt);
+      try {
+        await ctx.replyWithPhoto(pay.receipt, {
+          caption: `Receipt ${pay.receipt_ref ?? ''} — ${money(pay.amount)}${pay.ref ? ` · ref ${pay.ref}` : ''}`,
+        });
+      } catch { /* a broken/expired image link shouldn't break the list */ }
+    }
+  }
 }
 
 function renderCashout(w: any, brief = false): string {

@@ -76,13 +76,16 @@ export async function drainNotifications(bot: BotT, limit = 25): Promise<number>
      where n.status = 'pending' and n.send_after <= now()
      order by n.id limit ${limit} for update of n skip locked`;
 
+  const { sendRendered } = await import('@union/bot/build');
   let sent = 0;
   for (const n of rows) {
     const chatId = n.audience === 'admins' ? cfg?.admin_group_chat_id : (n.player_tg ?? n.admin_tg);
     const msg = renderNotification(n);
     if (!chatId || !msg) { await sql`update notifications set status='skipped' where id=${n.id}`; continue; }
     try {
-      await bot.api.sendMessage(chatId, msg.text, { parse_mode: 'Markdown', ...(msg.keyboard ? { reply_markup: msg.keyboard } : {}) });
+      // sendRendered sends a PHOTO when the notification carries a receipt image,
+      // else text — so receipts show inline in Telegram from the cron path too.
+      await sendRendered(bot, chatId, msg);
       await sql`update notifications set status='sent', sent_at=now() where id=${n.id}`;
       sent++;
     } catch (err) {
