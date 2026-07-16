@@ -3,7 +3,7 @@ import { Bot, session, GrammyError, HttpError } from 'grammy';
 import { db, closeDb } from '@union/core';
 import { type Ctx, type SessionData, initialSession } from './session.js';
 import { currentPlayer } from './player.js';
-import { dmOnly, groupIntro } from './guards.js';
+import { dmOnly, playerOnly, isAdminGroup } from './guards.js';
 import { Notifier } from './notifier.js';
 import {
   start, registerName, registerPickPlatform, registerUid, me,
@@ -46,8 +46,11 @@ export function buildBot(token: string): Bot<Ctx> {
   }));
   
   // ─── Commands ────────────────────────────────────────────────────────────────
+  // /start runs the registration flow IN PLACE — in a DM or the member's own
+  // group — never bouncing them to a separate chat. Only the admin group is
+  // excluded (it is for admin work, not player onboarding).
   bot.command('start', async (ctx) => {
-    if (ctx.chat?.type !== 'private') return void (await groupIntro(ctx));
+    if (await isAdminGroup(ctx)) return;
     await start(ctx);
   });
   bot.command('cancel', async (ctx) => {
@@ -205,12 +208,13 @@ export function buildBot(token: string): Bot<Ctx> {
   
   // ─── Free text — routed by conversation step ─────────────────────────────────
   bot.on('message:text', async (ctx) => {
-    // In the admin GROUP: an admin replying to a forwarded question relays it
-    // back to the player. Everything else in a group is ignored.
-    if (ctx.chat?.type !== 'private') {
+    // In the ADMIN GROUP: an admin replying to a forwarded question relays it
+    // back to the player. No player flows run there.
+    if (await isAdminGroup(ctx)) {
       await maybeRelayAdminReply(ctx);
       return;
     }
+    // Everywhere else (DM or a member's own group) the player flow runs in place.
 
     const step = ctx.session.step;
     const text = ctx.message.text.trim();
@@ -237,7 +241,7 @@ export function buildBot(token: string): Bot<Ctx> {
   
   // ─── Photos / documents (receipts) ───────────────────────────────────────────
   bot.on(['message:photo', 'message:document'], async (ctx) => {
-    if (ctx.chat?.type !== 'private') return;
+    if (await isAdminGroup(ctx)) return;
     const step = ctx.session.step;
   
     if (step.name === 'add:receipt') return void (await addReceipt(ctx, step.fillId));
