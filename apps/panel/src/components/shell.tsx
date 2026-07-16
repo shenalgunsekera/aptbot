@@ -37,6 +37,7 @@ export async function Shell({ children }: { children: React.ReactNode }) {
     { href: '/', label: 'Overview' },
     { href: '/jobs', label: 'Jobs', count: counts?.jobs },
     { href: '/transactions', label: 'Payments' },
+    { href: '/receipts', label: 'Receipts' },
     { href: '/queue', label: 'Cash outs' },
     { href: '/disputes', label: 'Disputes', count: counts?.disputes },
     { href: '/players', label: 'Players', count: counts?.links },

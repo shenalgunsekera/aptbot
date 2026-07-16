@@ -16,7 +16,9 @@ import {
   cashoutSavedHandle, cashoutHandle,
 } from './commands/cashout.js';
 import { confirmList, handleConfirm, handleDidntArrive, disputeReason } from './commands/confirm.js';
+import { payments } from './commands/payments.js';
 import { loaderClaim, loaderDone, loaderShort, loaderFail, fillVerify } from './admin-actions.js';
+import { pgSessionStorage } from './session-store.js';
 
 /**
  * buildBot — constructs the fully-wired bot WITHOUT starting it.
@@ -31,9 +33,14 @@ export function buildBot(token: string): Bot<Ctx> {
   
   // Key sessions by USER, not chat: money commands are DM-only, but a per-user key
   // means a stray group message can never corrupt an in-flight flow.
+  //
+  // Storage is Postgres (Neon), NOT the in-memory default — otherwise a serverless
+  // webhook forgets the conversation between /start and the next message, because
+  // each invocation is a fresh function instance.
   bot.use(session<SessionData, Ctx>({
     initial: initialSession,
     getSessionKey: (ctx) => ctx.from?.id.toString(),
+    storage: pgSessionStorage<SessionData>(),
   }));
   
   // ─── Commands ────────────────────────────────────────────────────────────────
@@ -52,6 +59,7 @@ export function buildBot(token: string): Bot<Ctx> {
   bot.command('help', (ctx) =>
     ctx.reply(
       `💵 /add — add money\n💸 /cashout — cash out\n📋 /me — your account\n` +
+        `📄 /payments — your payments & receipts\n` +
         `✅ /confirm — confirm a payment you got\n/cancel — stop what you're doing`,
     ),
   );
@@ -59,6 +67,7 @@ export function buildBot(token: string): Bot<Ctx> {
   bot.command(['add', 'deposit'], dmOnly(addStart));
   bot.command(['cashout', 'withdraw'], dmOnly(cashoutStart));
   bot.command('me', dmOnly(me));
+  bot.command(['payments', 'history', 'receipts'], dmOnly(payments));
   bot.command('confirm', dmOnly(confirmList));
   
   // The admin group adopts the chat it is added to (never creates one). Only an

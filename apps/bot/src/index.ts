@@ -46,6 +46,7 @@ await bot.api.setMyCommands([
   { command: 'add', description: 'Add money' },
   { command: 'cashout', description: 'Cash out' },
   { command: 'me', description: 'Your account' },
+  { command: 'payments', description: 'Your payments and receipts' },
   { command: 'confirm', description: 'Confirm a payment you got' },
   { command: 'help', description: 'What I can do' },
 ], { scope: { type: 'all_private_chats' } });
