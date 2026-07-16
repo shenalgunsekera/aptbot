@@ -28,9 +28,22 @@ export async function POST(req: Request) {
 
   // Being a valid Firebase user is not being an admin. Anyone can create a
   // Firebase account; only rows in `admins` may enter.
+  //
+  // First login by an admin added via /setadmin: the row has their email but no
+  // Firebase uid yet. admin_bind_firebase claims it — matching on the VERIFIED
+  // email from the Google token — so they just sign in and it works, no manual
+  // uid wiring. Only a verified email may bind (Google emails are verified).
   const sql = db();
-  const [admin] = await sql<Admin[]>`
-    select * from admins where firebase_uid = ${decoded.uid} and not disabled`;
+  let admin: Admin | undefined;
+  if (decoded.email && decoded.email_verified) {
+    const [bound] = await sql<Admin[]>`
+      select * from admin_bind_firebase(${decoded.uid}, ${decoded.email})`;
+    admin = bound ?? undefined;
+  } else {
+    const [a] = await sql<Admin[]>`
+      select * from admins where firebase_uid = ${decoded.uid} and not disabled`;
+    admin = a;
+  }
 
   if (!admin) {
     // Deliberately vague: do not confirm to a stranger whether an email is an

@@ -196,7 +196,13 @@ export function renderNotification(n: Notification): Rendered | null {
     case 'player.registered':
       return { text: `👤 *New player* — ${p.name ?? (p.username ? '@'+p.username : p.telegram_id)}\nWaiting to add their account.` };
     case 'player.claim':
-      return { text: `👤 *${p.name}* wants to link ${p.platform}: \`${p.uid_claimed}\`\n\nConfirm in the panel.` };
+      return {
+        text: `👤 *${p.name}* wants to link ${p.platform}: \`${p.uid_claimed}\`\n\n` +
+          `Check the ID against the roster, then approve.`,
+        keyboard: p.pp_id
+          ? new InlineKeyboard().text('✅ Approve', `pl:approve:${p.pp_id}`)
+          : undefined,
+      };
     case 'player.needs_club':
       return { text: `📍 *${p.name}* (${p.platform} ${p.uid}) is approved but not assigned to a club yet.` };
     case 'loader.delivery_failed':

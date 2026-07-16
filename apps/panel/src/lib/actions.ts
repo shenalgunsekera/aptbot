@@ -23,6 +23,20 @@ async function run(fn: () => Promise<string | void>, paths: string[] = ['/']): P
   try {
     const message = await fn();
     for (const p of paths) revalidatePath(p);
+
+    // Send any notifications this action queued, RIGHT NOW. Panel actions (like
+    // approving a player) write to the notification outbox but do not go through
+    // the bot webhook, so without this the player's "you're approved!" message
+    // would sit undelivered until the next cron. Draining here makes panel
+    // actions notify instantly, same as Telegram actions do. Best-effort.
+    try {
+      const { getBot, drainNotifications } = await import('./bot');
+      const bot = await getBot();
+      await drainNotifications(bot, 15);
+    } catch (e) {
+      console.error('[panel] notify drain failed:', e);
+    }
+
     return { ok: true, ...(message ? { message } : {}) };
   } catch (err) {
     const m = (err as Error).message;

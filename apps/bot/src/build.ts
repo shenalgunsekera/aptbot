@@ -18,6 +18,7 @@ import {
 import { confirmList, handleConfirm, handleDidntArrive, disputeReason } from './commands/confirm.js';
 import { payments } from './commands/payments.js';
 import { supportStart, relayInquiryToAdmins, maybeRelayAdminReply } from './commands/support.js';
+import { setAdmin, approvePlayer } from './admin-mgmt.js';
 import { loaderClaim, loaderDone, loaderShort, loaderFail, fillVerify } from './admin-actions.js';
 import { pgSessionStorage } from './session-store.js';
 
@@ -85,6 +86,9 @@ export function buildBot(token: string): Bot<Ctx> {
       ? '✅ This group is now the admin group. All notifications and jobs will come here.'
       : '⛔ Only an admin can do that. (Your Telegram account must be linked as an admin first.)');
   });
+
+  // Owner adds admins by tagging them. Works in the group or a DM.
+  bot.command('setadmin', setAdmin);
 
   // ─── Only admins may add the bot to a group ──────────────────────────────────
   // When the bot is added somewhere, check who added it. If they are not an
@@ -177,6 +181,7 @@ export function buildBot(token: string): Bot<Ctx> {
   bot.callbackQuery(/^lo:short:(.+)$/, (ctx) => loaderShort(ctx, ctx.match![1]!));
   bot.callbackQuery(/^lo:fail:(.+)$/, (ctx) => loaderFail(ctx, ctx.match![1]!));
   bot.callbackQuery(/^fl:verify:(.+)$/, (ctx) => fillVerify(ctx, ctx.match![1]!));
+  bot.callbackQuery(/^pl:approve:(.+)$/, (ctx) => approvePlayer(ctx, ctx.match![1]!));
   bot.callbackQuery('noop', (ctx) => ctx.answerCallbackQuery({ text: 'Open the panel for full details.' }));
   
   // ─── Loader "different amount" reply in the admin group ──────────────────────
