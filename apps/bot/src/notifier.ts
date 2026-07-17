@@ -256,6 +256,19 @@ export function renderNotification(n: Notification): Rendered | null {
       };
     case 'player.needs_club':
       return { text: `📍 *${p.name}* (${p.platform} ${p.uid}) is approved but not assigned to a club yet.` };
+    case 'payment.detected':
+      return p.matched
+        ? {
+            text: `💚 *Payment received — ${m(p.amount, p.currency)} via ${p.method}*` +
+              (p.name ? `\nFrom: *${p.name}*` : '') +
+              (p.ref ? `\nRef: \`${p.ref}\`` : '') +
+              `\n\n_Auto-detected. Check the receipt card above, then Verify & release._`,
+          }
+        : {
+            text: `⚠️ *Payment received with no matching request*\n${m(p.amount, p.currency)} via ${p.method}` +
+              (p.ref ? `\nRef: \`${p.ref}\`` : '') +
+              `\n\n_Nobody has an open request for this amount — check the panel._`,
+          };
     case 'sportsbook.create':
       return {
         text: `🆕 *Create a Sportsbook account*\n\nFor: *${p.name}*\n` +

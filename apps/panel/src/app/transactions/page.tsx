@@ -40,7 +40,10 @@ export default async function TransactionsPage({
     : sql``;
 
   const rows = await sql<any[]>`
-    select * from v_fills_detail v where ${where} ${search}
+    select v.*, f.detected_at, f.detected_source
+      from v_fills_detail v
+      left join fills f on f.id = v.id
+     where ${where} ${search}
      order by v.created_at desc limit 100`;
 
   return (
@@ -88,7 +91,14 @@ export default async function TransactionsPage({
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id}>
-                  <td><StatusBadge status={r.status} escalated={!!r.escalated_at} disputed={r.has_open_dispute} /></td>
+                  <td>
+                    <StatusBadge status={r.status} escalated={!!r.escalated_at} disputed={r.has_open_dispute} />
+                    {r.detected_at && (
+                      <div className="badge ok" style={{ marginTop: 4 }} title={`Auto-detected via ${r.detected_source}`}>
+                        💚 payment detected
+                      </div>
+                    )}
+                  </td>
                   <td className="num">
                     <Money minor={r.amount} currency={r.currency} />
                     {r.rake_amount > 0 && (

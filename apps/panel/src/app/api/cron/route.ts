@@ -27,6 +27,15 @@ export async function GET(req: Request): Promise<Response> {
   try {
     const [swept] = await db()<{ swept_locks: number; swept_holds: number; escalated: number }[]>`
       select * from sweep_all()`;
+
+    // Poll stablecoin addresses for incoming payments (matched exactly by amount,
+    // then queued as an admin heads-up). Best-effort — never break the cron.
+    let cryptoPolled = 0;
+    try {
+      const { detectCryptoPayments } = await import('../../../lib/crypto-watch');
+      cryptoPolled = await detectCryptoPayments();
+    } catch (err) { console.error('[cron] crypto poll failed:', err); }
+
     const bot = await getBot();
     const delivered = await drainNotifications(bot, 40);
 
@@ -37,7 +46,7 @@ export async function GET(req: Request): Promise<Response> {
     // one cron cycle.
     const webhookFixed = await ensureWebhook(bot, req);
 
-    return Response.json({ ok: true, ...swept, delivered, webhookFixed });
+    return Response.json({ ok: true, ...swept, delivered, cryptoPolled, webhookFixed });
   } catch (err) {
     console.error('[cron] failed:', err);
     return Response.json({ ok: false, error: String(err) }, { status: 500 });
