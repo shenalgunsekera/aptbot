@@ -25,7 +25,7 @@ export default async function ConfigPage() {
   const [cfg] = await sql<any[]>`select * from config where id`;
   const methods = await sql<any[]>`select * from payment_methods order by sort_order, name`;
   const platforms = await sql<any[]>`select * from platforms order by sort_order, name`;
-  const admins = await sql<any[]>`select id, telegram_id, telegram_username, email, role, disabled from admins order by role desc, created_at`;
+  const admins = await sql<any[]>`select id, telegram_id, display_name, email, role, disabled from admins order by role desc, created_at`;
 
   return (
     <Shell>

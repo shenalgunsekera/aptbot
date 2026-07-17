@@ -262,9 +262,9 @@ export async function addReceipt(ctx: Ctx, fillId: string): Promise<void> {
     return;
   }
 
-  // First receipt for this deposit → submit proof for every locked slice, and
-  // push the receipt image + Verify button to the admins (p_notify=false so the
-  // DB doesn't ALSO alert — the image card is the one that matters).
+  // First receipt for this deposit → submit proof for every locked slice
+  // (p_notify=false: we send the receipt album to admins ourselves when the
+  // player is finished, so the DB shouldn't also alert).
   const locked = await sql<{ id: string }[]>`
     select id from fills where deposit_id = ${f!.deposit_id} and status = 'locked' order by seq`;
   if (locked.length) {
@@ -274,27 +274,35 @@ export async function addReceipt(ctx: Ctx, fillId: string): Promise<void> {
       if (isUserError(err)) { await ctx.reply(`❌ ${userMessage(err)}`); ctx.session.step = { name: 'idle' }; return; }
       throw err;
     }
-    await sendReceiptToReviewer(fillId, fileId);
   }
 
-  // Count receipts on this fill so far; allow a second, then wrap up.
+  // Allow a second image, then send BOTH to admins as one album. We don't notify
+  // per image — that's what created two separate messages before.
   const [rc] = await sql<{ n: number }[]>`
     select count(*)::int n from receipts where ref_type='fill' and ref_id=${fillId}`;
   if ((rc?.n ?? 1) < MAX_RECEIPTS) {
     await ctx.reply('✅ Receipt saved. Send *one more* image if you have it, or tap /done.', { parse_mode: 'Markdown' });
     return;
   }
+  await sendReceiptsToReviewer(fillId);
   ctx.session.step = { name: 'idle' };
   await ctx.reply(finishedMessage());
 }
 
-/** /done or /skip during receipt collection — wrap up. If the player never sent
- *  a receipt, still submit proof (with an admin alert) so their payment isn't
- *  stranded; an admin can follow up. */
+/** /done or /skip during receipt collection — wrap up. Sends whatever receipts
+ *  were attached to admins as one album; if none, submits proof with an alert so
+ *  the payment isn't stranded. */
 export async function addDone(ctx: Ctx, fillId: string): Promise<void> {
   const sql = db();
   const [f] = await sql<{ deposit_id: string | null }[]>`select deposit_id from fills where id = ${fillId}`;
-  if (f?.deposit_id) {
+  const [rc] = await sql<{ n: number }[]>`
+    select count(*)::int n from receipts where ref_type='fill' and ref_id=${fillId}`;
+
+  if ((rc?.n ?? 0) > 0) {
+    // At least one receipt: proof was already submitted on upload; send the album.
+    await sendReceiptsToReviewer(fillId);
+  } else if (f?.deposit_id) {
+    // No receipt at all: submit proof with an admin alert so nothing is stranded.
     const locked = await sql<{ id: string }[]>`
       select id from fills where deposit_id = ${f.deposit_id} and status = 'locked' order by seq`;
     for (const lf of locked) {
@@ -306,40 +314,36 @@ export async function addDone(ctx: Ctx, fillId: string): Promise<void> {
   await ctx.reply(finishedMessage());
 }
 
-/** Queue the receipt image + action buttons to the right reviewer. */
-async function sendReceiptToReviewer(fillId: string, fileId: string): Promise<void> {
+/** Queue ALL of a fill's receipts to the admin group as one album + Verify. */
+async function sendReceiptsToReviewer(fillId: string): Promise<void> {
   const sql = db();
   const [f] = await sql<{
-    withdraw_id: string | null; amount: number; currency: string;
-    payment_ref: string | null; method: string; payee_id: string | null;
-    depositor_name: string | null; url: string | null;
+    amount: number; currency: string; payment_ref: string | null;
+    method: string; depositor_name: string | null;
   }[]>`
-    select f.withdraw_id, f.amount, f.currency, f.payment_ref,
-           pm.name as method, w.player_id as payee_id, dp.display_name as depositor_name,
-           (select r.url from receipts r where r.ref_type='fill' and r.ref_id=f.id order by r.created_at desc limit 1) as url
+    select f.amount, f.currency, f.payment_ref, pm.name as method,
+           dp.display_name as depositor_name
       from fills f
       join payment_methods pm on pm.id = f.method_id
-      left join withdraw_requests w on w.id = f.withdraw_id
       left join deposit_requests d on d.id = f.deposit_id
       left join players dp on dp.id = d.player_id
      where f.id = ${fillId}`;
   if (!f) return;
 
+  // Prefer Telegram file_ids (instant re-send, no re-upload); fall back to the
+  // stored Firebase URLs.
+  const receipts = await sql<{ telegram_file_id: string | null; url: string | null }[]>`
+    select telegram_file_id, url from receipts
+     where ref_type='fill' and ref_id=${fillId} order by created_at`;
+  const fileIds = receipts.map((r) => r.telegram_file_id).filter((x): x is string => !!x);
+  const urls = receipts.map((r) => r.url).filter((x): x is string => !!x && !x.startsWith('telegram:'));
+
   const payload = {
-    fill_id: fillId, file_id: fileId, url: f.url,
+    fill_id: fillId, file_ids: fileIds, urls,
     amount: f.amount, currency: f.currency, payment_ref: f.payment_ref,
     method: f.method, name: f.depositor_name,
   };
-
-  // The admin group gets the receipt image + a Verify button. Admins are the ONLY
-  // confirmers now — one tap releases the money, for P2P and club alike. The payee
-  // is not asked to confirm anything.
   await sql`select notify_admins('fill.receipt_admin', 'fill', ${fillId}::uuid, ${sql.json(payload)}::jsonb)`;
-}
-
-export async function addSkipReceipt(ctx: Ctx): Promise<void> {
-  ctx.session.step = { name: 'idle' };
-  await ctx.reply(finishedMessage());
 }
 
 function finishedMessage(): string {

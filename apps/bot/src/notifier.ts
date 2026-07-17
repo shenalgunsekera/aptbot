@@ -113,7 +113,7 @@ export class Notifier {
   }
 }
 
-interface Rendered { text: string; keyboard?: InlineKeyboard; photo?: string }
+interface Rendered { text: string; keyboard?: InlineKeyboard; photo?: string; photos?: string[] }
 
 /**
  * Send a rendered notification — as a PHOTO when it carries one (so a receipt
@@ -126,8 +126,25 @@ interface Rendered { text: string; keyboard?: InlineKeyboard; photo?: string }
  */
 export async function sendRendered(bot: Bot<Ctx>, chatId: number, msg: Rendered): Promise<void> {
   const opts = { parse_mode: 'Markdown' as const, ...(msg.keyboard ? { reply_markup: msg.keyboard } : {}) };
-  if (msg.photo) {
-    await bot.api.sendPhoto(chatId, msg.photo, { caption: msg.text.slice(0, 1024), ...opts });
+
+  // Multiple images → ONE album (media group), so several receipts arrive as a
+  // single grouped message, not one message per image. Albums can't carry an
+  // inline keyboard, so the action button follows in a short message.
+  if (msg.photos && msg.photos.length > 1) {
+    await bot.api.sendMediaGroup(chatId, msg.photos.slice(0, 10).map((media, i) => ({
+      type: 'photo' as const,
+      media,
+      ...(i === 0 ? { caption: msg.text.slice(0, 1024), parse_mode: 'Markdown' as const } : {}),
+    })));
+    if (msg.keyboard) {
+      await bot.api.sendMessage(chatId, '👆 Receipts above — verify when you\'ve checked them.', { reply_markup: msg.keyboard });
+    }
+    return;
+  }
+
+  const single = msg.photo ?? msg.photos?.[0];
+  if (single) {
+    await bot.api.sendPhoto(chatId, single, { caption: msg.text.slice(0, 1024), ...opts });
   } else {
     await bot.api.sendMessage(chatId, msg.text, opts);
   }
@@ -145,17 +162,19 @@ export function renderNotification(n: Notification): Rendered | null {
     case 'fill.receipt_payee':
       return { text: `*💰 A payment of ${m(p.amount, p.currency)} is on the way to you.* We'll confirm it and let you know.` };
 
-    // The receipt IMAGE, sent to the admin group. Admins are the only confirmers:
-    // one tap on Verify releases the money, P2P or club-mediated.
-    case 'fill.receipt_admin':
-      return {
-        photo: p.file_id || p.url,
-        text: `*🏦 Payment to verify — receipt attached*\n\n${p.name ? 'From: *' + p.name + '*\n' : ''}` +
-          `Amount: *${m(p.amount, p.currency)}* (${p.method})` +
-          (p.payment_ref ? `\nReference: \`${p.payment_ref}\`` : '') + `\n\n` +
-          `Check it landed, then release.`,
-        keyboard: new InlineKeyboard().text('✅ Verify & release', `fl:verify:${p.fill_id}`),
-      };
+    // The receipt IMAGE(S), sent to the admin group as one album. Admins are the
+    // only confirmers: one tap on Verify releases the money, P2P or club-mediated.
+    case 'fill.receipt_admin': {
+      const imgs: string[] = (Array.isArray(p.file_ids) && p.file_ids.length ? p.file_ids
+        : Array.isArray(p.urls) ? p.urls : [p.file_id || p.url]).filter(Boolean);
+      const text = `*🏦 Payment to verify — receipt${imgs.length > 1 ? 's' : ''} attached*\n\n` +
+        `${p.name ? 'From: *' + p.name + '*\n' : ''}` +
+        `Amount: *${m(p.amount, p.currency)}* (${p.method})` +
+        (p.payment_ref ? `\nReference: \`${p.payment_ref}\`` : '') +
+        `\n\nCheck it landed, then release.`;
+      const keyboard = new InlineKeyboard().text('✅ Verify & release', `fl:verify:${p.fill_id}`);
+      return imgs.length > 1 ? { photos: imgs, text, keyboard } : { photo: imgs[0], text, keyboard };
+    }
     case 'fill.released':
       return { text: `✅ *${m(p.credit, p.currency)} is on its way to your table.*` };
     case 'fill.settled':

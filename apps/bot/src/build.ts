@@ -9,7 +9,7 @@ import { start, me } from './commands/start.js';
 import {
   advance, obName, obSbUser, obSbPass, obSbUsername, obClubggId, obWdHandle,
   obTogglePlatform, obPlatformsDone, obSbHasAccount, obToggleDepMethod, obDepView, obDepMethodsDone,
-  obPickWithdrawMethod, obResume, updateMethods, updatePayout, addPlatform,
+  obToggleWdMethod, obWdView, obWdMethodsDone, obResume, updateMethods, updatePayout, addPlatform,
 } from './commands/onboarding.js';
 import { sbCreated } from './admin-actions.js';
 import {
@@ -153,7 +153,10 @@ export function buildBot(token: string): Bot<Ctx> {
   bot.callbackQuery('ob:dmback', (ctx) => obDepView(ctx, 'main'));
   bot.callbackQuery(/^ob:dm:(.+)$/, (ctx) => obToggleDepMethod(ctx, ctx.match![1]!));
   bot.callbackQuery('ob:dmdone', (ctx) => obDepMethodsDone(ctx));
-  bot.callbackQuery(/^ob:wm:(.+)$/, (ctx) => obPickWithdrawMethod(ctx, ctx.match![1]!));
+  bot.callbackQuery('ob:wmcrypto', (ctx) => obWdView(ctx, 'crypto'));
+  bot.callbackQuery('ob:wmback', (ctx) => obWdView(ctx, 'main'));
+  bot.callbackQuery('ob:wmdone', (ctx) => obWdMethodsDone(ctx));
+  bot.callbackQuery(/^ob:wm:(.+)$/, (ctx) => obToggleWdMethod(ctx, ctx.match![1]!));
   bot.callbackQuery('ob:resume', (ctx) => obResume(ctx));
   
   // Add money

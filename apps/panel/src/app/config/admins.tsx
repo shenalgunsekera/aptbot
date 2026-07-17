@@ -23,7 +23,7 @@ export function AdminsEditor({ admins }: { admins: any[] }) {
             {admins.map((a) => (
               <tr key={a.id}>
                 <td>
-                  <strong>{a.telegram_username ? '@' + a.telegram_username : '—'}</strong>
+                  <strong>{a.display_name ?? '—'}</strong>
                   <div className="mono" style={{ fontSize: 10, color: 'var(--text-faint)' }}>{a.email ?? 'no email'}</div>
                 </td>
                 <td className="mono">{a.telegram_id ?? '—'}</td>
@@ -94,8 +94,8 @@ function AdminForm({ onDone }: { onDone: () => void }) {
           <div className="field-hint">Their numeric Telegram user id.</div>
         </div>
         <div className="field">
-          <label htmlFor="auser">Username</label>
-          <input id="auser" name="username" placeholder="@handle" />
+          <label htmlFor="auser">Name</label>
+          <input id="auser" name="username" placeholder="Their name" />
         </div>
       </div>
       <div className="field-row">

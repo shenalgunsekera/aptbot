@@ -41,6 +41,9 @@ export interface OnboardingPlan {
   sbHasAccount?: boolean;     // answered the "already have APT Sports?" question
   depSel?: string[];          // deposit method ids toggled so far (real ids, incl. coins)
   depView?: 'main' | 'crypto';// which screen of the deposit-method picker is showing
+  wdSel?: string[];           // cash-out method ids toggled so far
+  wdView?: 'main' | 'crypto'; // which screen of the cash-out-method picker is showing
+  wdQueue?: string[];         // chosen cash-out methods still needing a saved handle
   // When set, we're editing one thing from a slash command, not first-run setup,
   // so the "Done" handlers save-and-stop instead of walking the whole sequence.
   mode?: 'methods' | 'payout' | 'addplatform';

@@ -225,14 +225,67 @@ async function askDepositMethods(ctx: Ctx): Promise<void> {
   await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: kb });
 }
 
+/** Cash-out method picker — same shape as the deposit one: multi-select, with
+ *  crypto behind a dropdown. Everything edits the same message in place. */
+async function wdKb(ctx: Ctx): Promise<{ text: string; kb: InlineKeyboard }> {
+  const methods = await db()<PaymentMethod[]>`select * from payment_methods where enabled order by sort_order, name`;
+  const coins = methods.filter(isCoin);
+  const fiat = methods.filter((m) => !isCoin(m));
+  const sel = ctx.session.ob?.wdSel ?? [];
+  const kb = new InlineKeyboard();
+
+  if (ctx.session.ob?.wdView === 'crypto') {
+    for (const c of coins) kb.text(`${sel.includes(c.id) ? '✅' : '⬜'} ${c.name}`, `ob:wm:${c.id}`).row();
+    kb.text('‹ Back', 'ob:wmback');
+    return { text: 'Tap the coins you want to get paid in, then Back.', kb };
+  }
+
+  for (const f of fiat) kb.text(`${sel.includes(f.id) ? '✅' : '⬜'} ${f.name}`, `ob:wm:${f.id}`).row();
+  if (coins.length) {
+    const n = coins.filter((c) => sel.includes(c.id)).length;
+    kb.text(`🪙 Crypto${n ? ` — ${n} chosen` : ''} ›`, 'ob:wmcrypto').row();
+  }
+  if (sel.length) kb.text('➡️ Done', 'ob:wmdone');
+  return {
+    text: 'How do you want to *get paid* when you cash out? Tap all that apply, then Done — ' +
+      "we'll save where to send each so you never re-type it.",
+    kb,
+  };
+}
+
 async function askWithdrawMethod(ctx: Ctx): Promise<void> {
   ctx.session.step = { name: 'ob:wd_method' };
-  const methods = await db()<PaymentMethod[]>`select * from payment_methods where enabled order by sort_order, name`;
-  const kb = new InlineKeyboard();
-  for (const m of methods) kb.text(m.name, `ob:wm:${m.id}`).row();
+  if (!ctx.session.ob) ctx.session.ob = { platforms: [] };
+  ctx.session.ob.wdView = 'main';
+  const { text, kb } = await wdKb(ctx);
+  await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: kb });
+}
+
+/** After the multi-select, collect a destination handle for each chosen method,
+ *  one at a time. */
+async function askNextWdHandle(ctx: Ctx): Promise<void> {
+  const q = ctx.session.ob?.wdQueue ?? [];
+  const p = await currentPlayer(ctx);
+  if (!p) return;
+  if (q.length === 0) {
+    // All handles collected.
+    if (ctx.session.ob?.mode === 'payout') {
+      ctx.session.ob = undefined;
+      ctx.session.step = { name: 'idle' };
+      await ctx.reply('✅ Updated how you get paid.');
+      return;
+    }
+    await advance(ctx, p.id);
+    return;
+  }
+  const methodId = q[0]!;
+  const [m] = await db()<PaymentMethod[]>`select * from payment_methods where id = ${methodId}`;
+  ctx.session.step = { name: 'ob:wd_handle', methodId };
+  const left = q.length > 1 ? ` (${q.length} left)` : '';
   await ctx.reply(
-    'Last thing — how do you want to *get paid* when you cash out? Pick one.',
-    { parse_mode: 'Markdown', reply_markup: kb },
+    `Where should we send your *${m?.name}*?${left}\n\nSend ${m?.handle_hint ?? `your ${m?.name} details`}.\n\n` +
+      `⚠️ Double-check it — money sent to the wrong place can't come back.`,
+    { parse_mode: 'Markdown' },
   );
 }
 
@@ -319,15 +372,16 @@ export async function obWdHandle(ctx: Ctx, methodId: string, text: string): Prom
     try { ok = new RegExp(m.handle_pattern).test(text.trim()); } catch { ok = true; }
     if (!ok) return void (await ctx.reply(`That doesn't look right for ${m.name}. Send it again.`));
   }
-  await sql`select prefs_set_withdraw_method(${p.id}::uuid, ${methodId}::uuid)`;
+  // First method chosen becomes the default; every one gets its handle saved.
+  const [pref] = await sql<{ mid: string | null }[]>`
+    select default_withdraw_method_id as mid from player_prefs where player_id = ${p.id}`;
+  if (!pref?.mid) await sql`select prefs_set_withdraw_method(${p.id}::uuid, ${methodId}::uuid)`;
   await sql`select payout_handle_remember(${p.id}::uuid, ${methodId}::uuid, ${text.trim()})`;
-  if (ctx.session.ob?.mode === 'payout') {
-    ctx.session.ob = undefined;
-    ctx.session.step = { name: 'idle' };
-    await ctx.reply(`✅ Updated — we'll send your cash-outs to \`${text.trim()}\` via ${m?.name}.`, { parse_mode: 'Markdown' });
-    return;
-  }
-  await advance(ctx, p.id);
+  await ctx.reply(`✅ Saved your *${m?.name}* — \`${text.trim()}\`.`, { parse_mode: 'Markdown' });
+
+  // Move to the next chosen method that still needs a handle.
+  if (ctx.session.ob) ctx.session.ob.wdQueue = (ctx.session.ob.wdQueue ?? []).filter((id) => id !== methodId);
+  await askNextWdHandle(ctx);
 }
 
 // ─── Callback answers ────────────────────────────────────────────────────────
@@ -401,18 +455,33 @@ export async function obDepMethodsDone(ctx: Ctx): Promise<void> {
   await advance(ctx, p.id);
 }
 
-export async function obPickWithdrawMethod(ctx: Ctx, methodId: string): Promise<void> {
+export async function obToggleWdMethod(ctx: Ctx, methodId: string): Promise<void> {
+  if (!ctx.session.ob) ctx.session.ob = { platforms: [] };
+  const sel = ctx.session.ob.wdSel ?? (ctx.session.ob.wdSel = []);
+  const i = sel.indexOf(methodId);
+  if (i >= 0) sel.splice(i, 1); else sel.push(methodId);
+  await ctx.answerCallbackQuery();
+  try { await ctx.editMessageReplyMarkup({ reply_markup: (await wdKb(ctx)).kb }); } catch { /* unchanged */ }
+}
+
+export async function obWdView(ctx: Ctx, view: 'main' | 'crypto'): Promise<void> {
+  if (!ctx.session.ob) ctx.session.ob = { platforms: [] };
+  ctx.session.ob.wdView = view;
+  await ctx.answerCallbackQuery();
+  const { text, kb } = await wdKb(ctx);
+  try { await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: kb }); } catch { /* unchanged */ }
+}
+
+export async function obWdMethodsDone(ctx: Ctx): Promise<void> {
   const p = await currentPlayer(ctx);
   if (!p) return;
-  const sql = db();
-  const [m] = await sql<PaymentMethod[]>`select * from payment_methods where id = ${methodId}`;
+  const sel = ctx.session.ob?.wdSel ?? [];
+  if (!sel.length) return void (await ctx.answerCallbackQuery({ text: 'Pick at least one.' }));
   await ctx.answerCallbackQuery();
   try { await ctx.editMessageReplyMarkup(); } catch { /* buttons already gone */ }
-  ctx.session.step = { name: 'ob:wd_handle', methodId };
-  await ctx.reply(
-    `Where should we send your ${m?.name} when you cash out?\n\nSend ${m?.handle_hint ?? `your ${m?.name} details`}.\n\n` +
-      `⚠️ Double-check it — money sent to the wrong place can't come back. We'll save it so you never re-type it.`,
-  );
+  // Now collect a destination for each chosen method, one at a time.
+  if (ctx.session.ob) ctx.session.ob.wdQueue = [...sel];
+  await askNextWdHandle(ctx);
 }
 
 /** The resume button on the "your Sportsbook account is ready" message. */
