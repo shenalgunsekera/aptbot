@@ -38,8 +38,9 @@ export function parseAmount(input: string): number | null {
   return Number.isSafeInteger(total) && total > 0 ? total : null;
 }
 
-/** Whole-dollar label, e.g. "$20" (no cents) — for step/limit messages. */
-const whole = (minor: number, currency = 'USD') => money(minor, currency).replace(/\.00$/, '');
+/** Whole-dollar label, e.g. "$20" (no cents) — amounts are whole multiples of 5,
+ *  so the ".00" is just noise in the prompts. */
+export const whole = (minor: number, currency = 'USD') => money(minor, currency).replace(/\.00$/, '');
 
 /**
  * Check a typed amount against the money rules (min, max, whole multiples of the

@@ -5,7 +5,7 @@ import {
 } from '@union/core';
 import type { Ctx } from '../session.js';
 import { requireActive } from '../player.js';
-import { money, parseAmount, amountProblem, shortHandle } from '../words.js';
+import { money, whole, parseAmount, amountProblem, shortHandle } from '../words.js';
 import { resolvePlatform, resolveMethod, platformKeyboard, methodKeyboard } from '../prefs.js';
 
 /**
@@ -42,8 +42,8 @@ async function askAmount(ctx: Ctx, platform: Platform): Promise<void> {
   ctx.session.step = { name: 'out:amount', platformId: platform.id };
   await ctx.reply(
     `How much do you want to cash out from *${platform.name}*?\n\n` +
-      `Between ${money(cfg.min_amount)} and ${money(cfg.max_amount)}, in multiples of ` +
-      `${money(cfg.amount_step).replace(/\.00$/, '')}. Send the number, like \`50\`. ` +
+      `Between ${whole(cfg.min_amount)} and ${whole(cfg.max_amount)}, in multiples of ` +
+      `${whole(cfg.amount_step)}. Send the number, like \`50\`. ` +
       `We'll take that much off your table if it's there.\n\n/cancel to stop.`,
     { parse_mode: 'Markdown' },
   );
@@ -98,7 +98,7 @@ export async function cashoutAmount(ctx: Ctx, platformId: string, text: string):
       return;
     }
     ctx.session.step = { name: 'out:method', platformId, amount };
-    await ctx.reply(`Cashing out *${money(amount)}* — how do you want to be paid?`, {
+    await ctx.reply(`Cashing out *${whole(amount)}* — how do you want to be paid?`, {
       parse_mode: 'Markdown',
       reply_markup: methodKeyboard('out', method.ask, method.offerRemember),
     });

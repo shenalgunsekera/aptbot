@@ -5,7 +5,7 @@ import {
 } from '@union/core';
 import type { Ctx } from '../session.js';
 import { requireActive } from '../player.js';
-import { money, parseAmount, amountProblem } from '../words.js';
+import { money, whole, parseAmount, amountProblem } from '../words.js';
 import { resolvePlatform, platformKeyboard } from '../prefs.js';
 import { createStripeCheckout } from '../stripe.js';
 
@@ -43,8 +43,8 @@ async function askAmount(ctx: Ctx, platform: Platform): Promise<void> {
   ctx.session.step = { name: 'add:amount', platformId: platform.id };
   await ctx.reply(
     `How much do you want to add to *${platform.name}*?\n\n` +
-      `Between ${money(cfg.min_amount)} and ${money(cfg.max_amount)}, in multiples of ` +
-      `${money(cfg.amount_step).replace(/\.00$/, '')}. ` +
+      `Between ${whole(cfg.min_amount)} and ${whole(cfg.max_amount)}, in multiples of ` +
+      `${whole(cfg.amount_step)}. ` +
       `Just send the number, like \`20\` or \`50\`.\n\n/cancel to stop.`,
     { parse_mode: 'Markdown' },
   );
@@ -123,7 +123,7 @@ async function askAddMethod(ctx: Ctx, platformId: string, amount: number): Promi
   if (methods.length === 1) return void (await runMatch(ctx, platformId, amount, methods[0]!.id));
 
   ctx.session.step = { name: 'add:method', platformId, amount };
-  await ctx.reply(`Adding *${money(amount)}* — how do you want to pay?`, {
+  await ctx.reply(`Adding *${whole(amount)}* — how do you want to pay?`, {
     parse_mode: 'Markdown', reply_markup: addMethodKb(methods),
   });
 }
@@ -151,7 +151,7 @@ export async function addMethodBack(ctx: Ctx): Promise<void> {
   const methods = await preferredDepositMethods(p.id);
   await ctx.answerCallbackQuery();
   try {
-    await ctx.editMessageText(`Adding *${money(s.amount)}* — how do you want to pay?`, {
+    await ctx.editMessageText(`Adding *${whole(s.amount)}* — how do you want to pay?`, {
       parse_mode: 'Markdown', reply_markup: addMethodKb(methods),
     });
   } catch { /* unchanged */ }
