@@ -36,6 +36,14 @@ export async function GET(req: Request): Promise<Response> {
       cryptoPolled = await detectCryptoPayments();
     } catch (err) { console.error('[cron] crypto poll failed:', err); }
 
+    // Read the PayPal inbox for "you got money" emails (personal account, no
+    // webhook). No-op unless the IMAP env is set.
+    let paypalSeen = 0;
+    try {
+      const { detectPaypalEmails } = await import('../../../lib/paypal-email');
+      paypalSeen = await detectPaypalEmails();
+    } catch (err) { console.error('[cron] paypal email poll failed:', err); }
+
     const bot = await getBot();
     const delivered = await drainNotifications(bot, 40);
 
@@ -46,7 +54,7 @@ export async function GET(req: Request): Promise<Response> {
     // one cron cycle.
     const webhookFixed = await ensureWebhook(bot, req);
 
-    return Response.json({ ok: true, ...swept, delivered, cryptoPolled, webhookFixed });
+    return Response.json({ ok: true, ...swept, delivered, cryptoPolled, paypalSeen, webhookFixed });
   } catch (err) {
     console.error('[cron] failed:', err);
     return Response.json({ ok: false, error: String(err) }, { status: 500 });

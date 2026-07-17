@@ -9,17 +9,20 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@union/bot": "workspace:*",
     "@union/core": "workspace:*",
     "firebase": "^11.1.0",
     "firebase-admin": "^13.0.2",
+    "grammy": "^1.32.0",
+    "imapflow": "^1.4.7",
+    "mailparser": "^3.9.14",
     "next": "^15.1.3",
     "postgres": "^3.4.5",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "@union/bot": "workspace:*",
-    "grammy": "^1.32.0"
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@types/mailparser": "^3.4.6",
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
