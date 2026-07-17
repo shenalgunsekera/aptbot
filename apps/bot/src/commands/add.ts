@@ -7,6 +7,7 @@ import type { Ctx } from '../session.js';
 import { requireActive } from '../player.js';
 import { money, whole, parseAmount, amountProblem } from '../words.js';
 import { resolvePlatform, platformKeyboard } from '../prefs.js';
+import { ask, clearQuestion } from '../ask.js';
 
 /**
  * /add — add money. (deposit)
@@ -27,7 +28,7 @@ export async function addStart(ctx: Ctx): Promise<void> {
       return;
     }
     ctx.session.step = { name: 'add:platform' };
-    await ctx.reply('Where do you want to add money?', {
+    await ask(ctx, 'Where do you want to add money?', {
       reply_markup: platformKeyboard('add', platform.ask, platform.offerRemember),
     });
     return;
@@ -50,7 +51,7 @@ async function askAmount(ctx: Ctx, platformId: string, methodId: string): Promis
     select min_amount, max_amount, amount_step from config where id`;
   const [pf] = await sql<{ name: string }[]>`select name from platforms where id = ${platformId}`;
   ctx.session.step = { name: 'add:amount', platformId, methodId };
-  await ctx.reply(
+  await ask(ctx,
     `How much do you want to add to *${pf?.name}*?\n\n` +
       `Between ${whole(cfg.min_amount)} and ${whole(cfg.max_amount)}, in multiples of ` +
       `${whole(cfg.amount_step)}. ` +
@@ -121,7 +122,7 @@ async function askAddMethod(ctx: Ctx, platformId: string): Promise<void> {
   if (methods.length === 1) return void (await addProceed(ctx, platformId, methods[0]!));
 
   ctx.session.step = { name: 'add:method', platformId };
-  await ctx.reply(`How do you want to pay?`, {
+  await ask(ctx, `How do you want to pay?`, {
     parse_mode: 'Markdown', reply_markup: addMethodKb(methods),
   });
 }
@@ -182,6 +183,7 @@ async function startStripeDeposit(ctx: Ctx, platformId: string): Promise<void> {
   const [cfg] = await db()<{ min_amount: number; max_amount: number }[]>`
     select min_amount, max_amount from config where id`;
   ctx.session.step = { name: 'add:stripe', platformId };
+  await clearQuestion(ctx);
   await ctx.reply(
     `💳 *Pay by card or Apple Pay*\n\n` +
       `Tap below, then on the page *enter the amount you want to add* ` +
@@ -227,16 +229,17 @@ async function runMatch(ctx: Ctx, platformId: string, amount: number, methodId: 
     if (f.gross_to_send !== f.amount) {
       lines.push(`_(${money(f.amount, f.currency)} + ${money(f.gross_to_send - f.amount, f.currency)} ${m!.name} fee, so they get the full amount)_`);
     }
-    lines.push(`To: \`${f.payout_handle}\``);
-    lines.push(f.withdraw_id === null ? `_This one goes to us._` : `_This is another player's ${m!.name}._`);
+    lines.push(`Address: \`${f.payout_handle}\`  _(tap to copy)_`);
+    if (f.withdraw_id !== null) lines.push(`_This is another player's ${m!.name}._`);
     lines.push('');
   }
-  lines.push('When you have paid, *send a photo of your receipt* — that\'s all we need. ');
-  lines.push('_You can send up to two images. No transaction ID to type._');
+  lines.push('Once you\'ve sent it, *send a photo of your payment* (showing the transaction ID) here so we can confirm it.');
+  lines.push('_You can send up to two images._');
 
   // The receipt IS the proof now. Collect it (up to two), submitting proof on the
   // first one. Every locked slice of this deposit is proven together.
   ctx.session.step = { name: 'add:receipt', fillId: fills[0]!.id };
+  await clearQuestion(ctx);
   await ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' });
 }
 

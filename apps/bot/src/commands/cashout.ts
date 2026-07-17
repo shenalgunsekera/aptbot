@@ -5,8 +5,9 @@ import {
 } from '@union/core';
 import type { Ctx } from '../session.js';
 import { requireActive } from '../player.js';
-import { money, whole, parseAmount, amountProblem, shortHandle } from '../words.js';
+import { money, whole, parseAmount, amountProblem, shortHandle, withdrawHandlePrompt } from '../words.js';
 import { resolvePlatform, resolveMethod, platformKeyboard, methodKeyboard } from '../prefs.js';
+import { ask, clearQuestion } from '../ask.js';
 
 /**
  * /cashout — cash out. (withdraw)
@@ -27,7 +28,7 @@ export async function cashoutStart(ctx: Ctx): Promise<void> {
       return;
     }
     ctx.session.step = { name: 'out:platform' };
-    await ctx.reply('Where do you want to cash out from?', {
+    await ask(ctx, 'Where do you want to cash out from?', {
       reply_markup: platformKeyboard('out', platform.ask, platform.offerRemember),
     });
     return;
@@ -40,7 +41,7 @@ async function askAmount(ctx: Ctx, platform: Platform): Promise<void> {
   const [cfg] = await sql<{ min_amount: number; max_amount: number; amount_step: number }[]>`
     select min_amount, max_amount, amount_step from config where id`;
   ctx.session.step = { name: 'out:amount', platformId: platform.id };
-  await ctx.reply(
+  await ask(ctx,
     `How much do you want to cash out from *${platform.name}*?\n\n` +
       `Between ${whole(cfg.min_amount)} and ${whole(cfg.max_amount)}, in multiples of ` +
       `${whole(cfg.amount_step)}. Send the number, like \`50\`. ` +
@@ -98,7 +99,7 @@ export async function cashoutAmount(ctx: Ctx, platformId: string, text: string):
       return;
     }
     ctx.session.step = { name: 'out:method', platformId, amount };
-    await ctx.reply(`Cashing out *${whole(amount)}* — how do you want to be paid?`, {
+    await ask(ctx, `Cashing out *${whole(amount)}* — how do you want to be paid?`, {
       parse_mode: 'Markdown',
       reply_markup: methodKeyboard('out', method.ask, method.offerRemember),
     });
@@ -135,14 +136,14 @@ async function askHandle(ctx: Ctx, platformId: string, amount: number, m: Paymen
     for (const h of saved) kb.text(`✓ ${h.label ? h.label + ' — ' : ''}${shortHandle(h.handle)}`, `out:h:${h.id}`).row();
     kb.text('➕ Use a different one', `out:h:new`);
     ctx.session.step = { name: 'out:handle', platformId, amount, methodId: m.id };
-    await ctx.reply(`Where should we send your ${m.name}? Pick one you've used, or add new.`, { reply_markup: kb });
+    await ask(ctx, `Where should we send your ${m.name}? Pick one you've used, or add new.`, { reply_markup: kb });
     return;
   }
 
   ctx.session.step = { name: 'out:handle', platformId, amount, methodId: m.id };
-  await ctx.reply(
-    `Where should we send your money?\n\nSend ${m.handle_hint ?? `your ${m.name} details`}.\n\n` +
-      `⚠️ Double-check it — money sent to the wrong place can't come back. I'll remember it for next time.`,
+  await ask(ctx,
+    withdrawHandlePrompt(m.code, m.name, m.club_handle) + `\n\n_We'll remember it for next time._`,
+    { parse_mode: 'Markdown' },
   );
 }
 
@@ -157,7 +158,7 @@ export async function cashoutSavedHandle(
     const [m] = await sql<PaymentMethod[]>`select * from payment_methods where id = ${methodId}`;
     await ctx.answerCallbackQuery();
     try { await ctx.editMessageReplyMarkup(); } catch { /* buttons already gone */ }
-    await ctx.reply(`Send ${m?.handle_hint ?? 'your payment details'}.\n\n⚠️ Money sent to the wrong place can't come back.`);
+    if (m) await ask(ctx, withdrawHandlePrompt(m.code, m.name, m.club_handle), { parse_mode: 'Markdown' });
     return;
   }
 
@@ -204,6 +205,7 @@ export async function cashoutHandle(
   }
 
   ctx.session.step = { name: 'idle' };
+  await clearQuestion(ctx);
   await ctx.reply(
     `✅ *Cash out started!*\n\nWe're getting *${money(w.requested_amount, w.currency)}* ready to send to \`${w.payout_handle}\`.\n\n` +
       `We'll take that off your table and then pay you — you'll get a message here at each step. ` +

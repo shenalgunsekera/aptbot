@@ -3,6 +3,7 @@ import { db, isUserError, userMessage, type Platform, type PaymentMethod } from 
 import type { Ctx, OnboardingPlan } from '../session.js';
 import { currentPlayer } from '../player.js';
 import { ask, clearQuestion } from '../ask.js';
+import { withdrawHandlePrompt } from '../words.js';
 
 /**
  * GUIDED ONBOARDING
@@ -67,7 +68,7 @@ export async function advance(ctx: Ctx, playerId: string): Promise<void> {
   if (!p?.display_name || !p.display_name.trim()) {
     ctx.session.step = { name: 'ob:name' };
     await ask(ctx,
-      `👋 Welcome! Let's get you set up.\n\nFirst — what's your *full name*? ` +
+      `👋 Welcome! Let's get you set up.\n\nFirst — what's your *name*? ` +
         `This is how our team will know you, so use the name you actually go by.`,
       { parse_mode: 'Markdown' },
     );
@@ -282,12 +283,8 @@ async function askNextWdHandle(ctx: Ctx): Promise<void> {
   const methodId = q[0]!;
   const [m] = await db()<PaymentMethod[]>`select * from payment_methods where id = ${methodId}`;
   ctx.session.step = { name: 'ob:wd_handle', methodId };
-  const left = q.length > 1 ? ` (${q.length} left)` : '';
-  await ask(ctx,
-    `Where should we send your *${m?.name}*?${left}\n\nSend ${m?.handle_hint ?? `your ${m?.name} details`}.\n\n` +
-      `⚠️ Double-check it — money sent to the wrong place can't come back.`,
-    { parse_mode: 'Markdown' },
-  );
+  const left = q.length > 1 ? `\n\n_(${q.length} more after this)_` : '';
+  await ask(ctx, withdrawHandlePrompt(m!.code, m!.name, m!.club_handle) + left, { parse_mode: 'Markdown' });
 }
 
 // ─── Text answers ────────────────────────────────────────────────────────────

@@ -59,6 +59,27 @@ export function amountProblem(
   return null;
 }
 
+/**
+ * The "where do we pay you?" question, worded per method so it's obvious what to
+ * send — their OWN tag/address, never the club's.
+ */
+export function withdrawHandlePrompt(code: string, name: string, clubHandle?: string | null): string {
+  switch (code) {
+    case 'paypal':
+      return `What's *your* PayPal email or tag? Send it here — that's who we pay when you cash out.\n\n` +
+        `_When you request a cash out, send a PayPal money request to *${clubHandle ?? 'our PayPal'}* for the amount, and we'll pay it._`;
+    case 'cashapp':
+      return `What's *your* Cash App \\$cashtag? Send it here — that's where your cash-outs go.`;
+    case 'venmo':
+      return `What's *your* Venmo @username? Send it here — that's where your cash-outs go.`;
+    case 'zelle':
+      return `What's *your* Zelle email or phone? Send it here — that's where your cash-outs go.`;
+    default:
+      return `What's *your* ${name} address? Send it here — that's where your cash-outs go.\n\n` +
+        `⚠️ Double-check it — crypto sent to the wrong address can't come back.`;
+  }
+}
+
 /** A player-facing status label, never the internal one. */
 export function friendlyStatus(kind: 'deposit' | 'withdraw', status: string): string {
   const map: Record<string, string> = {
