@@ -1,0 +1,11 @@
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 0020 — Route notifications to the chat the player actually uses
+-- ═══════════════════════════════════════════════════════════════════════════
+--
+-- Players interact with the bot in a group (their per-member ticket group), not
+-- a DM. But async notifications (approval, "you're all set", payment updates)
+-- were sent to the player's telegram_id — i.e. their private chat with the bot —
+-- so they landed in the wrong place. We now remember the chat each player last
+-- talked to us in, and the notifier delivers there instead. Null = fall back to
+-- the DM (telegram_id), which is correct for players who do use a DM.
+alter table players add column if not exists chat_id bigint;

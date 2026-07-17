@@ -56,6 +56,7 @@ export async function addPickPlatform(ctx: Ctx, platformId: string, remember: bo
   if (remember) await sql`select prefs_set_platform(${p.id}::uuid, ${platformId}::uuid)`;
   const [pf] = await sql<Platform[]>`select * from platforms where id = ${platformId}`;
   await ctx.answerCallbackQuery();
+  try { await ctx.editMessageReplyMarkup(); } catch { /* buttons already gone */ }
   await askAmount(ctx, pf!);
 }
 
@@ -96,6 +97,18 @@ async function preferredDepositMethods(playerId: string): Promise<PaymentMethod[
      order by m.sort_order, m.name`;
 }
 
+/** The main "how do you want to pay?" keyboard — fiat listed, crypto behind one
+ *  button that opens a coins screen. */
+function addMethodKb(methods: PaymentMethod[]): InlineKeyboard {
+  const coins = methods.filter(isCrypto);
+  const fiat = methods.filter((m) => !isCrypto(m));
+  const kb = new InlineKeyboard();
+  for (const m of fiat) kb.text(m.name, `add:m:${m.id}`).row();
+  if (coins.length === 1) kb.text(coins[0]!.name, `add:m:${coins[0]!.id}`).row();
+  else if (coins.length > 1) kb.text('🪙 Crypto ›', 'add:crypto').row();
+  return kb;
+}
+
 /** Ask how to pay — fiat methods listed, crypto collapsed under one button. */
 async function askAddMethod(ctx: Ctx, platformId: string, amount: number): Promise<void> {
   const p = await requireActive(ctx);
@@ -108,19 +121,13 @@ async function askAddMethod(ctx: Ctx, platformId: string, amount: number): Promi
   }
   if (methods.length === 1) return void (await runMatch(ctx, platformId, amount, methods[0]!.id));
 
-  const coins = methods.filter(isCrypto);
-  const fiat = methods.filter((m) => !isCrypto(m));
   ctx.session.step = { name: 'add:method', platformId, amount };
-  const kb = new InlineKeyboard();
-  for (const m of fiat) kb.text(m.name, `add:m:${m.id}`).row();
-  if (coins.length === 1) kb.text(coins[0]!.name, `add:m:${coins[0]!.id}`).row();
-  else if (coins.length > 1) kb.text('🪙 Crypto', 'add:crypto').row();
   await ctx.reply(`Adding *${money(amount)}* — how do you want to pay?`, {
-    parse_mode: 'Markdown', reply_markup: kb,
+    parse_mode: 'Markdown', reply_markup: addMethodKb(methods),
   });
 }
 
-/** The "Crypto" button → expand to every crypto coin. */
+/** The "Crypto ›" button → show the coins on the SAME message. */
 export async function addPickCrypto(ctx: Ctx): Promise<void> {
   const s = ctx.session.step;
   if (s.name !== 'add:method') return void (await ctx.answerCallbackQuery({ text: 'That expired — /add again.' }));
@@ -129,8 +136,24 @@ export async function addPickCrypto(ctx: Ctx): Promise<void> {
   const coins = (await preferredDepositMethods(p.id)).filter(isCrypto);
   const kb = new InlineKeyboard();
   for (const c of coins) kb.text(c.name, `add:m:${c.id}`).row();
+  kb.text('‹ Back', 'add:mback');
   await ctx.answerCallbackQuery();
-  await ctx.reply('Which coin?', { reply_markup: kb });
+  try { await ctx.editMessageText('Which coin?', { reply_markup: kb }); } catch { /* unchanged */ }
+}
+
+/** "‹ Back" from the coins screen → restore the main method list, in place. */
+export async function addMethodBack(ctx: Ctx): Promise<void> {
+  const s = ctx.session.step;
+  if (s.name !== 'add:method') return void (await ctx.answerCallbackQuery());
+  const p = await requireActive(ctx);
+  if (!p) return;
+  const methods = await preferredDepositMethods(p.id);
+  await ctx.answerCallbackQuery();
+  try {
+    await ctx.editMessageText(`Adding *${money(s.amount)}* — how do you want to pay?`, {
+      parse_mode: 'Markdown', reply_markup: addMethodKb(methods),
+    });
+  } catch { /* unchanged */ }
 }
 
 export async function addPickMethod(
@@ -140,6 +163,7 @@ export async function addPickMethod(
   if (!p) return;
   if (remember) await db()`select prefs_set_method(${p.id}::uuid, ${methodId}::uuid)`;
   await ctx.answerCallbackQuery();
+  try { await ctx.editMessageReplyMarkup(); } catch { /* buttons already gone */ }
   await runMatch(ctx, platformId, amount, methodId);
 }
 

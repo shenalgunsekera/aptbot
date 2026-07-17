@@ -45,8 +45,8 @@ export class Notifier {
     const [cfg] = await sql<{ admin_group_chat_id: number | null }[]>`
       select admin_group_chat_id from config where id`;
 
-    const rows = await sql<(Notification & { player_tg: number | null; admin_tg: number | null })[]>`
-      select n.*, p.telegram_id as player_tg, a.telegram_id as admin_tg
+    const rows = await sql<(Notification & { player_chat: number | null; admin_tg: number | null })[]>`
+      select n.*, coalesce(p.chat_id, p.telegram_id) as player_chat, a.telegram_id as admin_tg
         from notifications n
         left join players p on p.id = n.player_id
         left join admins  a on a.id = n.admin_id
@@ -63,7 +63,7 @@ export class Notifier {
         // No group set: fall back to fanning out to each linked admin.
         if (!chatId) { await this.fanOutToAdmins(n); continue; }
       } else {
-        chatId = n.player_tg ?? n.admin_tg;
+        chatId = n.player_chat ?? n.admin_tg;
       }
       if (!chatId) { await sql`update notifications set status='skipped' where id=${n.id}`; continue; }
 

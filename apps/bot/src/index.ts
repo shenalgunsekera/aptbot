@@ -57,14 +57,22 @@ async function shutdown(sig: string) {
 process.once('SIGINT', () => void shutdown('SIGINT'));
 process.once('SIGTERM', () => void shutdown('SIGTERM'));
 
-await bot.api.setMyCommands([
+const PLAYER_COMMANDS = [
+  { command: 'start', description: 'Set up your account' },
   { command: 'add', description: 'Add money' },
   { command: 'cashout', description: 'Cash out' },
-  { command: 'me', description: 'Your account' },
-  { command: 'payments', description: 'Your payments and receipts' },
-  { command: 'confirm', description: 'Confirm a payment you got' },
+  { command: 'me', description: 'Your account & receipts' },
+  { command: 'payments', description: 'Your payments & receipts' },
+  { command: 'addplatform', description: 'Add ClubGG or Sportsbook' },
+  { command: 'methods', description: 'Change your payment methods' },
+  { command: 'payout', description: 'Change how you get paid' },
+  { command: 'support', description: 'Message our team' },
   { command: 'help', description: 'What I can do' },
-], { scope: { type: 'all_private_chats' } });
+];
+// Same commands everywhere — the bot works right in the group, no private chat.
+await bot.api.setMyCommands(PLAYER_COMMANDS, { scope: { type: 'default' } });
+await bot.api.setMyCommands(PLAYER_COMMANDS, { scope: { type: 'all_group_chats' } });
+await bot.api.setMyCommands(PLAYER_COMMANDS, { scope: { type: 'all_private_chats' } });
 
 notifier.start();
 console.log('[bot] starting (long polling)…');

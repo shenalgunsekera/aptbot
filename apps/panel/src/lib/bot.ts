@@ -69,7 +69,7 @@ export async function drainNotifications(bot: BotT, limit = 25): Promise<number>
   const [cfg] = await sql<{ admin_group_chat_id: number | null }[]>`
     select admin_group_chat_id from config where id`;
   const rows = await sql<any[]>`
-    select n.*, p.telegram_id as player_tg, a.telegram_id as admin_tg
+    select n.*, coalesce(p.chat_id, p.telegram_id) as player_chat, a.telegram_id as admin_tg
       from notifications n
       left join players p on p.id = n.player_id
       left join admins a on a.id = n.admin_id
@@ -79,7 +79,9 @@ export async function drainNotifications(bot: BotT, limit = 25): Promise<number>
   const { sendRendered } = await import('@union/bot/build');
   let sent = 0;
   for (const n of rows) {
-    const chatId = n.audience === 'admins' ? cfg?.admin_group_chat_id : (n.player_tg ?? n.admin_tg);
+    // Player notifications go to the chat the player actually uses (their group),
+    // not their DM — see 0020. Admin rows go to the admin group.
+    const chatId = n.audience === 'admins' ? cfg?.admin_group_chat_id : (n.player_chat ?? n.admin_tg);
     const msg = renderNotification(n);
     if (!chatId || !msg) { await sql`update notifications set status='skipped' where id=${n.id}`; continue; }
     try {

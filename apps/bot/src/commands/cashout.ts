@@ -56,6 +56,7 @@ export async function cashoutPickPlatform(ctx: Ctx, platformId: string, remember
   if (remember) await sql`select prefs_set_platform(${p.id}::uuid, ${platformId}::uuid)`;
   const [pf] = await sql<Platform[]>`select * from platforms where id = ${platformId}`;
   await ctx.answerCallbackQuery();
+  try { await ctx.editMessageReplyMarkup(); } catch { /* buttons already gone */ }
   await askAmount(ctx, pf!);
 }
 
@@ -115,6 +116,7 @@ export async function cashoutPickMethod(
   if (remember) await sql`select prefs_set_method(${p.id}::uuid, ${methodId}::uuid)`;
   const [m] = await sql<PaymentMethod[]>`select * from payment_methods where id = ${methodId}`;
   await ctx.answerCallbackQuery();
+  try { await ctx.editMessageReplyMarkup(); } catch { /* buttons already gone */ }
   await askHandle(ctx, platformId, amount, m!);
 }
 
@@ -154,6 +156,7 @@ export async function cashoutSavedHandle(
     const sql = db();
     const [m] = await sql<PaymentMethod[]>`select * from payment_methods where id = ${methodId}`;
     await ctx.answerCallbackQuery();
+    try { await ctx.editMessageReplyMarkup(); } catch { /* buttons already gone */ }
     await ctx.reply(`Send ${m?.handle_hint ?? 'your payment details'}.\n\n⚠️ Money sent to the wrong place can't come back.`);
     return;
   }
@@ -167,6 +170,7 @@ export async function cashoutSavedHandle(
     return;
   }
   await ctx.answerCallbackQuery();
+  try { await ctx.editMessageReplyMarkup(); } catch { /* buttons already gone */ }
   await cashoutHandle(ctx, platformId, amount, methodId, h.handle);
 }
 

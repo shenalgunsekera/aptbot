@@ -359,6 +359,7 @@ export async function obSbHasAccount(ctx: Ctx, has: boolean): Promise<void> {
   if (!ctx.session.ob) ctx.session.ob = { platforms: [] };
   ctx.session.ob.sbHasAccount = has;
   await ctx.answerCallbackQuery();
+  try { await ctx.editMessageReplyMarkup(); } catch { /* buttons already gone */ }
   await advance(ctx, p.id);
 }
 
@@ -406,6 +407,7 @@ export async function obPickWithdrawMethod(ctx: Ctx, methodId: string): Promise<
   const sql = db();
   const [m] = await sql<PaymentMethod[]>`select * from payment_methods where id = ${methodId}`;
   await ctx.answerCallbackQuery();
+  try { await ctx.editMessageReplyMarkup(); } catch { /* buttons already gone */ }
   ctx.session.step = { name: 'ob:wd_handle', methodId };
   await ctx.reply(
     `Where should we send your ${m?.name} when you cash out?\n\nSend ${m?.handle_hint ?? `your ${m?.name} details`}.\n\n` +

@@ -13,7 +13,7 @@ import {
 } from './commands/onboarding.js';
 import { sbCreated } from './admin-actions.js';
 import {
-  addStart, addPickPlatform, addPickCrypto, addAmount, addPickMethod, addReceipt, addDone,
+  addStart, addPickPlatform, addPickCrypto, addMethodBack, addAmount, addPickMethod, addReceipt, addDone,
 } from './commands/add.js';
 import {
   cashoutStart, cashoutPickPlatform, cashoutAmount, cashoutPickMethod,
@@ -48,7 +48,24 @@ export function buildBot(token: string): Bot<Ctx> {
     getSessionKey: (ctx) => ctx.from?.id.toString(),
     storage: pgSessionStorage<SessionData>(),
   }));
-  
+
+  // Remember WHICH chat each player talks to us in, so async notifications
+  // (approval, "you're all set", payment updates) come back to THAT chat — the
+  // group they used — not their private DM. Skips the admin group. Best-effort,
+  // and only writes when the chat actually changed, so it's a cheap no-op most
+  // updates.
+  bot.use(async (ctx, next) => {
+    const tg = ctx.from?.id;
+    const chatId = ctx.chat?.id;
+    if (tg && chatId && ctx.chat?.type !== 'channel' && !(await isAdminGroup(ctx))) {
+      try {
+        await db()`update players set chat_id = ${chatId}
+                    where telegram_id = ${tg} and coalesce(chat_id, 0) <> ${chatId}`;
+      } catch { /* best-effort; never block an update on this */ }
+    }
+    await next();
+  });
+
   // ─── Commands ────────────────────────────────────────────────────────────────
   // /start runs the registration flow IN PLACE — in a DM or the member's own
   // group — never bouncing them to a separate chat. Only the admin group is
@@ -148,6 +165,7 @@ export function buildBot(token: string): Bot<Ctx> {
     if (p) await db()`select prefs_set_platform(${p.id}::uuid, null)`;
   });
   bot.callbackQuery('add:crypto', (ctx) => addPickCrypto(ctx));
+  bot.callbackQuery('add:mback', (ctx) => addMethodBack(ctx));
   bot.callbackQuery(/^add:m:(.+)$/, async (ctx) => {
     const s = ctx.session.step;
     if (s.name !== 'add:method') return void (await ctx.answerCallbackQuery({ text: 'That expired — /add again.' }));
