@@ -69,9 +69,16 @@ const PLAYER_COMMANDS = [
   { command: 'support', description: 'Message our team' },
   { command: 'help', description: 'What I can do' },
 ];
-// Same commands everywhere — the bot works right in the group, no private chat.
+// In groups, admins also need the setup commands (harmless for players — the
+// handlers check admin status and politely refuse otherwise).
+const GROUP_COMMANDS = [
+  ...PLAYER_COMMANDS,
+  { command: 'setadmingroup', description: 'Make this the admin group (admins only)' },
+  { command: 'setadmin', description: 'Add an admin (owner only)' },
+];
+// Same core commands everywhere — the bot works right in the group, no private chat.
 await bot.api.setMyCommands(PLAYER_COMMANDS, { scope: { type: 'default' } });
-await bot.api.setMyCommands(PLAYER_COMMANDS, { scope: { type: 'all_group_chats' } });
+await bot.api.setMyCommands(GROUP_COMMANDS, { scope: { type: 'all_group_chats' } });
 await bot.api.setMyCommands(PLAYER_COMMANDS, { scope: { type: 'all_private_chats' } });
 
 notifier.start();
