@@ -52,6 +52,7 @@ export interface OnboardingPlan {
 export interface SessionData {
   step: Step;
   ob?: OnboardingPlan;
+  lastQ?: number;   // message id of the last question, so we can tidy it away
 }
 
 export type Ctx = Context & SessionFlavor<SessionData>;

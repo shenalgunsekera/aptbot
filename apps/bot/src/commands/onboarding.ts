@@ -2,6 +2,7 @@ import { InlineKeyboard } from 'grammy';
 import { db, isUserError, userMessage, type Platform, type PaymentMethod } from '@union/core';
 import type { Ctx, OnboardingPlan } from '../session.js';
 import { currentPlayer } from '../player.js';
+import { ask, clearQuestion } from '../ask.js';
 
 /**
  * GUIDED ONBOARDING
@@ -65,7 +66,7 @@ export async function advance(ctx: Ctx, playerId: string): Promise<void> {
   // 1 — Name.
   if (!p?.display_name || !p.display_name.trim()) {
     ctx.session.step = { name: 'ob:name' };
-    await ctx.reply(
+    await ask(ctx,
       `👋 Welcome! Let's get you set up.\n\nFirst — what's your *full name*? ` +
         `This is how our team will know you, so use the name you actually go by.`,
       { parse_mode: 'Markdown' },
@@ -91,7 +92,7 @@ export async function advance(ctx: Ctx, playerId: string): Promise<void> {
     const r = rowFor(sb.id);
     if (r?.needs_creation && !r.platform_uid) {
       ctx.session.step = { name: 'ob:sb_wait' };
-      await ctx.reply(
+      await ask(ctx,
         `⏳ Thanks! We've sent your Sportsbook account details to our team to set up. ` +
           `You'll get a message here the moment it's ready, and we'll pick up right where we left off.`,
       );
@@ -100,7 +101,7 @@ export async function advance(ctx: Ctx, playerId: string): Promise<void> {
     if (!r || (!r.platform_uid_claimed && !r.platform_uid)) {
       if (plan.sbHasAccount === undefined) {
         ctx.session.step = { name: 'ob:sb_hasacct' };
-        await ctx.reply('Do you already have an *APT Sports* account?', {
+        await ask(ctx, 'Do you already have an *APT Sports* account?', {
           parse_mode: 'Markdown',
           reply_markup: new InlineKeyboard()
             .text('✅ Yes, I have one', 'ob:sb:yes')
@@ -110,11 +111,11 @@ export async function advance(ctx: Ctx, playerId: string): Promise<void> {
       }
       if (plan.sbHasAccount) {
         ctx.session.step = { name: 'ob:sb_username' };
-        await ctx.reply('Great — what is your *APT Sports username*?', { parse_mode: 'Markdown' });
+        await ask(ctx, 'Great — what is your *APT Sports username*?', { parse_mode: 'Markdown' });
         return;
       }
       ctx.session.step = { name: 'ob:sb_user' };
-      await ctx.reply(
+      await ask(ctx,
         `Let's create your APT Sports account.\n\nWhat *username* would you like? ` +
           `Max ${SB_MAX} characters. Choose carefully — it can't easily be changed later.`,
         { parse_mode: 'Markdown' },
@@ -128,7 +129,7 @@ export async function advance(ctx: Ctx, playerId: string): Promise<void> {
     const r = rowFor(cg.id);
     if (!r || (!r.platform_uid_claimed && !r.platform_uid)) {
       ctx.session.step = { name: 'ob:clubgg_id' };
-      await ctx.reply(
+      await ask(ctx,
         `What's your *ClubGG ID*? Copy it exactly — money gets sent using this.`,
         { parse_mode: 'Markdown' },
       );
@@ -180,7 +181,7 @@ async function platformKb(ctx: Ctx): Promise<InlineKeyboard> {
 
 async function askPlatforms(ctx: Ctx): Promise<void> {
   ctx.session.step = { name: 'ob:platforms' };
-  await ctx.reply(
+  await ask(ctx,
     'Which platform(s) will you be using? Tap to tick — you can pick *both* — then tap Done.',
     { parse_mode: 'Markdown', reply_markup: await platformKb(ctx) },
   );
@@ -222,13 +223,13 @@ async function askDepositMethods(ctx: Ctx): Promise<void> {
   if (!ctx.session.ob) ctx.session.ob = { platforms: [] };
   ctx.session.ob.depView = 'main';
   const { text, kb } = await depKb(ctx);
-  await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: kb });
+  await ask(ctx, text, { parse_mode: 'Markdown', reply_markup: kb });
 }
 
 /** Cash-out method picker — same shape as the deposit one: multi-select, with
  *  crypto behind a dropdown. Everything edits the same message in place. */
 async function wdKb(ctx: Ctx): Promise<{ text: string; kb: InlineKeyboard }> {
-  const methods = await db()<PaymentMethod[]>`select * from payment_methods where enabled order by sort_order, name`;
+  const methods = await db()<PaymentMethod[]>`select * from payment_methods where enabled and payout_enabled order by sort_order, name`;
   const coins = methods.filter(isCoin);
   const fiat = methods.filter((m) => !isCoin(m));
   const sel = ctx.session.ob?.wdSel ?? [];
@@ -258,7 +259,7 @@ async function askWithdrawMethod(ctx: Ctx): Promise<void> {
   if (!ctx.session.ob) ctx.session.ob = { platforms: [] };
   ctx.session.ob.wdView = 'main';
   const { text, kb } = await wdKb(ctx);
-  await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: kb });
+  await ask(ctx, text, { parse_mode: 'Markdown', reply_markup: kb });
 }
 
 /** After the multi-select, collect a destination handle for each chosen method,
@@ -282,7 +283,7 @@ async function askNextWdHandle(ctx: Ctx): Promise<void> {
   const [m] = await db()<PaymentMethod[]>`select * from payment_methods where id = ${methodId}`;
   ctx.session.step = { name: 'ob:wd_handle', methodId };
   const left = q.length > 1 ? ` (${q.length} left)` : '';
-  await ctx.reply(
+  await ask(ctx,
     `Where should we send your *${m?.name}*?${left}\n\nSend ${m?.handle_hint ?? `your ${m?.name} details`}.\n\n` +
       `⚠️ Double-check it — money sent to the wrong place can't come back.`,
     { parse_mode: 'Markdown' },
@@ -311,7 +312,7 @@ export async function obSbUser(ctx: Ctx, text: string): Promise<void> {
     return;
   }
   ctx.session.step = { name: 'ob:sb_pass', username: u };
-  await ctx.reply(
+  await ask(ctx,
     `Got it — *${u}*.\n\nNow pick a *password*. Max ${SB_MAX} characters. ` +
       `Type it carefully.`,
     { parse_mode: 'Markdown' },
@@ -404,6 +405,10 @@ export async function obPlatformsDone(ctx: Ctx): Promise<void> {
   }
   await ctx.answerCallbackQuery();
   try { await ctx.editMessageReplyMarkup(); } catch { /* buttons already gone */ }
+  const sql = db();
+  const names = await sql<{ name: string }[]>`
+    select name from platforms where id = any(${sql.array(ctx.session.ob.platforms)}::uuid[]) order by sort_order`;
+  await ctx.reply(`✅ Playing on: *${names.map((n) => n.name).join(', ')}*`, { parse_mode: 'Markdown' });
   await advance(ctx, p.id);
 }
 
@@ -446,12 +451,17 @@ export async function obDepMethodsDone(ctx: Ctx): Promise<void> {
   await sql`select prefs_set_deposit_methods(${p.id}::uuid, ${sql.array(sel)}::uuid[])`;
   await ctx.answerCallbackQuery();
   try { await ctx.editMessageReplyMarkup(); } catch { /* buttons already gone */ }
+  const names = await sql<{ name: string }[]>`
+    select name from payment_methods where id = any(${sql.array(sel)}::uuid[]) order by sort_order, name`;
+  const label = `✅ You'll add money with: *${names.map((n) => n.name).join(', ')}*`;
   if (ctx.session.ob?.mode === 'methods') {
     ctx.session.ob = undefined;
     ctx.session.step = { name: 'idle' };
-    await ctx.reply('✅ Updated the payment methods you add money with.');
+    await clearQuestion(ctx);
+    await ctx.reply(label, { parse_mode: 'Markdown' });
     return;
   }
+  await ctx.reply(label, { parse_mode: 'Markdown' });
   await advance(ctx, p.id);
 }
 
@@ -532,6 +542,7 @@ async function finish(ctx: Ctx, playerId: string): Promise<void> {
   await db()`select player_finish_onboarding(${playerId}::uuid)`;
   ctx.session.step = { name: 'idle' };
   ctx.session.ob = undefined;
+  await clearQuestion(ctx);   // tidy the last prompt; the completion message stays
   await ctx.reply(
     `🎉 *Thank you for joining! Your account setup is now complete.*\n\n` +
       `Some of your accounts may still need a quick confirmation from our team — ` +

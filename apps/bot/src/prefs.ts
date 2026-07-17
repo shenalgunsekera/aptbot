@@ -51,11 +51,12 @@ export async function resolvePlatform(playerId: string): Promise<Resolved<Platfo
 }
 
 // ─── Method ──────────────────────────────────────────────────────────────────
+// Cash-out only, so it excludes deposit-only methods (e.g. Stripe can't pay out).
 export async function resolveMethod(playerId: string): Promise<Resolved<PaymentMethod>> {
   const sql = db();
 
   const methods = await sql<PaymentMethod[]>`
-    select * from payment_methods where enabled order by sort_order, name`;
+    select * from payment_methods where enabled and payout_enabled order by sort_order, name`;
 
   if (methods.length === 0) return { ask: [], offerRemember: false };
   if (methods.length === 1) return { pick: methods[0]! };
