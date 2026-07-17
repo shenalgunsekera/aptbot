@@ -13,13 +13,19 @@ export async function recordDetection(d: {
   amount: number;         // minor units (cents)
   currency: string;
   toleranceBps?: number;  // >0 lets a near match count (volatile coins). 0 = exact.
+  fillId?: string;        // when known (Stripe Checkout) — match this exact fill.
   raw?: unknown;
 }): Promise<void> {
   const { db } = await import('@union/core');
   const sql = db();
-  await sql`select payment_detect(${d.source}, ${d.externalId}, ${d.methodCode},
-                                  ${d.amount}::bigint, ${d.currency}, ${sql.json((d.raw ?? {}) as any)}::jsonb,
-                                  ${d.toleranceBps ?? 0})`;
+  if (d.fillId) {
+    await sql`select payment_detect_fill(${d.source}, ${d.externalId}, ${d.fillId}::uuid,
+                                         ${d.amount}::bigint, ${sql.json((d.raw ?? {}) as any)}::jsonb)`;
+  } else {
+    await sql`select payment_detect(${d.source}, ${d.externalId}, ${d.methodCode},
+                                    ${d.amount}::bigint, ${d.currency}, ${sql.json((d.raw ?? {}) as any)}::jsonb,
+                                    ${d.toleranceBps ?? 0})`;
+  }
   // Push the admin message out now rather than waiting for the next cron.
   try {
     const { getBot, drainNotifications } = await import('./bot');

@@ -7,6 +7,7 @@ import type { Ctx } from '../session.js';
 import { requireActive } from '../player.js';
 import { money, parseAmount, amountProblem } from '../words.js';
 import { resolvePlatform, platformKeyboard } from '../prefs.js';
+import { createStripeCheckout } from '../stripe.js';
 
 /**
  * /add — add money. (deposit)
@@ -189,6 +190,27 @@ async function runMatch(ctx: Ctx, platformId: string, amount: number, methodId: 
   }
 
   const [m] = await sql<PaymentMethod[]>`select * from payment_methods where id = ${methodId}`;
+
+  // Stripe (card / Apple Pay) has no handle to send to — it needs a hosted
+  // payment link generated for this exact amount. Create one, hand over the URL,
+  // and let the checkout webhook confirm it. No receipt needed here.
+  if (m?.code === 'stripe') {
+    const f0 = fills[0]!;
+    const url = await createStripeCheckout(f0.id, f0.gross_to_send);
+    ctx.session.step = { name: 'idle' };
+    if (!url) {
+      await ctx.reply('Card payments are momentarily unavailable — please pick another method with /add.');
+      return;
+    }
+    await ctx.reply(
+      `💳 *Pay ${money(f0.gross_to_send, f0.currency)} securely*\n\n` +
+        `Tap below to pay by *card or Apple Pay*. We'll spot your payment automatically and add your ` +
+        `money once it's confirmed — no receipt needed.`,
+      { parse_mode: 'Markdown', reply_markup: new InlineKeyboard().url('💳 Pay now', url) },
+    );
+    return;
+  }
+
   const mins = Math.round(cfg.match_timeout_seconds / 60);
   const lines: string[] = [`*💸 Send your payment now — you have ${mins} minutes*\n`];
 

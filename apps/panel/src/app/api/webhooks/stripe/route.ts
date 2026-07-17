@@ -48,7 +48,19 @@ export async function POST(req: Request): Promise<Response> {
     }
   }
 
-  if (event.type === 'charge.succeeded' || event.type === 'payment_intent.succeeded') {
+  // Our own Checkout links carry the fill id — match that exact request.
+  if (event.type === 'checkout.session.completed') {
+    const s = event.data?.object ?? {};
+    const fillId = s.metadata?.fill_id;
+    const amount = Number(s.amount_total ?? 0);
+    if (fillId && amount > 0 && s.payment_status === 'paid') {
+      await recordDetection({
+        source: 'stripe', externalId: String(event.id), methodCode: 'stripe',
+        amount, currency: String(s.currency ?? 'usd').toUpperCase(), fillId, raw: { session: s.id },
+      });
+    }
+  } else if (event.type === 'charge.succeeded' || event.type === 'payment_intent.succeeded') {
+    // Fallback for any Stripe payment made outside our Checkout flow.
     const obj = event.data?.object ?? {};
     const amount = Number(obj.amount_received ?? obj.amount ?? 0);   // already in cents
     const currency = String(obj.currency ?? 'usd').toUpperCase();
