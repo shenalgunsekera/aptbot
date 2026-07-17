@@ -259,9 +259,10 @@ export function renderNotification(n: Notification): Rendered | null {
     case 'payment.detected':
       return p.matched
         ? {
-            text: `💚 *Payment received — ${m(p.amount, p.currency)} via ${p.method}*` +
+            text: `💚 *Payment received — ${p.approx ? '≈ ' : ''}${m(p.amount, p.currency)} via ${p.method}*` +
               (p.name ? `\nFrom: *${p.name}*` : '') +
               (p.ref ? `\nRef: \`${p.ref}\`` : '') +
+              (p.approx ? `\n_(matched by live price — confirm the exact amount)_` : '') +
               `\n\n_Auto-detected. Check the receipt card above, then Verify & release._`,
           }
         : {
