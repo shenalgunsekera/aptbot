@@ -44,6 +44,7 @@ export default async function AuditPage({
           </select>
           <input name="q" defaultValue={q ?? ''} placeholder="Search action or detail…" style={{ width: 200 }} />
           <button type="submit">Filter</button>
+          <a className="btn" href="/api/export?type=audit">⬇ Excel</a>
         </form>
       </div>
 

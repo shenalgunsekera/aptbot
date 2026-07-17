@@ -55,6 +55,7 @@ export default async function PlayersPage({
         <form className="btn-row">
           <input name="q" defaultValue={q ?? ''} placeholder="Search name or ID…" style={{ width: 200 }} />
           <button type="submit">Search</button>
+          <a className="btn" href="/api/export?type=players">⬇ Excel</a>
         </form>
       </div>
 

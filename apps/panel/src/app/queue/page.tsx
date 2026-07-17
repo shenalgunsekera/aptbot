@@ -19,6 +19,7 @@ export default async function QueuePage() {
             one directly from the float.
           </p>
         </div>
+        <a className="btn" href="/api/export?type=cashouts">⬇ Excel</a>
       </div>
 
       <div className="table-wrap">

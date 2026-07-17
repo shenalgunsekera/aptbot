@@ -46,6 +46,7 @@ export default async function JobsPage() {
           <h1>Jobs</h1>
           <p className="sub">Add money to a player's table, or take it off. Claim one, do it, then say what actually moved.</p>
         </div>
+        <a className="btn" href="/api/export?type=jobs">⬇ Excel</a>
       </div>
 
       {stale > 0 && (

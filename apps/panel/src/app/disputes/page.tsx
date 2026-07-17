@@ -66,6 +66,7 @@ export default async function DisputesPage() {
             against the payment provider. Screenshots come second; they're easy to fake.
           </p>
         </div>
+        <a className="btn" href="/api/export?type=disputes">⬇ Excel</a>
       </div>
 
       {rows.length === 0 ? (

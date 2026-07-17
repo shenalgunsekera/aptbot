@@ -57,6 +57,7 @@ export default async function TransactionsPage({
           <input name="q" defaultValue={q ?? ''} placeholder="Search ref, name, ID…" style={{ width: 220 }} />
           <input type="hidden" name="filter" value={filter} />
           <button type="submit">Search</button>
+          <a className="btn" href="/api/export?type=payments">⬇ Excel</a>
         </form>
       </div>
 

@@ -43,7 +43,10 @@ export default async function ConfigPage() {
 
       <ConfigForm cfg={cfg} />
 
-      <h2>Payment methods</h2>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <h2 style={{ marginBottom: 0 }}>Payment methods</h2>
+        <a className="btn sm" href="/api/export?type=methods">⬇ Excel</a>
+      </div>
       <MethodsEditor methods={methods} />
 
       <h2 style={{ marginTop: 32 }}>Platforms</h2>

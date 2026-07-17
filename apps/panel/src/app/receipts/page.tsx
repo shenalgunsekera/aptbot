@@ -42,6 +42,7 @@ export default async function ReceiptsPage({
         <form className="btn-row">
           <input name="q" defaultValue={q ?? ''} placeholder="Search name, ID, or receipt code…" style={{ width: 240 }} />
           <button type="submit">Search</button>
+          <a className="btn" href="/api/export?type=receipts">⬇ Excel</a>
         </form>
       </div>
 
