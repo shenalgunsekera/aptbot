@@ -75,21 +75,17 @@ export async function resolveMethod(playerId: string): Promise<Resolved<PaymentM
 // ─── Keyboards ───────────────────────────────────────────────────────────────
 // `flow` is 'add' or 'out' so the callback routes back to the right step.
 
-export function platformKeyboard(flow: 'add' | 'out', platforms: Platform[], offerRemember: boolean) {
+// No "Always ask me" — players pick their platform(s) and methods during setup,
+// so /add and /cashout just show what they actually have.
+export function platformKeyboard(flow: 'add' | 'out', platforms: Platform[], _offerRemember: boolean) {
   const kb = new InlineKeyboard();
   for (const p of platforms) kb.text(p.name, `${flow}:pf:${p.id}`).row();
-  if (offerRemember) {
-    kb.text('⚙️ Always ask me', `${flow}:pfremember:none`);
-  }
   return kb;
 }
 
-export function methodKeyboard(flow: 'add' | 'out', methods: PaymentMethod[], offerRemember: boolean) {
+export function methodKeyboard(flow: 'add' | 'out', methods: PaymentMethod[], _offerRemember: boolean) {
   const kb = new InlineKeyboard();
   for (const m of methods) kb.text(m.name, `${flow}:m:${m.id}`).row();
-  if (offerRemember) {
-    kb.text('⚙️ Always ask me', `${flow}:mremember:none`);
-  }
   return kb;
 }
 

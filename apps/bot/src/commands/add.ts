@@ -5,7 +5,7 @@ import {
 } from '@union/core';
 import type { Ctx } from '../session.js';
 import { requireActive } from '../player.js';
-import { money, whole, parseAmount, amountProblem } from '../words.js';
+import { money, whole, parseAmount, amountProblem, receiptInstruction } from '../words.js';
 import { resolvePlatform, platformKeyboard } from '../prefs.js';
 import { ask, clearQuestion } from '../ask.js';
 
@@ -74,6 +74,18 @@ export async function addAmount(ctx: Ctx, platformId: string, methodId: string, 
   const problem = amountProblem(amount, { min: cfg0.min_amount, max: cfg0.max_amount, step: cfg0.amount_step });
   if (problem) {
     await ctx.reply(problem);
+    return;
+  }
+
+  // Cash App: $250+ goes straight to our $cashtag; under $250 must go through the
+  // card link using Cash App Pay.
+  const [mm] = await sql0<PaymentMethod[]>`select * from payment_methods where id = ${methodId}`;
+  if (mm?.code === 'cashapp' && amount < 25000) {
+    await ctx.reply(
+      `💵 For Cash App *under $250*, pay through our secure link and choose *Cash App Pay* on the page.`,
+      { parse_mode: 'Markdown' },
+    );
+    await startStripeDeposit(ctx, platformId);
     return;
   }
 
@@ -185,11 +197,11 @@ async function startStripeDeposit(ctx: Ctx, platformId: string): Promise<void> {
   ctx.session.step = { name: 'add:stripe', platformId };
   await clearQuestion(ctx);
   await ctx.reply(
-    `💳 *Pay by card or Apple Pay*\n\n` +
+    `💳 *Pay by Card, Apple Pay, or Cash App Pay*\n\n` +
       `Tap below, then on the page *enter the amount you want to add* ` +
       `(between ${whole(cfg.min_amount)} and ${whole(cfg.max_amount)}) and pay.\n\n` +
-      `When you're done, come back here and *send a screenshot of your receipt* so we can confirm it ` +
-      `and add your money.`,
+      `When you're done, come back here and *send a screenshot of the "Thanks for your payment" screen* ` +
+      `so we can confirm it and add your money.`,
     { parse_mode: 'Markdown', reply_markup: new InlineKeyboard().url('💳 Pay now', STRIPE_LINK()) },
   );
 }
@@ -233,7 +245,7 @@ async function runMatch(ctx: Ctx, platformId: string, amount: number, methodId: 
     if (f.withdraw_id !== null) lines.push(`_This is another player's ${m!.name}._`);
     lines.push('');
   }
-  lines.push('Once you\'ve sent it, *send a photo of your payment* (showing the transaction ID) here so we can confirm it.');
+  lines.push(`Once you've sent it, *send ${receiptInstruction(m!.code)}* here so we can confirm it.`);
   lines.push('_You can send up to two images._');
 
   // The receipt IS the proof now. Collect it (up to two), submitting proof on the

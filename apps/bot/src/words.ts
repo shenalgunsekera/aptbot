@@ -80,6 +80,18 @@ export function withdrawHandlePrompt(code: string, name: string, clubHandle?: st
   }
 }
 
+/** What proof to send for a deposit, worded per method. This is what we need to
+ *  verify the payment, so it's spelled out exactly. */
+export function receiptInstruction(code: string): string {
+  switch (code) {
+    case 'venmo':  return 'a screenshot showing the *amount* and the *transaction ID*';
+    case 'paypal': return 'a screenshot of your receipt showing the *amount sent* and the *transaction ID*';
+    case 'zelle':  return 'a screenshot of your receipt showing the *amount sent*';
+    case 'cashapp':return 'a screenshot of your receipt showing the *amount sent*';
+    default:       return 'a screenshot of your receipt showing the *amount sent*';   // crypto
+  }
+}
+
 /** A player-facing status label, never the internal one. */
 export function friendlyStatus(kind: 'deposit' | 'withdraw', status: string): string {
   const map: Record<string, string> = {
