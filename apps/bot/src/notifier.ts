@@ -292,12 +292,18 @@ export function renderNotification(n: Notification): Rendered | null {
         keyboard: new InlineKeyboard().text('✅ Account created', `sb:made:${p.player_id}`),
       };
     case 'withdraw.needs_payout':
-      return {
-        text: `💸 *Cash out to pay* (${p.method})\n\n${p.name ? 'To: *' + p.name + '*\n' : ''}` +
-          `Amount: *${m(p.amount, p.currency)}*\nSend to: \`${p.handle}\`\n\n` +
-          `Pay it, then tap below and send the transaction ID.`,
-        keyboard: new InlineKeyboard().text('✅ I paid it', `wd:pay:${p.withdraw_id}`),
-      };
+      return String(p.method).toLowerCase().includes('paypal')
+        ? {
+            text: `💸 *PayPal cash out — approve a request*\n\nFrom: *${p.name}*\nAmount: *${m(p.amount, p.currency)}*\n\n` +
+              `They'll send a PayPal money request to your account for this amount. Approve & pay it, then tap below.`,
+            keyboard: new InlineKeyboard().text('✅ I paid it', `wd:pay:${p.withdraw_id}`),
+          }
+        : {
+            text: `💸 *Cash out to pay* (${p.method})\n\n${p.name ? 'To: *' + p.name + '*\n' : ''}` +
+              `Amount: *${m(p.amount, p.currency)}*\nSend to: \`${p.handle}\`\n\n` +
+              `Pay it, then tap below and send the transaction ID.`,
+            keyboard: new InlineKeyboard().text('✅ I paid it', `wd:pay:${p.withdraw_id}`),
+          };
     case 'loader.delivery_failed':
       return { text: `⚠️ *Couldn't add value* to ${p.player_name} (\`${p.platform_uid}\`)\n${m(p.delta, p.currency)}\n_${p.reason}_\n\nNeeds a human.` };
     default:

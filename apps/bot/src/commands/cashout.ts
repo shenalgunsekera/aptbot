@@ -206,11 +206,21 @@ export async function cashoutHandle(
 
   ctx.session.step = { name: 'idle' };
   await clearQuestion(ctx);
-  await ctx.reply(
-    `✅ *Cash out started!*\n\nWe're getting *${money(w.requested_amount, w.currency)}* ready to send to \`${w.payout_handle}\`.\n\n` +
+
+  // PayPal cash-outs work by the player REQUESTING money from our PayPal, so the
+  // instruction is different from methods where we send to their handle.
+  const amt = money(w.requested_amount, w.currency);
+  const body = m?.code === 'paypal'
+    ? `✅ *Cash out started!*\n\nTo get your *${amt}*, open PayPal and send a *money request* to ` +
+      `*${m.club_handle ?? 'our PayPal'}* for *${amt}*. We'll approve and pay it.\n\n` +
+      `We're taking it off your table now — you'll get a message here at each step.\n\n` +
+      `Changed your mind? You can cancel it from /me while it's still waiting.`
+    : `✅ *Cash out started!*\n\nWe're getting *${amt}* ready to send to \`${w.payout_handle}\`.\n\n` +
       `We'll take that off your table and then pay you — you'll get a message here at each step. ` +
       `Sometimes it comes in a few pieces from different people; that's normal, and we track every part.\n\n` +
-      `Changed your mind? You can cancel it from /me while it's still waiting.`,
+      `Changed your mind? You can cancel it from /me while it's still waiting.`;
+  await ctx.reply(
+    body,
     { parse_mode: 'Markdown' },
   );
 }
