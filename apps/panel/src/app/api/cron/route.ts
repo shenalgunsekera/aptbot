@@ -46,10 +46,23 @@ export async function GET(req: Request): Promise<Response> {
 
 async function ensureWebhook(bot: Awaited<ReturnType<typeof getBot>>, req: Request): Promise<boolean> {
   try {
-    // The URL this app is actually served from — derived from the incoming
-    // request, so it follows the deployment without hard-coding a domain.
+    // WHERE the webhook must point. Order matters:
+    //   1. WEBHOOK_URL — an explicit, stable target. Set this in Vercel to the
+    //      production alias and the guesswork below never runs.
+    //   2. Otherwise the host this request arrived on — BUT never a Vercel
+    //      auto-generated deployment URL. Those (…-<team>-projects.vercel.app,
+    //      and the per-deploy <proj>-<hash>-<team>.vercel.app) are gated by
+    //      Vercel deployment protection and answer Telegram with 401 — which is
+    //      EXACTLY how the bot kept dying: the daily Vercel cron fires on such a
+    //      URL, self-heal repoints the webhook to it, and every update 401s.
+    //      A stable production alias is not protected, so only those are safe.
+    const explicit = process.env.WEBHOOK_URL;
     const host = req.headers.get('x-forwarded-host') ?? new URL(req.url).host;
-    const want = `https://${host}/api/telegram`;
+    const isProtectedDeployHost =
+      host.endsWith('-projects.vercel.app') || /\.vusercontent\.net$/.test(host);
+
+    const want = explicit ?? (isProtectedDeployHost ? null : `https://${host}/api/telegram`);
+    if (!want) return false;   // no safe target we can prove — leave the webhook alone
 
     const info = await bot.api.getWebhookInfo();
     if (info.url === want) return false;   // already correct
