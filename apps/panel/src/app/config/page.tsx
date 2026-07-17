@@ -3,6 +3,8 @@ import { Shell } from '../../components/shell';
 import { requireOwner } from '../../lib/auth';
 import { ConfigForm } from './form';
 import { MethodsEditor } from './methods';
+import { PlatformsEditor } from './platforms';
+import { AdminsEditor } from './admins';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,6 +24,8 @@ export default async function ConfigPage() {
   const sql = db();
   const [cfg] = await sql<any[]>`select * from config where id`;
   const methods = await sql<any[]>`select * from payment_methods order by sort_order, name`;
+  const platforms = await sql<any[]>`select * from platforms order by sort_order, name`;
+  const admins = await sql<any[]>`select id, telegram_id, telegram_username, email, role, disabled from admins order by role desc, created_at`;
 
   return (
     <Shell>
@@ -41,6 +45,12 @@ export default async function ConfigPage() {
 
       <h2>Payment methods</h2>
       <MethodsEditor methods={methods} />
+
+      <h2 style={{ marginTop: 32 }}>Platforms</h2>
+      <PlatformsEditor platforms={platforms} />
+
+      <h2 style={{ marginTop: 32 }}>Admins</h2>
+      <AdminsEditor admins={admins} />
     </Shell>
   );
 }

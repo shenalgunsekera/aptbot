@@ -5,7 +5,7 @@ import {
 } from '@union/core';
 import type { Ctx } from '../session.js';
 import { requireActive } from '../player.js';
-import { money, parseAmount, shortHandle } from '../words.js';
+import { money, parseAmount, amountProblem, shortHandle } from '../words.js';
 import { resolvePlatform, resolveMethod, platformKeyboard, methodKeyboard } from '../prefs.js';
 
 /**
@@ -36,10 +36,15 @@ export async function cashoutStart(ctx: Ctx): Promise<void> {
 }
 
 async function askAmount(ctx: Ctx, platform: Platform): Promise<void> {
+  const sql = db();
+  const [cfg] = await sql<{ min_amount: number; max_amount: number; amount_step: number }[]>`
+    select min_amount, max_amount, amount_step from config where id`;
   ctx.session.step = { name: 'out:amount', platformId: platform.id };
   await ctx.reply(
     `How much do you want to cash out from *${platform.name}*?\n\n` +
-      `Send the number, like \`50\`. We'll take that much off your table if it's there.\n\n/cancel to stop.`,
+      `Between ${money(cfg.min_amount)} and ${money(cfg.max_amount)}, in multiples of ` +
+      `${money(cfg.amount_step).replace(/\.00$/, '')}. Send the number, like \`50\`. ` +
+      `We'll take that much off your table if it's there.\n\n/cancel to stop.`,
     { parse_mode: 'Markdown' },
   );
 }
@@ -60,6 +65,27 @@ export async function cashoutAmount(ctx: Ctx, platformId: string, text: string):
   const amount = parseAmount(text);
   if (amount === null) {
     await ctx.reply("That doesn't look like an amount. Try `50`.", { parse_mode: 'Markdown' });
+    return;
+  }
+  const sql0 = db();
+  const [cfg0] = await sql0<{ min_amount: number; max_amount: number; amount_step: number }[]>`
+    select min_amount, max_amount, amount_step from config where id`;
+  const problem = amountProblem(amount, { min: cfg0.min_amount, max: cfg0.max_amount, step: cfg0.amount_step });
+  if (problem) {
+    await ctx.reply(problem);
+    return;
+  }
+
+  // Onboarding stored a preferred cash-out method AND where to send it, so we
+  // don't ask again — straight to creating the request.
+  const [pref] = await sql0<{ mid: string | null; handle: string | null }[]>`
+    select pr.default_withdraw_method_id as mid,
+           (select h.handle from payout_handles h
+             where h.player_id = ${p.id} and h.method_id = pr.default_withdraw_method_id
+             order by h.last_used_at desc nulls last, h.created_at desc limit 1) as handle
+      from player_prefs pr where pr.player_id = ${p.id}`;
+  if (pref?.mid && pref.handle) {
+    await cashoutHandle(ctx, platformId, amount, pref.mid, pref.handle);
     return;
   }
 
@@ -177,7 +203,48 @@ export async function cashoutHandle(
   await ctx.reply(
     `✅ *Cash out started!*\n\nWe're getting *${money(w.requested_amount, w.currency)}* ready to send to \`${w.payout_handle}\`.\n\n` +
       `We'll take that off your table and then pay you — you'll get a message here at each step. ` +
-      `Sometimes it comes in a few pieces from different people; that's normal, and we track every part.`,
+      `Sometimes it comes in a few pieces from different people; that's normal, and we track every part.\n\n` +
+      `Changed your mind? You can cancel it from /me while it's still waiting.`,
     { parse_mode: 'Markdown' },
   );
+}
+
+/**
+ * Player retracts a cash out. Whatever hasn't been handed to someone else yet
+ * comes straight back; any part already being paid stays in flight and finishes.
+ * If it's already fully claimed or paid, it can't be pulled back.
+ */
+export async function cashoutRetract(ctx: Ctx, withdrawId: string): Promise<void> {
+  const p = await requireActive(ctx);
+  if (!p) return;
+  const sql = db();
+
+  const [w] = await sql<{ status: string; amount: number | null; amount_remaining: number; requested_amount: number; currency: string }[]>`
+    select status, amount, amount_remaining, requested_amount, currency
+      from withdraw_requests where id = ${withdrawId} and player_id = ${p.id}`;
+  if (!w) return void (await ctx.answerCallbackQuery({ text: "Can't find that cash out.", show_alert: true }));
+  if (['completed', 'cancelled'].includes(w.status)) {
+    return void (await ctx.answerCallbackQuery({ text: `That cash out is already ${w.status}.`, show_alert: true }));
+  }
+
+  const returned = w.status === 'pending_unload' ? (w.requested_amount) : w.amount_remaining;
+  const assigned = (w.amount ?? 0) - w.amount_remaining;
+
+  try {
+    await sql`select withdraw_cancel(${withdrawId}::uuid, null, 'retracted by player')`;
+  } catch (err) {
+    if (isUserError(err)) return void (await ctx.answerCallbackQuery({ text: userMessage(err), show_alert: true }));
+    throw err;
+  }
+
+  await ctx.answerCallbackQuery({ text: 'Cash out cancelled.' });
+  if (w.status !== 'pending_unload' && assigned > 0) {
+    await ctx.reply(
+      `✅ Cancelled. We put *${money(returned, w.currency)}* back for you. ` +
+        `The *${money(assigned, w.currency)}* already being paid will still complete.`,
+      { parse_mode: 'Markdown' },
+    );
+  } else {
+    await ctx.reply(`✅ Cancelled — nothing was taken from your account.`, { parse_mode: 'Markdown' });
+  }
 }

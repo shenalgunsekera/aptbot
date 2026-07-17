@@ -1,41 +1,21 @@
 import { InlineKeyboard } from 'grammy';
-import { db, isUserError, userMessage, type Platform } from '@union/core';
+import { db } from '@union/core';
 import type { Ctx } from '../session.js';
 import { currentPlayer } from '../player.js';
 import { money, friendlyStatus } from '../words.js';
+import { startOnboarding, advance, isOnboarded } from './onboarding.js';
 
 /**
- * /start — registration.
+ * /start — the front door.
  *
- * v2 takes the NAME first, because the name is the identifier — unique across
- * the union and what every human sees. Then which platform (ClubGG / Sportsbook)
- * they play on and their id there. An admin confirms it before they can transact.
+ * A finished player gets their account summary. Anyone who hasn't finished the
+ * guided setup (brand new, or stalled partway) is dropped straight back into it,
+ * exactly where they left off — no re-typing what they already gave us. Frozen
+ * or banned accounts are told plainly.
  */
 export async function start(ctx: Ctx): Promise<void> {
   const sql = db();
   const p = await currentPlayer(ctx);
-
-  if (p?.status === 'active') {
-    // Already set up — say so clearly, show which accounts are linked, and point
-    // them at what they can do. No re-registration.
-    const accts = await sql<{ name: string; uid: string }[]>`
-      select pf.name, pp.platform_uid as uid
-        from player_platforms pp join platforms pf on pf.id = pp.platform_id
-       where pp.player_id = ${p.id} and pp.platform_uid is not null
-       order by pf.sort_order`;
-    const acctLines = accts.length
-      ? '\n\nYour accounts:\n' + accts.map((a) => `  • ${a.name}: ${a.uid}`).join('\n')
-      : '';
-    await ctx.reply(
-      `You're all set${p.display_name ? ', ' + p.display_name : ''} — you already have an account.${acctLines}\n\n` +
-        `💵 /add — add money\n` +
-        `💸 /cashout — cash out\n` +
-        `📄 /payments — your payments & receipts\n` +
-        `📋 /me — your account\n` +
-        `💬 /support — message our team`,
-    );
-    return;
-  }
 
   if (p && (p.status === 'frozen' || p.status === 'banned')) {
     await ctx.reply(
@@ -46,102 +26,41 @@ export async function start(ctx: Ctx): Promise<void> {
     return;
   }
 
-  if (p && p.status === 'pending') {
-    // Resume registration wherever it stalled — a session lost mid-flow must
-    // never leave a player stuck. No name yet → ask for it. Name but no platform
-    // account claimed → ask that. Otherwise they really are waiting on an admin.
-    if (!p.display_name || !p.display_name.trim()) {
-      ctx.session.step = { name: 'register:name' };
-      await ctx.reply(
-        `👋 Welcome back — let's finish setting you up.\n\nWhat name should we know you by?`,
-      );
-      return;
-    }
-    const [claim] = await sql<{ n: number }[]>`
-      select count(*)::int as n from player_platforms where player_id = ${p.id}`;
-    if (!claim || claim.n === 0) {
-      const platforms = await sql<Platform[]>`select * from platforms where enabled order by sort_order`;
-      const kb = new InlineKeyboard();
-      for (const pf of platforms) kb.text(pf.name, `reg:pf:${pf.id}`).row();
-      ctx.session.step = { name: 'idle' };
-      await ctx.reply(`Almost there, ${p.display_name}! Where do you play?`, { reply_markup: kb });
-      return;
-    }
+  // Already finished setup → show the summary, don't re-onboard.
+  if (p && (await isOnboarded(p.id))) {
+    const accts = await sql<{ name: string; uid: string | null; claimed: string | null }[]>`
+      select pf.name, pp.platform_uid as uid, pp.platform_uid_claimed as claimed
+        from player_platforms pp join platforms pf on pf.id = pp.platform_id
+       where pp.player_id = ${p.id}
+       order by pf.sort_order`;
+    const acctLines = accts.length
+      ? '\n\nYour accounts:\n' + accts.map((a) =>
+          `  • ${a.name}: ${a.uid ?? a.claimed}${a.uid ? '' : ' (being confirmed)'}`).join('\n')
+      : '';
     await ctx.reply(
-      "You're all registered! We just need someone to confirm your account. " +
-        "You'll get a message here the moment that's done.",
+      `You're all set${p.display_name ? ', ' + p.display_name : ''} — you already have an account.${acctLines}\n\n` +
+        `💵 /add — add money\n` +
+        `💸 /cashout — cash out\n` +
+        `📄 /payments — your payments & receipts\n` +
+        `📋 /me — your account\n` +
+        `➕ /addplatform · 💳 /methods · 🏦 /payout — update your setup\n` +
+        `💬 /support — message our team`,
     );
     return;
   }
 
-  // New player. Register a shell row and ask for their name.
-  await sql`select player_register(${ctx.from!.id}::bigint, ${ctx.from?.username ?? null}, null)`;
-  ctx.session.step = { name: 'register:name' };
-  await ctx.reply(
-    `👋 Welcome!\n\nWhat name should we know you by? This is how our team will ` +
-      `find you, so use the name you actually go by.`,
-  );
-}
-
-export async function registerName(ctx: Ctx, text: string): Promise<void> {
-  const sql = db();
-  const p = await currentPlayer(ctx);
-  if (!p) return void (await start(ctx));
-
-  try {
-    await sql`select player_set_name(${p.id}::uuid, ${text}, null)`;
-  } catch (err) {
-    if (isUserError(err)) {
-      await ctx.reply(userMessage(err));
-      return;
-    }
-    throw err;
+  // New or unfinished → (re)start the guided setup where it left off.
+  if (!p) {
+    await startOnboarding(ctx);
+    return;
   }
-
-  // Ask which platform they play on.
-  const platforms = await sql<Platform[]>`select * from platforms where enabled order by sort_order`;
-  const kb = new InlineKeyboard();
-  for (const pf of platforms) kb.text(pf.name, `reg:pf:${pf.id}`).row();
-
-  ctx.session.step = { name: 'idle' };
-  await ctx.reply(
-    `Nice to meet you, ${text}!\n\nWhere do you play?`,
-    { reply_markup: kb },
-  );
-}
-
-export async function registerPickPlatform(ctx: Ctx, platformId: string): Promise<void> {
-  const sql = db();
-  const [pf] = await sql<Platform[]>`select * from platforms where id = ${platformId}`;
-  ctx.session.step = { name: 'register:platform_uid', platformId };
-  await ctx.answerCallbackQuery();
-  await ctx.reply(
-    `What's your ${pf?.name} ID? Copy it exactly — money gets sent using this, ` +
-      `and there's no getting it back if it's wrong.`,
-  );
-}
-
-export async function registerUid(ctx: Ctx, platformId: string, uid: string): Promise<void> {
-  const sql = db();
-  const p = await currentPlayer(ctx);
-  if (!p) return;
-
-  try {
-    await sql`select player_claim_platform(${p.id}::uuid, ${platformId}::uuid, ${uid})`;
-  } catch (err) {
-    if (isUserError(err)) {
-      await ctx.reply(userMessage(err));
-      return;
-    }
-    throw err;
+  if (!ctx.session.ob) {
+    // Session was reset mid-setup; rebuild the plan from what's already stored.
+    const rows = await sql<{ platform_id: string }[]>`
+      select platform_id from player_platforms where player_id = ${p.id}`;
+    ctx.session.ob = { platforms: rows.map((r) => r.platform_id) };
   }
-
-  ctx.session.step = { name: 'idle' };
-  await ctx.reply(
-    `✅ Got it — *${uid}*.\n\nSomeone on our team will confirm your account shortly. ` +
-      `You'll get a message here the moment you're good to go.`,
-    { parse_mode: 'Markdown' },
-  );
+  await advance(ctx, p.id);
 }
 
 /**
@@ -188,8 +107,8 @@ export async function me(ctx: Ctx): Promise<void> {
     select amount, currency, status from deposit_requests
      where player_id = ${p.id} and status in ('matching','awaiting_payment','awaiting_confirmation')
      order by created_at`;
-  const outs = await sql<{ requested_amount: number; amount: number | null; currency: string; status: string }[]>`
-    select requested_amount, amount, currency, status from withdraw_requests
+  const outs = await sql<{ id: string; requested_amount: number; amount: number | null; currency: string; status: string }[]>`
+    select id, requested_amount, amount, currency, status from withdraw_requests
      where player_id = ${p.id} and status in ('pending_unload','queued','partially_filled','filled')
      order by created_at`;
 
@@ -200,12 +119,15 @@ export async function me(ctx: Ctx): Promise<void> {
     lines.push('');
   }
 
-  const toConfirm = await sql<{ id: string }[]>`
-    select f.id from fills f join withdraw_requests w on w.id = f.withdraw_id
-     where w.player_id = ${p.id} and f.status = 'awaiting_confirmation' and f.payee_confirmed_at is null`;
-  if (toConfirm.length) {
-    lines.push(`⚠️ You have ${toConfirm.length} payment(s) to confirm — /confirm`);
+  // A cash out can be pulled back while it's still waiting (not fully paid).
+  const cancellable = outs.filter((o) => ['pending_unload', 'queued', 'partially_filled'].includes(o.status));
+  const kb = new InlineKeyboard();
+  for (const o of cancellable) {
+    kb.text(`✖️ Cancel cash out ${money(o.amount ?? o.requested_amount, o.currency)}`, `wd:retract:${o.id}`).row();
   }
 
-  await ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' });
+  await ctx.reply(lines.join('\n'), {
+    parse_mode: 'Markdown',
+    reply_markup: cancellable.length ? kb : undefined,
+  });
 }

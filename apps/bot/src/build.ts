@@ -5,21 +5,25 @@ import { type Ctx, type SessionData, initialSession } from './session.js';
 import { currentPlayer } from './player.js';
 import { dmOnly, playerOnly, isAdminGroup } from './guards.js';
 import { Notifier } from './notifier.js';
+import { start, me } from './commands/start.js';
 import {
-  start, registerName, registerPickPlatform, registerUid, me,
-} from './commands/start.js';
+  advance, obName, obSbUser, obSbPass, obSbUsername, obClubggId, obWdHandle,
+  obTogglePlatform, obPlatformsDone, obSbHasAccount, obToggleDepMethod, obDepMethodsDone,
+  obPickWithdrawMethod, obResume, updateMethods, updatePayout, addPlatform,
+} from './commands/onboarding.js';
+import { sbCreated } from './admin-actions.js';
 import {
-  addStart, addPickPlatform, addAmount, addPickMethod, addTxid, addReceipt, addSkipReceipt,
+  addStart, addPickPlatform, addPickCrypto, addAmount, addPickMethod, addReceipt, addDone,
 } from './commands/add.js';
 import {
   cashoutStart, cashoutPickPlatform, cashoutAmount, cashoutPickMethod,
-  cashoutSavedHandle, cashoutHandle,
+  cashoutSavedHandle, cashoutHandle, cashoutRetract,
 } from './commands/cashout.js';
-import { confirmList, handleConfirm, handleDidntArrive, disputeReason } from './commands/confirm.js';
+import { disputeReason } from './commands/confirm.js';
 import { payments } from './commands/payments.js';
 import { supportStart, relayInquiryToAdmins, maybeRelayAdminReply } from './commands/support.js';
 import { setAdmin, approvePlayer } from './admin-mgmt.js';
-import { loaderClaim, loaderDone, loaderShort, loaderFail, fillVerify } from './admin-actions.js';
+import { loaderClaim, loaderDone, loaderShort, loaderFail, fillVerify, withdrawPayPrompt, withdrawPayConfirm } from './admin-actions.js';
 import { pgSessionStorage } from './session-store.js';
 
 /**
@@ -57,15 +61,16 @@ export function buildBot(token: string): Bot<Ctx> {
     ctx.session.step = { name: 'idle' };
     await ctx.reply('Okay, stopped. 👍');
   });
-  bot.command('skip', async (ctx) => {
-    if (ctx.session.step.name === 'add:receipt') return void (await addSkipReceipt(ctx));
-    await ctx.reply('Nothing to skip right now.');
+  bot.command(['done', 'skip'], async (ctx) => {
+    if (ctx.session.step.name === 'add:receipt') return void (await addDone(ctx, ctx.session.step.fillId));
+    await ctx.reply('Nothing to finish right now.');
   });
   bot.command('help', (ctx) =>
     ctx.reply(
       `💵 /add — add money\n💸 /cashout — cash out\n📋 /me — your account\n` +
         `📄 /payments — your payments & receipts\n` +
-        `✅ /confirm — confirm a payment you got\n/cancel — stop what you're doing`,
+        `➕ /addplatform · 💳 /methods · 🏦 /payout — update your setup\n` +
+        `💬 /support — message our team\n/cancel — stop what you're doing`,
     ),
   );
   
@@ -73,8 +78,12 @@ export function buildBot(token: string): Bot<Ctx> {
   bot.command(['cashout', 'withdraw'], dmOnly(cashoutStart));
   bot.command('me', dmOnly(me));
   bot.command(['payments', 'history', 'receipts'], dmOnly(payments));
-  bot.command('confirm', dmOnly(confirmList));
   bot.command(['support', 'help_me', 'contact'], dmOnly(supportStart));
+
+  // Update your setup later.
+  bot.command(['methods', 'depositmethods'], dmOnly(updateMethods));
+  bot.command(['payout', 'cashoutmethod'], dmOnly(updatePayout));
+  bot.command('addplatform', dmOnly(addPlatform));
 
   // The admin group adopts the chat it is added to (never creates one). Only an
   // enabled admin's telegram_id can set it — the DB function is the whole check.
@@ -118,8 +127,15 @@ export function buildBot(token: string): Bot<Ctx> {
   });
   
   // ─── Callbacks ───────────────────────────────────────────────────────────────
-  // Registration
-  bot.callbackQuery(/^reg:pf:(.+)$/, (ctx) => registerPickPlatform(ctx, ctx.match![1]!));
+  // Onboarding
+  bot.callbackQuery(/^ob:pf:(.+)$/, (ctx) => obTogglePlatform(ctx, ctx.match![1]!));
+  bot.callbackQuery('ob:pfdone', (ctx) => obPlatformsDone(ctx));
+  bot.callbackQuery('ob:sb:yes', (ctx) => obSbHasAccount(ctx, true));
+  bot.callbackQuery('ob:sb:no', (ctx) => obSbHasAccount(ctx, false));
+  bot.callbackQuery(/^ob:dm:(.+)$/, (ctx) => obToggleDepMethod(ctx, ctx.match![1]!));
+  bot.callbackQuery('ob:dmdone', (ctx) => obDepMethodsDone(ctx));
+  bot.callbackQuery(/^ob:wm:(.+)$/, (ctx) => obPickWithdrawMethod(ctx, ctx.match![1]!));
+  bot.callbackQuery('ob:resume', (ctx) => obResume(ctx));
   
   // Add money
   bot.callbackQuery(/^add:pf:(.+)$/, (ctx) => addPickPlatform(ctx, ctx.match![1]!, false));
@@ -129,6 +145,7 @@ export function buildBot(token: string): Bot<Ctx> {
     const p = await currentPlayer(ctx);
     if (p) await db()`select prefs_set_platform(${p.id}::uuid, null)`;
   });
+  bot.callbackQuery('add:crypto', (ctx) => addPickCrypto(ctx));
   bot.callbackQuery(/^add:m:(.+)$/, async (ctx) => {
     const s = ctx.session.step;
     if (s.name !== 'add:method') return void (await ctx.answerCallbackQuery({ text: 'That expired — /add again.' }));
@@ -168,15 +185,13 @@ export function buildBot(token: string): Bot<Ctx> {
     const p = await currentPlayer(ctx);
     if (p) await db()`select prefs_set_method(${p.id}::uuid, null)`;
   });
+  bot.callbackQuery(/^wd:retract:(.+)$/, (ctx) => cashoutRetract(ctx, ctx.match![1]!));
   bot.callbackQuery(/^out:h:(.+)$/, async (ctx) => {
     const s = ctx.session.step;
     if (s.name !== 'out:handle') return void (await ctx.answerCallbackQuery({ text: 'That expired — /cashout again.' }));
     await cashoutSavedHandle(ctx, ctx.match![1]!, s.platformId, s.amount, s.methodId);
   });
   
-  // Confirm
-  bot.callbackQuery(/^cf:yes:(.+)$/, (ctx) => handleConfirm(ctx, ctx.match![1]!));
-  bot.callbackQuery(/^cf:no:(.+)$/, (ctx) => handleDidntArrive(ctx, ctx.match![1]!));
   
   // Admin group actions (auth checked inside each handler by telegram_id)
   bot.callbackQuery(/^lo:claim:(.+)$/, (ctx) => loaderClaim(ctx, ctx.match![1]!));
@@ -185,24 +200,34 @@ export function buildBot(token: string): Bot<Ctx> {
   bot.callbackQuery(/^lo:fail:(.+)$/, (ctx) => loaderFail(ctx, ctx.match![1]!));
   bot.callbackQuery(/^fl:verify:(.+)$/, (ctx) => fillVerify(ctx, ctx.match![1]!));
   bot.callbackQuery(/^pl:approve:(.+)$/, (ctx) => approvePlayer(ctx, ctx.match![1]!));
+  bot.callbackQuery(/^wd:pay:(.+)$/, (ctx) => withdrawPayPrompt(ctx, ctx.match![1]!));
+  bot.callbackQuery(/^sb:made:(.+)$/, (ctx) => sbCreated(ctx, ctx.match![1]!));
   bot.callbackQuery('noop', (ctx) => ctx.answerCallbackQuery({ text: 'Open the panel for full details.' }));
   
   // ─── Loader "different amount" reply in the admin group ──────────────────────
   // The loaderShort prompt used force_reply and stashed the order id. A reply in
   // the group with a number completes the job for that amount.
   bot.on('message:text', async (ctx, next) => {
-    const orderId = (ctx.session as any)._loaderShortOrder as string | undefined;
     const replyText = ctx.message.reply_to_message?.text ?? '';
+
+    // Loader reporting a short unload amount.
+    const orderId = (ctx.session as any)._loaderShortOrder as string | undefined;
     if (orderId && /Reply to THIS message with the amount/.test(replyText)) {
       const n = parseFloat(ctx.message.text.trim());
-      if (!Number.isFinite(n) || n < 0) {
-        await ctx.reply('Send just the number, e.g. 30');
-        return;
-      }
+      if (!Number.isFinite(n) || n < 0) { await ctx.reply('Send just the number, e.g. 30'); return; }
       (ctx.session as any)._loaderShortOrder = undefined;
       await loaderDone(ctx, orderId, -Math.round(n * 100));
       return;
     }
+
+    // Admin giving the tx id for a club-mediated cash out they paid.
+    const payId = (ctx.session as any)._payWithdraw as string | undefined;
+    if (payId && /Reply to THIS message with the transaction ID/.test(replyText)) {
+      (ctx.session as any)._payWithdraw = undefined;
+      await withdrawPayConfirm(ctx, payId, ctx.message.text.trim());
+      return;
+    }
+
     return next();
   });
   
@@ -226,15 +251,22 @@ export function buildBot(token: string): Bot<Ctx> {
     }
 
     switch (step.name) {
-      case 'register:name': return void (await registerName(ctx, text));
-      case 'register:platform_uid': return void (await registerUid(ctx, step.platformId, text));
+      // Onboarding
+      case 'ob:name': return void (await obName(ctx, text));
+      case 'ob:sb_user': return void (await obSbUser(ctx, text));
+      case 'ob:sb_pass': return void (await obSbPass(ctx, step.username, text));
+      case 'ob:sb_username': return void (await obSbUsername(ctx, text));
+      case 'ob:clubgg_id': return void (await obClubggId(ctx, text));
+      case 'ob:wd_handle': return void (await obWdHandle(ctx, step.methodId, text));
+      case 'ob:sb_wait':
+        return void (await ctx.reply("We're still setting up your Sportsbook account — you'll get a message here the moment it's ready. 🙏"));
+      // Money flows
       case 'add:amount': return void (await addAmount(ctx, step.platformId, text));
-      case 'add:txid': return void (await addTxid(ctx, step.fillId, text));
       case 'out:amount': return void (await cashoutAmount(ctx, step.platformId, text));
       case 'out:handle': return void (await cashoutHandle(ctx, step.platformId, step.amount, step.methodId, text));
       case 'dispute:reason': return void (await disputeReason(ctx, step.fillId, text));
       default:
-        // Anything else in a DM is treated as a question for the team.
+        // Anything else is treated as a question for the team.
         await relayInquiryToAdmins(ctx, text);
     }
   });

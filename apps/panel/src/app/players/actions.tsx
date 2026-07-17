@@ -1,7 +1,33 @@
 'use client';
 
 import { ActionButton, PromptAction } from '../../components/ui';
-import { confirmPlayer, setPlayerStatus, adjustPlayer } from '../../lib/actions';
+import { confirmPlayer, setPlayerStatus, adjustPlayer, approveSportsbook } from '../../lib/actions';
+
+/** A Sportsbook account the club must CREATE. Shows the desired credentials; the
+ *  button marks it created (on APT Sports) and auto-resumes the player. */
+export function SportsbookCreateAction({
+  playerId, username,
+}: {
+  playerId: string; username: string;
+}) {
+  return (
+    <div className="btn-row">
+      <ActionButton
+        small variant="ok" label={`Created ${username}`}
+        confirm={`Confirm you've created the APT Sports account "${username}" with the shown password. ` +
+          `The player will be told and setup will continue.`}
+        action={() => approveSportsbook(playerId, null)}
+      />
+      <PromptAction
+        label="Different username"
+        title="Created with a different username"
+        variant="primary"
+        fields={[{ name: 'uid', label: 'Actual Sportsbook username', placeholder: username, required: true }]}
+        action={(v) => approveSportsbook(playerId, v.uid ?? null)}
+      />
+    </div>
+  );
+}
 
 /** Approve a claimed platform account. Shown per pending claim. */
 export function ConfirmAction({

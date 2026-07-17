@@ -38,6 +38,26 @@ export function parseAmount(input: string): number | null {
   return Number.isSafeInteger(total) && total > 0 ? total : null;
 }
 
+/** Whole-dollar label, e.g. "$20" (no cents) — for step/limit messages. */
+const whole = (minor: number, currency = 'USD') => money(minor, currency).replace(/\.00$/, '');
+
+/**
+ * Check a typed amount against the money rules (min, max, whole multiples of the
+ * step). Returns a player-friendly problem string, or null if the amount is fine.
+ */
+export function amountProblem(
+  minor: number,
+  opts: { min: number; max: number; step: number },
+): string | null {
+  if (minor < opts.min) return `The smallest amount is ${whole(opts.min)}.`;
+  if (minor > opts.max) return `The largest amount is ${whole(opts.max)}.`;
+  if (opts.step > 0 && minor % opts.step !== 0) {
+    const near = Math.max(opts.min, Math.round(minor / opts.step) * opts.step);
+    return `Amounts must be in whole multiples of ${whole(opts.step)} — no cents. Try ${whole(near)}.`;
+  }
+  return null;
+}
+
 /** A player-facing status label, never the internal one. */
 export function friendlyStatus(kind: 'deposit' | 'withdraw', status: string): string {
   const map: Record<string, string> = {

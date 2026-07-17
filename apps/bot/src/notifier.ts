@@ -139,34 +139,20 @@ export function renderNotification(n: Notification): Rendered | null {
 
   switch (n.kind) {
     // ── Player-facing ──
+    // Players no longer confirm payments (admins do). Kept as a plain heads-up in
+    // case any pre-change rows are still in the outbox — no dead buttons.
     case 'fill.confirm_request':
-      return {
-        text: `*💰 Someone says they paid you*\n\nAmount: *${m(p.amount, p.currency)}*\n` +
-          `Transaction ID: \`${p.payment_ref}\`\n\nCheck your ${p.method}, then confirm below.` +
-          (p.hold_until ? `\n\n🕒 Short hold on this one before it fully releases.` : ''),
-        keyboard: new InlineKeyboard()
-          .text('✅ Yes, I got it', `cf:yes:${n.ref_id}`)
-          .text("❌ Didn't arrive", `cf:no:${n.ref_id}`),
-      };
-
-    // The receipt IMAGE, sent to the payee so they see proof before confirming.
     case 'fill.receipt_payee':
-      return {
-        photo: p.file_id || p.url,
-        text: `*💰 Payment received — here's their receipt*\n\nAmount: *${m(p.amount, p.currency)}*\n` +
-          `Transaction ID: \`${p.payment_ref}\`\n\nCheck it matches your ${p.method}, then confirm.`,
-        keyboard: new InlineKeyboard()
-          .text('✅ Yes, I got it', `cf:yes:${p.fill_id}`)
-          .text("❌ Didn't arrive", `cf:no:${p.fill_id}`),
-      };
+      return { text: `*💰 A payment of ${m(p.amount, p.currency)} is on the way to you.* We'll confirm it and let you know.` };
 
-    // The receipt IMAGE, sent to the admin group so they can verify a
-    // club-mediated payment (PayPal etc.) by looking at the actual proof.
+    // The receipt IMAGE, sent to the admin group. Admins are the only confirmers:
+    // one tap on Verify releases the money, P2P or club-mediated.
     case 'fill.receipt_admin':
       return {
         photo: p.file_id || p.url,
         text: `*🏦 Payment to verify — receipt attached*\n\n${p.name ? 'From: *' + p.name + '*\n' : ''}` +
-          `Amount: *${m(p.amount, p.currency)}* (${p.method})\nTransaction ID: \`${p.payment_ref}\`\n\n` +
+          `Amount: *${m(p.amount, p.currency)}* (${p.method})` +
+          (p.payment_ref ? `\nReference: \`${p.payment_ref}\`` : '') + `\n\n` +
           `Check it landed, then release.`,
         keyboard: new InlineKeyboard().text('✅ Verify & release', `fl:verify:${p.fill_id}`),
       };
@@ -179,9 +165,18 @@ export function renderNotification(n: Notification): Rendered | null {
     case 'fill.lock_expired':
       return { text: `⏱ *Your payment timed out.*\n\nThe ${m(p.amount, p.currency)} went back in the queue — no proof arrived in time. If you already sent it, message us now.` };
     case 'withdraw.queued':
-      return { text: p.short
-        ? `✅ We got *${m(p.amount, p.currency)}* off your table (that's what was there of the ${m(p.requested, p.currency)} you asked for). You're in line to be paid.`
-        : `✅ *${m(p.amount, p.currency)}* is ready and you're in line to be paid.` };
+      return {
+        text: (p.short
+          ? `✅ We got *${m(p.amount, p.currency)}* off your table (that's what was there of the ${m(p.requested, p.currency)} you asked for). You're in line to be paid.`
+          : `✅ *${m(p.amount, p.currency)}* is ready and you're in line to be paid.`) +
+          `\n\nChanged your mind? You can cancel below while it's still waiting.`,
+        keyboard: new InlineKeyboard().text('✖️ Cancel this cash out', `wd:retract:${n.ref_id}`),
+      };
+    case 'onboarding.resume':
+      return {
+        text: `✅ *Your Sportsbook account is ready!* Let's finish setting you up.`,
+        keyboard: new InlineKeyboard().text('▶️ Continue setup', 'ob:resume'),
+      };
     case 'withdraw.completed':
       return { text: `🎉 *Cash out complete!* ${m(p.amount, p.currency)} — all done.` };
     case 'withdraw.cancelled':
@@ -242,6 +237,20 @@ export function renderNotification(n: Notification): Rendered | null {
       };
     case 'player.needs_club':
       return { text: `📍 *${p.name}* (${p.platform} ${p.uid}) is approved but not assigned to a club yet.` };
+    case 'sportsbook.create':
+      return {
+        text: `🆕 *Create a Sportsbook account*\n\nFor: *${p.name}*\n` +
+          `Username: \`${p.username}\`\nPassword: \`${p.password}\`\n\n` +
+          `Create it on APT Sports with these exact details, then tap below — the player is told automatically.`,
+        keyboard: new InlineKeyboard().text('✅ Account created', `sb:made:${p.player_id}`),
+      };
+    case 'withdraw.needs_payout':
+      return {
+        text: `💸 *Cash out to pay* (${p.method})\n\n${p.name ? 'To: *' + p.name + '*\n' : ''}` +
+          `Amount: *${m(p.amount, p.currency)}*\nSend to: \`${p.handle}\`\n\n` +
+          `Pay it, then tap below and send the transaction ID.`,
+        keyboard: new InlineKeyboard().text('✅ I paid it', `wd:pay:${p.withdraw_id}`),
+      };
     case 'loader.delivery_failed':
       return { text: `⚠️ *Couldn't add value* to ${p.player_name} (\`${p.platform_uid}\`)\n${m(p.delta, p.currency)}\n_${p.reason}_\n\nNeeds a human.` };
     default:

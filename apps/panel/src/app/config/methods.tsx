@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { upsertMethod } from '../../lib/actions';
+import { upsertMethod, deleteMethod } from '../../lib/actions';
 
 export function MethodsEditor({ methods }: { methods: any[] }) {
   const [editing, setEditing] = useState<string | null>(null);
@@ -47,10 +47,11 @@ export function MethodsEditor({ methods }: { methods: any[] }) {
                 <td>
                   <span className={`badge ${m.enabled ? 'ok' : 'muted'}`}>{m.enabled ? 'on' : 'off'}</span>
                 </td>
-                <td>
+                <td style={{ display: 'flex', gap: 6 }}>
                   <button className="sm ghost" onClick={() => setEditing(editing === m.id ? null : m.id)}>
                     {editing === m.id ? 'Close' : 'Edit'}
                   </button>
+                  <DeleteMethodButton id={m.id} name={m.name} />
                 </td>
               </tr>
             ))}
@@ -65,6 +66,29 @@ export function MethodsEditor({ methods }: { methods: any[] }) {
       ) : (
         <button onClick={() => setEditing('new')}>+ Add payment method</button>
       )}
+    </>
+  );
+}
+
+function DeleteMethodButton({ id, name }: { id: string; name: string }) {
+  const [pending, start] = useTransition();
+  const [msg, setMsg] = useState<string | null>(null);
+  return (
+    <>
+      <button
+        className="sm ghost danger"
+        disabled={pending}
+        onClick={() => {
+          if (!confirm(`Delete ${name}? If it has history it will be disabled instead.`)) return;
+          start(async () => {
+            const r = await deleteMethod(id);
+            setMsg(r.ok ? (r.message ?? 'Done.') : r.error);
+          });
+        }}
+      >
+        {pending ? '…' : 'Delete'}
+      </button>
+      {msg && <span className="mono" style={{ fontSize: 10 }}>{msg}</span>}
     </>
   );
 }

@@ -107,6 +107,50 @@ export async function loaderFail(ctx: Ctx, orderId: string): Promise<void> {
   await ctx.editMessageText(`❌ *Failed* · by ${ctx.from?.first_name ?? 'admin'}`, { parse_mode: 'Markdown' });
 }
 
+/** Admin taps "I paid it" on a club-mediated cash out → ask for the tx id. */
+export async function withdrawPayPrompt(ctx: Ctx, withdrawId: string): Promise<void> {
+  const admin = await adminFor(ctx);
+  if (!admin) return void (await ctx.answerCallbackQuery({ text: 'Admins only.', show_alert: true }));
+  await ctx.answerCallbackQuery();
+  (ctx.session as any)._payWithdraw = withdrawId;
+  await ctx.reply(
+    `Reply to THIS message with the transaction ID / reference of the payment you sent for cash out \`${withdrawId.slice(0, 8)}\`.`,
+    { parse_mode: 'Markdown', reply_markup: { force_reply: true } },
+  );
+}
+
+/** The admin's reply with the tx id → record the payout from float. */
+export async function withdrawPayConfirm(ctx: Ctx, withdrawId: string, ref: string): Promise<void> {
+  const admin = await adminFor(ctx);
+  if (!admin) return;
+  const sql = db();
+  try {
+    await sql`select withdraw_club_payout(${withdrawId}::uuid, ${admin.id}::uuid, null, ${ref.trim()}, 'paid via telegram')`;
+  } catch (err) {
+    if (isUserError(err)) return void (await ctx.reply(`❌ ${userMessage(err)}`));
+    throw err;
+  }
+  await ctx.reply(`✅ Recorded as paid (ref \`${ref.trim()}\`). The player has been told.`, { parse_mode: 'Markdown' });
+}
+
+/** Admin taps "Account created" on a Sportsbook creation request → activate the
+ *  account and auto-resume the player's onboarding. */
+export async function sbCreated(ctx: Ctx, playerId: string): Promise<void> {
+  const admin = await adminFor(ctx);
+  if (!admin) return void (await ctx.answerCallbackQuery({ text: 'Admins only.', show_alert: true }));
+  const sql = db();
+  const [sb] = await sql<{ id: string }[]>`select id from platforms where code = 'sportsbook'`;
+  if (!sb) return void (await ctx.answerCallbackQuery({ text: 'Sportsbook platform missing.', show_alert: true }));
+  try {
+    await sql`select sb_mark_created(${playerId}::uuid, ${sb.id}::uuid, ${admin.id}::uuid, null)`;
+  } catch (err) {
+    if (isUserError(err)) return void (await ctx.answerCallbackQuery({ text: userMessage(err), show_alert: true }));
+    throw err;
+  }
+  await ctx.answerCallbackQuery({ text: 'Created — the player has been told.' });
+  await ctx.editMessageText(`✅ *Sportsbook account created* · by ${ctx.from?.first_name ?? 'admin'}`, { parse_mode: 'Markdown' });
+}
+
 /** Verify a fill (release money) from the group. */
 export async function fillVerify(ctx: Ctx, fillId: string): Promise<void> {
   const admin = await adminFor(ctx);

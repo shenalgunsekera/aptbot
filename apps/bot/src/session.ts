@@ -10,13 +10,22 @@ import type { Context, SessionFlavor } from 'grammy';
  */
 export type Step =
   | { name: 'idle' }
-  | { name: 'register:name' }
-  | { name: 'register:platform_uid'; platformId: string }
+  // guided onboarding (first-run setup)
+  | { name: 'ob:name' }
+  | { name: 'ob:platforms' }
+  | { name: 'ob:sb_hasacct' }
+  | { name: 'ob:sb_user' }
+  | { name: 'ob:sb_pass'; username: string }
+  | { name: 'ob:sb_wait' }
+  | { name: 'ob:sb_username' }
+  | { name: 'ob:clubgg_id' }
+  | { name: 'ob:dep_methods' }
+  | { name: 'ob:wd_method' }
+  | { name: 'ob:wd_handle'; methodId: string }
   // add money
   | { name: 'add:platform' }
   | { name: 'add:amount'; platformId: string }
   | { name: 'add:method'; platformId: string; amount: number }
-  | { name: 'add:txid'; fillId: string }
   | { name: 'add:receipt'; fillId: string }
   // cash out
   | { name: 'out:platform' }
@@ -25,8 +34,20 @@ export type Step =
   | { name: 'out:handle'; platformId: string; amount: number; methodId: string }
   | { name: 'dispute:reason'; fillId: string };
 
+/** Scratch state for the guided onboarding, held across steps. Durable (the
+ *  session lives in Postgres), so it survives the Sportsbook-creation pause. */
+export interface OnboardingPlan {
+  platforms: string[];        // platform ids the player chose
+  sbHasAccount?: boolean;     // answered the "already have APT Sports?" question
+  depSel?: string[];          // deposit method ids toggled so far
+  // When set, we're editing one thing from a slash command, not first-run setup,
+  // so the "Done" handlers save-and-stop instead of walking the whole sequence.
+  mode?: 'methods' | 'payout' | 'addplatform';
+}
+
 export interface SessionData {
   step: Step;
+  ob?: OnboardingPlan;
 }
 
 export type Ctx = Context & SessionFlavor<SessionData>;

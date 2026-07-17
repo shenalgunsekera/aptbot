@@ -236,6 +236,104 @@ export async function upsertMethod(patch: Record<string, unknown>): Promise<Resu
   }, ['/config']);
 }
 
+/** Delete a payment method if nothing references it; otherwise just disable it —
+ *  a method with ledger/fill history must never vanish from under that history. */
+export async function deleteMethod(id: string): Promise<Result> {
+  return run(async () => {
+    const s = await requireOwner();
+    const sql = db();
+    const [used] = await sql<{ n: number }[]>`
+      select (
+        (select count(*) from fills where method_id = ${id}) +
+        (select count(*) from deposit_requests where method_id = ${id}) +
+        (select count(*) from withdraw_requests where method_id = ${id})
+      )::int as n`;
+    if (used.n > 0) {
+      await sql`update payment_methods set enabled = false where id = ${id}`;
+      await sql`select audit(${s.admin.id}::uuid, 'method.disable', 'payment_method', ${id}::uuid, '{"reason":"in use, disabled instead of deleted"}'::jsonb)`;
+      return 'This method has history, so it was disabled rather than deleted.';
+    }
+    await sql`delete from payment_methods where id = ${id}`;
+    await sql`select audit(${s.admin.id}::uuid, 'method.delete', 'payment_method', ${id}::uuid, '{}'::jsonb)`;
+    return 'Payment method deleted.';
+  }, ['/config']);
+}
+
+// ─── Platforms (owner only) ──────────────────────────────────────────────────
+
+export async function upsertPlatform(patch: Record<string, unknown>): Promise<Result> {
+  return run(async () => {
+    const s = await requireOwner();
+    const sql = db();
+    const allowed = new Set(['code', 'name', 'enabled', 'sort_order']);
+    const clean: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(patch)) if (allowed.has(k)) clean[k] = v;
+    const id = patch.id as string | undefined;
+    if (id) {
+      delete clean.code;   // permanent — historical rows reference it
+      await sql`update platforms set ${sql(clean)} where id = ${id}`;
+    } else {
+      await sql`insert into platforms ${sql(clean)}`;
+    }
+    await sql`select audit(${s.admin.id}::uuid, ${id ? 'platform.update' : 'platform.create'},
+                           'platform', ${id ?? null}::uuid, ${sql.json(clean as any)}::jsonb)`;
+    return 'Platform saved.';
+  }, ['/config']);
+}
+
+export async function deletePlatform(id: string): Promise<Result> {
+  return run(async () => {
+    const s = await requireOwner();
+    const sql = db();
+    const [used] = await sql<{ n: number }[]>`
+      select (select count(*) from player_platforms where platform_id = ${id})::int as n`;
+    if (used.n > 0) {
+      await sql`update platforms set enabled = false where id = ${id}`;
+      await sql`select audit(${s.admin.id}::uuid, 'platform.disable', 'platform', ${id}::uuid, '{"reason":"in use"}'::jsonb)`;
+      return 'This platform is in use, so it was disabled rather than deleted.';
+    }
+    await sql`delete from platforms where id = ${id}`;
+    await sql`select audit(${s.admin.id}::uuid, 'platform.delete', 'platform', ${id}::uuid, '{}'::jsonb)`;
+    return 'Platform deleted.';
+  }, ['/config']);
+}
+
+// ─── Admins (owner only) ─────────────────────────────────────────────────────
+
+export async function upsertAdmin(
+  telegramId: string, username: string | null, email: string | null, role: 'admin' | 'owner',
+): Promise<Result> {
+  return run(async () => {
+    const s = await requireOwner();
+    await db()`select admin_upsert(${Number(telegramId)}::bigint, ${username}, ${email}, ${role}, ${s.admin.id}::uuid)`;
+    return 'Admin saved.';
+  }, ['/config']);
+}
+
+export async function setAdminDisabled(adminId: string, disabled: boolean): Promise<Result> {
+  return run(async () => {
+    const s = await requireOwner();
+    const sql = db();
+    if (adminId === s.admin.id && disabled) throw new Error('you cannot disable yourself');
+    await sql`update admins set disabled = ${disabled} where id = ${adminId} and role <> 'owner'`;
+    await sql`select audit(${s.admin.id}::uuid, ${disabled ? 'admin.disable' : 'admin.enable'}, 'admin', ${adminId}::uuid, '{}'::jsonb)`;
+    return disabled ? 'Admin disabled.' : 'Admin re-enabled.';
+  }, ['/config']);
+}
+
+// ─── Sportsbook account approval ─────────────────────────────────────────────
+
+export async function approveSportsbook(playerId: string, uid: string | null): Promise<Result> {
+  return run(async () => {
+    const s = await requireAdmin();
+    const sql = db();
+    const [sb] = await sql<{ id: string }[]>`select id from platforms where code = 'sportsbook'`;
+    if (!sb) throw new Error('sportsbook platform not found');
+    await sql`select sb_mark_created(${playerId}::uuid, ${sb.id}::uuid, ${s.admin.id}::uuid, ${uid || null})`;
+    return 'Sportsbook account created and player resumed.';
+  }, ['/players', '/']);
+}
+
 export async function setClubDetails(
   clubId: string, platformClubId: string, ownerAdminId: string | null,
 ): Promise<Result> {

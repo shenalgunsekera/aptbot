@@ -2,7 +2,7 @@ import { db } from '@union/core';
 import { Shell } from '../../components/shell';
 import { getSession } from '../../lib/auth';
 import { Ago } from '../../components/ui';
-import { ConfirmAction, PlayerActions } from './actions';
+import { ConfirmAction, PlayerActions, SportsbookCreateAction } from './actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,11 +21,11 @@ export default async function PlayersPage({
   // Pending: claimed a platform account, not yet approved.
   const pending = await sql<any[]>`
     select p.id, p.display_name, p.telegram_id, p.telegram_username, p.created_at,
-           pp.platform_id, pp.platform_uid_claimed, pf.name as platform_name
+           pp.platform_id, pp.platform_uid_claimed, pp.needs_creation, pp.secret, pf.name as platform_name
       from players p
       join player_platforms pp on pp.player_id = p.id
       join platforms pf on pf.id = pp.platform_id
-     where p.status = 'pending' and pp.platform_uid is null and pp.platform_uid_claimed is not null
+     where pp.platform_uid is null and pp.platform_uid_claimed is not null
      order by p.created_at`;
 
   const search = q
@@ -75,10 +75,22 @@ export default async function PlayersPage({
                   <tr key={p.id + p.platform_id}>
                     <td className="name">{p.display_name ?? '—'}</td>
                     <td className="mono">{p.telegram_username ? '@' + p.telegram_username : p.telegram_id}</td>
-                    <td>{p.platform_name}</td>
-                    <td className="mono"><strong>{p.platform_uid_claimed}</strong></td>
+                    <td>
+                      {p.platform_name}
+                      {p.needs_creation && <span className="badge warn" style={{ marginLeft: 4 }}>create</span>}
+                    </td>
+                    <td className="mono">
+                      <strong>{p.platform_uid_claimed}</strong>
+                      {p.needs_creation && p.secret && (
+                        <div style={{ fontSize: 10, color: 'var(--text-faint)' }}>pass: <strong>{p.secret}</strong></div>
+                      )}
+                    </td>
                     <td><Ago at={p.created_at} /></td>
-                    <td><ConfirmAction playerId={p.id} platformId={p.platform_id} uid={p.platform_uid_claimed} platformName={p.platform_name} /></td>
+                    <td>
+                      {p.needs_creation
+                        ? <SportsbookCreateAction playerId={p.id} username={p.platform_uid_claimed} />
+                        : <ConfirmAction playerId={p.id} platformId={p.platform_id} uid={p.platform_uid_claimed} platformName={p.platform_name} />}
+                    </td>
                   </tr>
                 ))}
               </tbody>
