@@ -271,12 +271,19 @@ export function renderNotification(n: Notification): Rendered | null {
               `\n\n_Match it to the player's receipt, then credit them._`,
           };
     case 'stripe.claim':
-      return {
-        photo: p.file_id || p.url,
-        text: `🍎 *Card / Apple Pay receipt — from ${p.name ?? 'a player'}*\n\n` +
-          `They paid on the Stripe link. Check the amount from the "Payment received" alert, then tap Credit.`,
-        keyboard: new InlineKeyboard().text('💵 Credit', `st:credit:${p.claim_id}`),
-      };
+      return p.amount
+        ? {
+            photo: p.file_id || p.url,
+            text: `🍎 *Card / Apple Pay receipt — from ${p.name ?? 'a player'}*\n\n` +
+              `Matched payment: *${m(p.amount, p.currency)}*. Check the receipt, then tap to credit.`,
+            keyboard: new InlineKeyboard().text(`✅ Verify & Credit ${m(p.amount, p.currency)}`, `st:ok:${p.claim_id}`),
+          }
+        : {
+            photo: p.file_id || p.url,
+            text: `🍎 *Card / Apple Pay receipt — from ${p.name ?? 'a player'}*\n\n` +
+              `We haven't matched a payment amount yet. Check the "Payment received" alert, then enter the amount.`,
+            keyboard: new InlineKeyboard().text('💵 Credit (enter amount)', `st:credit:${p.claim_id}`),
+          };
     case 'sportsbook.create':
       return {
         text: `🆕 *Create a Sportsbook account*\n\nFor: *${p.name}*\n` +

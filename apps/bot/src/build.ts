@@ -26,7 +26,7 @@ import { supportStart, relayInquiryToAdmins, maybeRelayAdminReply } from './comm
 import { setAdmin, approvePlayer } from './admin-mgmt.js';
 import {
   loaderClaim, loaderDone, loaderShort, loaderFail, fillVerify, withdrawPayPrompt, withdrawPayConfirm,
-  stripeCreditPrompt, stripeCreditConfirm,
+  stripeCreditPrompt, stripeCreditConfirm, stripeCreditOk,
 } from './admin-actions.js';
 import { pgSessionStorage } from './session-store.js';
 
@@ -229,6 +229,7 @@ export function buildBot(token: string): Bot<Ctx> {
   bot.callbackQuery(/^pl:approve:(.+)$/, (ctx) => approvePlayer(ctx, ctx.match![1]!));
   bot.callbackQuery(/^wd:pay:(.+)$/, (ctx) => withdrawPayPrompt(ctx, ctx.match![1]!));
   bot.callbackQuery(/^sb:made:(.+)$/, (ctx) => sbCreated(ctx, ctx.match![1]!));
+  bot.callbackQuery(/^st:ok:(.+)$/, (ctx) => stripeCreditOk(ctx, ctx.match![1]!));
   bot.callbackQuery(/^st:credit:(.+)$/, (ctx) => stripeCreditPrompt(ctx, ctx.match![1]!));
   bot.callbackQuery('noop', (ctx) => ctx.answerCallbackQuery({ text: 'Open the panel for full details.' }));
   

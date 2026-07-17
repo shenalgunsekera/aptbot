@@ -364,8 +364,13 @@ export async function stripeReceipt(ctx: Ctx, platformId: string): Promise<void>
     console.error('stripe receipt upload failed:', err);
   }
 
+  // Pull in the amount from the matching webhook payment, so the admin can credit
+  // in one tap without typing it.
+  const [al] = await sql<{ amt: number | null }[]>`select stripe_claim_autolink(${claim!.id}::uuid) as amt`;
+
   await sql`select notify_admins('stripe.claim', 'stripe_claim', ${claim!.id}::uuid, ${sql.json({
     claim_id: claim!.id, file_id: fileId, url, name: p.display_name,
+    amount: al?.amt ?? null, currency: 'USD',
   })}::jsonb)`;
 
   ctx.session.step = { name: 'idle' };

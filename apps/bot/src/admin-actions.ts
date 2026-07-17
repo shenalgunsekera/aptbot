@@ -163,6 +163,20 @@ export async function stripeCreditPrompt(ctx: Ctx, claimId: string): Promise<voi
   );
 }
 
+/** One-tap: credit the amount already matched from the webhook — no typing. */
+export async function stripeCreditOk(ctx: Ctx, claimId: string): Promise<void> {
+  const admin = await adminFor(ctx);
+  if (!admin) return void (await ctx.answerCallbackQuery({ text: 'Admins only.', show_alert: true }));
+  try {
+    await db()`select stripe_claim_credit(${claimId}::uuid, ${admin.id}::uuid, null)`;
+  } catch (err) {
+    if (isUserError(err)) return void (await ctx.answerCallbackQuery({ text: userMessage(err), show_alert: true }));
+    throw err;
+  }
+  await ctx.answerCallbackQuery({ text: 'Credited — the player has been told.' });
+  await ctx.editMessageCaption({ caption: `✅ *Credited* · by ${ctx.from?.first_name ?? 'admin'}`, parse_mode: 'Markdown' }).catch(() => {});
+}
+
 /** The admin's reply with the amount → credit the player through the normal path. */
 export async function stripeCreditConfirm(ctx: Ctx, claimId: string, amountText: string): Promise<void> {
   const admin = await adminFor(ctx);
