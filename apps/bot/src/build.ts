@@ -8,7 +8,7 @@ import { Notifier } from './notifier.js';
 import { start, me } from './commands/start.js';
 import {
   advance, obName, obSbUser, obSbPass, obSbUsername, obClubggId, obWdHandle,
-  obTogglePlatform, obPlatformsDone, obSbHasAccount, obToggleDepMethod, obDepMethodsDone,
+  obTogglePlatform, obPlatformsDone, obSbHasAccount, obToggleDepMethod, obDepView, obDepMethodsDone,
   obPickWithdrawMethod, obResume, updateMethods, updatePayout, addPlatform,
 } from './commands/onboarding.js';
 import { sbCreated } from './admin-actions.js';
@@ -132,6 +132,8 @@ export function buildBot(token: string): Bot<Ctx> {
   bot.callbackQuery('ob:pfdone', (ctx) => obPlatformsDone(ctx));
   bot.callbackQuery('ob:sb:yes', (ctx) => obSbHasAccount(ctx, true));
   bot.callbackQuery('ob:sb:no', (ctx) => obSbHasAccount(ctx, false));
+  bot.callbackQuery('ob:dmcrypto', (ctx) => obDepView(ctx, 'crypto'));
+  bot.callbackQuery('ob:dmback', (ctx) => obDepView(ctx, 'main'));
   bot.callbackQuery(/^ob:dm:(.+)$/, (ctx) => obToggleDepMethod(ctx, ctx.match![1]!));
   bot.callbackQuery('ob:dmdone', (ctx) => obDepMethodsDone(ctx));
   bot.callbackQuery(/^ob:wm:(.+)$/, (ctx) => obPickWithdrawMethod(ctx, ctx.match![1]!));

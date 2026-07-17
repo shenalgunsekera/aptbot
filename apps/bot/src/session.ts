@@ -39,7 +39,8 @@ export type Step =
 export interface OnboardingPlan {
   platforms: string[];        // platform ids the player chose
   sbHasAccount?: boolean;     // answered the "already have APT Sports?" question
-  depSel?: string[];          // deposit method ids toggled so far
+  depSel?: string[];          // deposit method ids toggled so far (real ids, incl. coins)
+  depView?: 'main' | 'crypto';// which screen of the deposit-method picker is showing
   // When set, we're editing one thing from a slash command, not first-run setup,
   // so the "Done" handlers save-and-stop instead of walking the whole sequence.
   mode?: 'methods' | 'payout' | 'addplatform';

@@ -167,39 +167,62 @@ export async function advance(ctx: Ctx, playerId: string): Promise<void> {
 
 // ─── Prompts (multi-select ones) ─────────────────────────────────────────────
 
-async function askPlatforms(ctx: Ctx): Promise<void> {
-  ctx.session.step = { name: 'ob:platforms' };
-  const sql = db();
-  const platforms = await sql<Platform[]>`select * from platforms where enabled order by sort_order`;
+async function platformKb(ctx: Ctx): Promise<InlineKeyboard> {
+  const platforms = await db()<Platform[]>`select * from platforms where enabled order by sort_order`;
   const sel = ctx.session.ob?.platforms ?? [];
   const kb = new InlineKeyboard();
   for (const pf of platforms) {
-    const on = sel.includes(pf.id);
-    kb.text(`${on ? '☑️' : '⬜'} ${pf.name}`, `ob:pf:${pf.id}`).row();
+    kb.text(`${sel.includes(pf.id) ? '✅' : '⬜'} ${pf.name}`, `ob:pf:${pf.id}`).row();
   }
-  if (sel.length) kb.text('✅ Done', 'ob:pfdone');
+  if (sel.length) kb.text('➡️ Done', 'ob:pfdone');
+  return kb;
+}
+
+async function askPlatforms(ctx: Ctx): Promise<void> {
+  ctx.session.step = { name: 'ob:platforms' };
   await ctx.reply(
-    'Which platform(s) will you be using? Tap to select — you can pick *both*.',
-    { parse_mode: 'Markdown', reply_markup: kb },
+    'Which platform(s) will you be using? Tap to tick — you can pick *both* — then tap Done.',
+    { parse_mode: 'Markdown', reply_markup: await platformKb(ctx) },
   );
+}
+
+const isCoin = (m: PaymentMethod) => m.reversibility === 'irreversible' && m.settlement === 'club';
+
+/** Build the deposit-method picker for whichever screen is showing. Crypto coins
+ *  live behind one "Crypto" button that opens a second screen of coin checkboxes,
+ *  so the top level stays short. Everything edits the same message in place. */
+async function depKb(ctx: Ctx): Promise<{ text: string; kb: InlineKeyboard }> {
+  const methods = await db()<PaymentMethod[]>`select * from payment_methods where enabled order by sort_order, name`;
+  const coins = methods.filter(isCoin);
+  const fiat = methods.filter((m) => !isCoin(m));
+  const sel = ctx.session.ob?.depSel ?? [];
+  const kb = new InlineKeyboard();
+
+  if (ctx.session.ob?.depView === 'crypto') {
+    for (const c of coins) kb.text(`${sel.includes(c.id) ? '✅' : '⬜'} ${c.name}`, `ob:dm:${c.id}`).row();
+    kb.text('‹ Back', 'ob:dmback');
+    return { text: 'Tap the coins you want to use, then Back.', kb };
+  }
+
+  for (const f of fiat) kb.text(`${sel.includes(f.id) ? '✅' : '⬜'} ${f.name}`, `ob:dm:${f.id}`).row();
+  if (coins.length) {
+    const n = coins.filter((c) => sel.includes(c.id)).length;
+    kb.text(`🪙 Crypto${n ? ` — ${n} chosen` : ''} ›`, 'ob:dmcrypto').row();
+  }
+  if (sel.length) kb.text('➡️ Done', 'ob:dmdone');
+  return {
+    text: 'Which methods do you want to use to *add money*? Tap all that apply, then Done. ' +
+      "We'll only show you these later.",
+    kb,
+  };
 }
 
 async function askDepositMethods(ctx: Ctx): Promise<void> {
   ctx.session.step = { name: 'ob:dep_methods' };
   if (!ctx.session.ob) ctx.session.ob = { platforms: [] };
-  const methods = await depositMethodChoices();
-  const sel = ctx.session.ob.depSel ?? [];
-  const kb = new InlineKeyboard();
-  for (const m of methods) {
-    const on = sel.includes(m.id);
-    kb.text(`${on ? '☑️' : '⬜'} ${m.label}`, `ob:dm:${m.id}`).row();
-  }
-  if (sel.length) kb.text('✅ Done', 'ob:dmdone');
-  await ctx.reply(
-    'Which payment methods do you want to use to *add money*? Pick all that apply — ' +
-      "later we'll only show you these.",
-    { parse_mode: 'Markdown', reply_markup: kb },
-  );
+  ctx.session.ob.depView = 'main';
+  const { text, kb } = await depKb(ctx);
+  await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: kb });
 }
 
 async function askWithdrawMethod(ctx: Ctx): Promise<void> {
@@ -211,23 +234,6 @@ async function askWithdrawMethod(ctx: Ctx): Promise<void> {
     'Last thing — how do you want to *get paid* when you cash out? Pick one.',
     { parse_mode: 'Markdown', reply_markup: kb },
   );
-}
-
-/**
- * Deposit-method choices with crypto collapsed into one "Crypto" entry. Returns
- * synthetic rows: a crypto row whose id is the literal string 'crypto' expands
- * later, real methods carry their uuid.
- */
-async function depositMethodChoices(): Promise<{ id: string; label: string }[]> {
-  const methods = await db()<PaymentMethod[]>`select * from payment_methods where enabled order by sort_order, name`;
-  const out: { id: string; label: string }[] = [];
-  let hasCrypto = false;
-  for (const m of methods) {
-    if (m.reversibility === 'irreversible' && m.settlement === 'club') { hasCrypto = true; continue; }
-    out.push({ id: m.id, label: m.name });
-  }
-  if (hasCrypto) out.unshift({ id: 'crypto', label: '🪙 Crypto (all coins)' });
-  return out;
 }
 
 // ─── Text answers ────────────────────────────────────────────────────────────
@@ -332,7 +338,8 @@ export async function obTogglePlatform(ctx: Ctx, platformId: string): Promise<vo
   const i = sel.indexOf(platformId);
   if (i >= 0) sel.splice(i, 1); else sel.push(platformId);
   await ctx.answerCallbackQuery();
-  await askPlatforms(ctx);   // re-render with the new ticks
+  // Update the ticks IN PLACE — no new message per tap.
+  try { await ctx.editMessageReplyMarkup({ reply_markup: await platformKb(ctx) }); } catch { /* unchanged */ }
 }
 
 export async function obPlatformsDone(ctx: Ctx): Promise<void> {
@@ -342,6 +349,7 @@ export async function obPlatformsDone(ctx: Ctx): Promise<void> {
     return void (await ctx.answerCallbackQuery({ text: 'Pick at least one platform.' }));
   }
   await ctx.answerCallbackQuery();
+  try { await ctx.editMessageReplyMarkup(); } catch { /* buttons already gone */ }
   await advance(ctx, p.id);
 }
 
@@ -360,7 +368,16 @@ export async function obToggleDepMethod(ctx: Ctx, methodId: string): Promise<voi
   const i = sel.indexOf(methodId);
   if (i >= 0) sel.splice(i, 1); else sel.push(methodId);
   await ctx.answerCallbackQuery();
-  await askDepositMethods(ctx);
+  try { await ctx.editMessageReplyMarkup({ reply_markup: (await depKb(ctx)).kb }); } catch { /* unchanged */ }
+}
+
+/** Switch between the main method list and the crypto-coins screen, in place. */
+export async function obDepView(ctx: Ctx, view: 'main' | 'crypto'): Promise<void> {
+  if (!ctx.session.ob) ctx.session.ob = { platforms: [] };
+  ctx.session.ob.depView = view;
+  await ctx.answerCallbackQuery();
+  const { text, kb } = await depKb(ctx);
+  try { await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: kb }); } catch { /* unchanged */ }
 }
 
 export async function obDepMethodsDone(ctx: Ctx): Promise<void> {
@@ -369,18 +386,11 @@ export async function obDepMethodsDone(ctx: Ctx): Promise<void> {
   const sel = ctx.session.ob?.depSel ?? [];
   if (!sel.length) return void (await ctx.answerCallbackQuery({ text: 'Pick at least one.' }));
 
-  // Expand the synthetic 'crypto' choice into every crypto method id.
+  // depSel already holds real method ids (coins are ticked individually now).
   const sql = db();
-  const ids = new Set<string>();
-  for (const id of sel) {
-    if (id === 'crypto') {
-      const coins = await sql<{ id: string }[]>`
-        select id from payment_methods where enabled and reversibility='irreversible' and settlement='club'`;
-      for (const c of coins) ids.add(c.id);
-    } else ids.add(id);
-  }
-  await sql`select prefs_set_deposit_methods(${p.id}::uuid, ${sql.array([...ids])}::uuid[])`;
+  await sql`select prefs_set_deposit_methods(${p.id}::uuid, ${sql.array(sel)}::uuid[])`;
   await ctx.answerCallbackQuery();
+  try { await ctx.editMessageReplyMarkup(); } catch { /* buttons already gone */ }
   if (ctx.session.ob?.mode === 'methods') {
     ctx.session.ob = undefined;
     ctx.session.step = { name: 'idle' };
