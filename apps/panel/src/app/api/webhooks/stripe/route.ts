@@ -4,10 +4,18 @@ import { recordDetection } from '../../../../lib/detect';
 /**
  * Stripe webhook — covers card AND Apple Pay (both settle through Stripe).
  *
- * On a successful charge we tell the admins the money landed; we do NOT release
- * anything. Set STRIPE_WEBHOOK_SECRET in Vercel and point a Stripe webhook at
- * https://<host>/api/webhooks/stripe for events charge.succeeded and
- * payment_intent.succeeded.
+ * On a successful charge we tell the admins the money landed; we do NOT release.
+ *
+ * Keys (Vercel):
+ *   STRIPE_WEBHOOK_SECRET  (whsec_…) — REQUIRED. This is the webhook *signing
+ *     secret*, not an API key; it's what proves an event really came from Stripe.
+ *   STRIPE_API_KEY  (rk_live_… RESTRICTED key, or sk_…) — OPTIONAL. If set, we
+ *     re-fetch the event from Stripe as an extra authenticity check and use its
+ *     authoritative amount. A restricted key with "Events: Read" is enough — no
+ *     secret key needed.
+ *
+ * Point a Stripe webhook at https://<host>/api/webhooks/stripe for events
+ * charge.succeeded and payment_intent.succeeded.
  */
 export const dynamic = 'force-dynamic';
 
@@ -23,6 +31,22 @@ export async function POST(req: Request): Promise<Response> {
 
   let event: any;
   try { event = JSON.parse(body); } catch { return new Response('bad json', { status: 400 }); }
+
+  // Optional belt-and-braces: with a restricted key, pull the event straight from
+  // Stripe so a forged/replayed body can't get through even if the signing secret
+  // ever leaked. Uses the authoritative amount from Stripe's own record.
+  const apiKey = process.env.STRIPE_API_KEY;
+  if (apiKey) {
+    try {
+      const res = await fetch(`https://api.stripe.com/v1/events/${event.id}`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      if (!res.ok) return new Response('could not confirm event', { status: 400 });
+      event = await res.json();
+    } catch {
+      return new Response('event confirm failed', { status: 400 });
+    }
+  }
 
   if (event.type === 'charge.succeeded' || event.type === 'payment_intent.succeeded') {
     const obj = event.data?.object ?? {};
