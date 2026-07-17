@@ -151,6 +151,34 @@ export async function sbCreated(ctx: Ctx, playerId: string): Promise<void> {
   await ctx.editMessageText(`✅ *Sportsbook account created* · by ${ctx.from?.first_name ?? 'admin'}`, { parse_mode: 'Markdown' });
 }
 
+/** Admin taps "Credit" on a Stripe receipt → ask for the amount that was paid. */
+export async function stripeCreditPrompt(ctx: Ctx, claimId: string): Promise<void> {
+  const admin = await adminFor(ctx);
+  if (!admin) return void (await ctx.answerCallbackQuery({ text: 'Admins only.', show_alert: true }));
+  await ctx.answerCallbackQuery();
+  (ctx.session as any)._stripeClaim = claimId;
+  await ctx.reply(
+    `Reply to THIS message with the amount that was paid (e.g. \`50\` or \`23.50\`) for Stripe receipt \`${claimId.slice(0, 8)}\`.`,
+    { parse_mode: 'Markdown', reply_markup: { force_reply: true } },
+  );
+}
+
+/** The admin's reply with the amount → credit the player through the normal path. */
+export async function stripeCreditConfirm(ctx: Ctx, claimId: string, amountText: string): Promise<void> {
+  const admin = await adminFor(ctx);
+  if (!admin) return;
+  const n = parseFloat(amountText.trim());
+  if (!Number.isFinite(n) || n <= 0) return void (await ctx.reply('Send just the amount, e.g. `50`.', { parse_mode: 'Markdown' }));
+  const cents = Math.round(n * 100);
+  try {
+    await db()`select stripe_claim_credit(${claimId}::uuid, ${admin.id}::uuid, ${cents}::bigint)`;
+  } catch (err) {
+    if (isUserError(err)) return void (await ctx.reply(`❌ ${userMessage(err)}`));
+    throw err;
+  }
+  await ctx.reply(`✅ Credited *${money(cents)}*. The player has been told and their table is being loaded.`, { parse_mode: 'Markdown' });
+}
+
 /** Verify a fill (release money) from the group. */
 export async function fillVerify(ctx: Ctx, fillId: string): Promise<void> {
   const admin = await adminFor(ctx);

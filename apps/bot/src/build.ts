@@ -13,7 +13,8 @@ import {
 } from './commands/onboarding.js';
 import { sbCreated } from './admin-actions.js';
 import {
-  addStart, addPickPlatform, addPickCrypto, addMethodBack, addAmount, addPickMethod, addReceipt, addDone,
+  addStart, addPickPlatform, addPickCrypto, addMethodBack, addAmount, addPickMethod,
+  addReceipt, addDone, stripeReceipt,
 } from './commands/add.js';
 import {
   cashoutStart, cashoutPickPlatform, cashoutAmount, cashoutPickMethod,
@@ -23,7 +24,10 @@ import { disputeReason } from './commands/confirm.js';
 import { payments } from './commands/payments.js';
 import { supportStart, relayInquiryToAdmins, maybeRelayAdminReply } from './commands/support.js';
 import { setAdmin, approvePlayer } from './admin-mgmt.js';
-import { loaderClaim, loaderDone, loaderShort, loaderFail, fillVerify, withdrawPayPrompt, withdrawPayConfirm } from './admin-actions.js';
+import {
+  loaderClaim, loaderDone, loaderShort, loaderFail, fillVerify, withdrawPayPrompt, withdrawPayConfirm,
+  stripeCreditPrompt, stripeCreditConfirm,
+} from './admin-actions.js';
 import { pgSessionStorage } from './session-store.js';
 
 /**
@@ -172,12 +176,12 @@ export function buildBot(token: string): Bot<Ctx> {
   bot.callbackQuery(/^add:m:(.+)$/, async (ctx) => {
     const s = ctx.session.step;
     if (s.name !== 'add:method') return void (await ctx.answerCallbackQuery({ text: 'That expired — /add again.' }));
-    await addPickMethod(ctx, s.platformId, s.amount, ctx.match![1]!, false);
+    await addPickMethod(ctx, s.platformId, ctx.match![1]!, false);
   });
   bot.callbackQuery(/^add:msave:(.+)$/, async (ctx) => {
     const s = ctx.session.step;
     if (s.name !== 'add:method') return void (await ctx.answerCallbackQuery({ text: 'That expired — /add again.' }));
-    await addPickMethod(ctx, s.platformId, s.amount, ctx.match![1]!, true);
+    await addPickMethod(ctx, s.platformId, ctx.match![1]!, true);
   });
   bot.callbackQuery(/^add:mremember:/, async (ctx) => {
     await ctx.answerCallbackQuery({ text: "Okay, I'll ask each time." });
@@ -225,6 +229,7 @@ export function buildBot(token: string): Bot<Ctx> {
   bot.callbackQuery(/^pl:approve:(.+)$/, (ctx) => approvePlayer(ctx, ctx.match![1]!));
   bot.callbackQuery(/^wd:pay:(.+)$/, (ctx) => withdrawPayPrompt(ctx, ctx.match![1]!));
   bot.callbackQuery(/^sb:made:(.+)$/, (ctx) => sbCreated(ctx, ctx.match![1]!));
+  bot.callbackQuery(/^st:credit:(.+)$/, (ctx) => stripeCreditPrompt(ctx, ctx.match![1]!));
   bot.callbackQuery('noop', (ctx) => ctx.answerCallbackQuery({ text: 'Open the panel for full details.' }));
   
   // ─── Loader "different amount" reply in the admin group ──────────────────────
@@ -248,6 +253,14 @@ export function buildBot(token: string): Bot<Ctx> {
     if (payId && /Reply to THIS message with the transaction ID/.test(replyText)) {
       (ctx.session as any)._payWithdraw = undefined;
       await withdrawPayConfirm(ctx, payId, ctx.message.text.trim());
+      return;
+    }
+
+    // Admin entering the amount for a Stripe receipt they're crediting.
+    const claimId = (ctx.session as any)._stripeClaim as string | undefined;
+    if (claimId && /Reply to THIS message with the amount that was paid/.test(replyText)) {
+      (ctx.session as any)._stripeClaim = undefined;
+      await stripeCreditConfirm(ctx, claimId, ctx.message.text.trim());
       return;
     }
 
@@ -284,7 +297,7 @@ export function buildBot(token: string): Bot<Ctx> {
       case 'ob:sb_wait':
         return void (await ctx.reply("We're still setting up your Sportsbook account — you'll get a message here the moment it's ready. 🙏"));
       // Money flows
-      case 'add:amount': return void (await addAmount(ctx, step.platformId, text));
+      case 'add:amount': return void (await addAmount(ctx, step.platformId, step.methodId, text));
       case 'out:amount': return void (await cashoutAmount(ctx, step.platformId, text));
       case 'out:handle': return void (await cashoutHandle(ctx, step.platformId, step.amount, step.methodId, text));
       case 'dispute:reason': return void (await disputeReason(ctx, step.fillId, text));
@@ -300,6 +313,7 @@ export function buildBot(token: string): Bot<Ctx> {
     const step = ctx.session.step;
   
     if (step.name === 'add:receipt') return void (await addReceipt(ctx, step.fillId));
+    if (step.name === 'add:stripe') return void (await stripeReceipt(ctx, step.platformId));
   
     // A screenshot attached to an open dispute.
     const sql = db();

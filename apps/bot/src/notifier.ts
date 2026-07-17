@@ -266,10 +266,17 @@ export function renderNotification(n: Notification): Rendered | null {
               `\n\n_Auto-detected. Check the receipt card above, then Verify & release._`,
           }
         : {
-            text: `⚠️ *Payment received with no matching request*\n${m(p.amount, p.currency)} via ${p.method}` +
+            text: `💳 *Payment received* — ${m(p.amount, p.currency)} via ${p.method}` +
               (p.ref ? `\nRef: \`${p.ref}\`` : '') +
-              `\n\n_Nobody has an open request for this amount — check the panel._`,
+              `\n\n_Match it to the player's receipt, then credit them._`,
           };
+    case 'stripe.claim':
+      return {
+        photo: p.file_id || p.url,
+        text: `🍎 *Card / Apple Pay receipt — from ${p.name ?? 'a player'}*\n\n` +
+          `They paid on the Stripe link. Check the amount from the "Payment received" alert, then tap Credit.`,
+        keyboard: new InlineKeyboard().text('💵 Credit', `st:credit:${p.claim_id}`),
+      };
     case 'sportsbook.create':
       return {
         text: `🆕 *Create a Sportsbook account*\n\nFor: *${p.name}*\n` +
