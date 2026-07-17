@@ -17,58 +17,58 @@ const sql = connect({ max: 1 });
 //
 const methods = [
   // ── Crypto — irreversible, peer-to-peer ──
-  { code: 'usdt_trc20', name: 'USDT (TRC-20)', currency: 'USD',
+  { code: 'usdt_trc20', name: '₮ USDT (TRC-20)', currency: 'USD',
     reversibility: 'irreversible', settlement: 'club',
     club_handle: 'TCa6pw8PGp7X8WtVGhA24yupHPfnjcm531',
     handle_hint: 'your USDT TRC-20 address (starts with T)',
     handle_pattern: '^T[A-Za-z0-9]{33}$', min_amount: 1000, sort_order: 1 },
 
-  { code: 'usdt_erc20', name: 'USDT/USDC (ERC-20)', currency: 'USD',
+  { code: 'usdt_erc20', name: '₮ USDT (ERC-20)', currency: 'USD',
     reversibility: 'irreversible', settlement: 'club',
     club_handle: '0x2f26912DA941a7CdF7585eF67c1Dbdef0f019b20',
     handle_hint: 'your ERC-20 address (starts with 0x)',
     handle_pattern: '^0x[a-fA-F0-9]{40}$', min_amount: 2000, sort_order: 2 },
 
-  { code: 'usdc_base', name: 'USDC (Base)', currency: 'USD',
+  { code: 'usdc_base', name: '＄ USDC (Base)', currency: 'USD',
     reversibility: 'irreversible', settlement: 'club',
     club_handle: '0x20A32Cf623752bedA87744d00f26D7940C217970',
     handle_hint: 'your Base address (starts with 0x)',
     handle_pattern: '^0x[a-fA-F0-9]{40}$', min_amount: 1000, sort_order: 3 },
 
-  { code: 'btc', name: 'Bitcoin', currency: 'USD',
+  { code: 'btc', name: '₿ BTC', currency: 'USD',
     reversibility: 'irreversible', settlement: 'club',
     club_handle: 'bc1q3wmkvmfwdpj06se9qq6sjv7ppnn4pzq7ttmrsm',
     handle_hint: 'your BTC address', min_amount: 2000, sort_order: 4 },
 
-  { code: 'eth', name: 'Ethereum', currency: 'USD',
+  { code: 'eth', name: 'Ξ ETH', currency: 'USD',
     reversibility: 'irreversible', settlement: 'club',
     club_handle: '0x2f26912DA941a7CdF7585eF67c1Dbdef0f019b20',
     handle_hint: 'your ETH address (starts with 0x)',
     handle_pattern: '^0x[a-fA-F0-9]{40}$', min_amount: 2000, sort_order: 5 },
 
-  { code: 'ltc', name: 'Litecoin', currency: 'USD',
+  { code: 'ltc', name: 'Ł LTC', currency: 'USD',
     reversibility: 'irreversible', settlement: 'club',
     club_handle: 'ltc1q6qf6q36ceecdajaql3jjtv7j0u900ak9z6s43j',
     handle_hint: 'your LTC address', min_amount: 1000, sort_order: 6 },
 
-  { code: 'sol', name: 'Solana', currency: 'USD',
+  { code: 'sol', name: '◎ SOL', currency: 'USD',
     reversibility: 'irreversible', settlement: 'club',
     club_handle: 'Djw27e3keT24AZ6fgWwMyMCYobacHk9fuwxPyHyq8k2a',
     handle_hint: 'your SOL address', min_amount: 1000, sort_order: 7 },
 
-  { code: 'xrp', name: 'XRP', currency: 'USD',
+  { code: 'xrp', name: '✕ XRP', currency: 'USD',
     reversibility: 'irreversible', settlement: 'club',
     club_handle: 'rNohTzcnJRVzBNDMKU3WM722cVwp2JwMYQ',
     handle_hint: 'your XRP address (and destination tag if any)', min_amount: 1000, sort_order: 8 },
 
   // ── Reversible — CLUB MEDIATED. Set club_handle in the panel before enabling. ──
-  { code: 'paypal', name: 'PayPal', currency: 'USD',
+  { code: 'paypal', name: '🅿️ PayPal', currency: 'USD',
     reversibility: 'reversible', settlement: 'club',
     club_handle: null, enabled: false,   // enable once the receiving account is set
     handle_hint: 'your PayPal email or @username',
     processor_fee_bps: 349, processor_fee_flat: 49, min_amount: 500, sort_order: 20 },
 
-  { code: 'cashapp', name: 'Cash App', currency: 'USD',
+  { code: 'cashapp', name: '💵 Cash App', currency: 'USD',
     reversibility: 'reversible', settlement: 'club',
     club_handle: null, enabled: false,
     handle_hint: 'your $cashtag', min_amount: 500, sort_order: 21 },
