@@ -29,13 +29,14 @@ export async function payments(ctx: Ctx): Promise<void> {
   const outs = await sql<any[]>`select * from player_payments(${p.id}::uuid) limit 25`;
   const deps = await sql<any[]>`select * from player_deposits(${p.id}::uuid) limit 25`;
 
+  // Only show payments that actually went through — never cancelled/expired ones.
   const outOngoing = outs.filter((w) => ONGOING_WD.has(w.status));
-  const outDone = outs.filter((w) => !ONGOING_WD.has(w.status)).slice(0, 3);
+  const outDone = outs.filter((w) => w.status === 'completed').slice(0, 3);
   const depOngoing = deps.filter((d) => ONGOING_DEP.has(d.status));
-  const depDone = deps.filter((d) => !ONGOING_DEP.has(d.status)).slice(0, 3);
+  const depDone = deps.filter((d) => d.status === 'completed').slice(0, 3);
 
   if (!outs.length && !deps.length) {
-    await ctx.reply("You haven't added or cashed out any money yet. Use /add or /cashout to start.");
+    await ctx.reply("You haven't added or cashed out any money yet. Use /deposit or /withdraw to start.");
     return;
   }
 
@@ -57,9 +58,15 @@ export async function payments(ctx: Ctx): Promise<void> {
   }
 
   if (!lines.length) {
-    // Everything is old/done beyond the recent window — still let them see it.
-    lines.push('*Your recent payments*\n');
-    for (const w of outs.slice(0, 5)) lines.push(renderCashout(w, true));
+    // Everything is old/done beyond the recent window — still let them see the
+    // completed ones (never cancelled).
+    const done = outs.filter((w) => w.status === 'completed').slice(0, 5);
+    if (done.length) {
+      lines.push('*Your recent payments*\n');
+      for (const w of done) lines.push(renderCashout(w, true));
+    } else {
+      lines.push('No completed payments yet.');
+    }
   }
 
   const full = lines.join('\n').trim();
@@ -70,7 +77,8 @@ export async function payments(ctx: Ctx): Promise<void> {
   // Then send the actual receipt IMAGES, so the player sees them — not just
   // links. One photo per payment that has a receipt, with a short caption.
   const seen = new Set<string>();
-  for (const w of outs) {
+  const showable = outs.filter((w) => ONGOING_WD.has(w.status) || w.status === 'completed');
+  for (const w of showable) {
     for (const pay of (w.payments ?? []) as any[]) {
       if (!pay.receipt || seen.has(pay.receipt)) continue;
       seen.add(pay.receipt);

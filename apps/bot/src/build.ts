@@ -89,16 +89,16 @@ export function buildBot(token: string): Bot<Ctx> {
   });
   bot.command('help', (ctx) =>
     ctx.reply(
-      `💵 /add — add money\n💸 /cashout — cash out\n📋 /me — your account\n` +
-        `📄 /payments — your payments & receipts\n` +
+      `💵 /deposit — add money\n💸 /withdraw — cash out\n⏳ /pending — your pending cash-outs\n` +
+        `📄 /payments — your completed payments & receipts\n` +
         `➕ /addplatform · 💳 /methods · 🏦 /payout — update your setup\n` +
         `💬 /support — message our team\n/cancel — stop what you're doing`,
     ),
   );
-  
-  bot.command(['add', 'deposit'], dmOnly(addStart));
-  bot.command(['cashout', 'withdraw'], dmOnly(cashoutStart));
-  bot.command('me', dmOnly(me));
+
+  bot.command(['deposit', 'add'], dmOnly(addStart));
+  bot.command(['withdraw', 'cashout'], dmOnly(cashoutStart));
+  bot.command(['pending', 'me'], dmOnly(me));
   bot.command(['payments', 'history', 'receipts'], dmOnly(payments));
   bot.command(['support', 'help_me', 'contact'], dmOnly(supportStart));
 
@@ -323,8 +323,9 @@ export function buildBot(token: string): Bot<Ctx> {
       case 'out:handle': return void (await cashoutHandle(ctx, step.platformId, step.amount, step.methodId, text));
       case 'dispute:reason': return void (await disputeReason(ctx, step.fillId, text));
       default:
-        // Anything else is treated as a question for the team.
-        await relayInquiryToAdmins(ctx, text);
+        // Stray text when not in a flow: do NOT auto-relay every message (that
+        // floods the ticket + bot chat). Players reach the team with /support.
+        return;
     }
   });
   

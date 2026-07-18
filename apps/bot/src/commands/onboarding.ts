@@ -547,7 +547,7 @@ async function finish(ctx: Ctx, playerId: string): Promise<void> {
       `Join our official Telegram channel to stay updated with promotions, announcements, and news:\n` +
       `${CHANNEL_URL}\n\n` +
       `We look forward to having you as part of the community!\n\n` +
-      `When you're ready:\n💵 /add — add money\n💸 /cashout — cash out\n📋 /me — your account`,
+      `When you're ready:\n💵 /deposit — add money\n💸 /withdraw — cash out\n📋 /pending — your account`,
     { parse_mode: 'Markdown', link_preview_options: { is_disabled: true } },
   );
 }

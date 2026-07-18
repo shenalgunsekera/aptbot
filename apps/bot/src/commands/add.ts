@@ -5,12 +5,12 @@ import {
 } from '@union/core';
 import type { Ctx } from '../session.js';
 import { requireActive } from '../player.js';
-import { money, whole, parseAmount, amountProblem, receiptInstruction } from '../words.js';
+import { money, whole, parseAmount, amountProblem, receiptInstruction, receiptCount } from '../words.js';
 import { resolvePlatform, platformKeyboard } from '../prefs.js';
 import { ask, clearQuestion } from '../ask.js';
 
 /**
- * /add — add money. (deposit)
+ * /deposit — add money. (deposit)
  *
  * Flow: platform → method → amount → match → pay → prove. Method comes before
  * amount so Stripe (a fixed payment link where the player types their own amount)
@@ -149,7 +149,7 @@ async function addProceed(ctx: Ctx, platformId: string, method: PaymentMethod): 
 /** The "Crypto ›" button → show the coins on the SAME message. */
 export async function addPickCrypto(ctx: Ctx): Promise<void> {
   const s = ctx.session.step;
-  if (s.name !== 'add:method') return void (await ctx.answerCallbackQuery({ text: 'That expired — /add again.' }));
+  if (s.name !== 'add:method') return void (await ctx.answerCallbackQuery({ text: 'That expired — /deposit again.' }));
   const p = await requireActive(ctx);
   if (!p) return;
   const coins = (await preferredDepositMethods(p.id)).filter(isCrypto);
@@ -254,8 +254,6 @@ async function runMatch(ctx: Ctx, platformId: string, amount: number, methodId: 
   await ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' });
 }
 
-const MAX_RECEIPTS = 2;
-
 /** Player sent a receipt photo. Upload it, submit proof on the first, allow a
  *  second, then finish. No transaction ID anywhere. */
 export async function addReceipt(ctx: Ctx, fillId: string): Promise<void> {
@@ -302,9 +300,8 @@ export async function addReceipt(ctx: Ctx, fillId: string): Promise<void> {
     return;
   }
 
-  // First receipt for this deposit → submit proof for every locked slice
-  // (p_notify=false: we send the receipt album to admins ourselves when the
-  // player is finished, so the DB shouldn't also alert).
+  // Submit proof for every locked slice on the first receipt (p_notify=false — we
+  // send the album ourselves once all needed images are in).
   const locked = await sql<{ id: string }[]>`
     select id from fills where deposit_id = ${f!.deposit_id} and status = 'locked' order by seq`;
   if (locked.length) {
@@ -316,12 +313,16 @@ export async function addReceipt(ctx: Ctx, fillId: string): Promise<void> {
     }
   }
 
-  // Allow a second image, then send BOTH to admins as one album. We don't notify
-  // per image — that's what created two separate messages before.
+  // Auto-finalize once we have the images the method needs — no /done to tap.
+  const [meth] = await sql<{ code: string }[]>`
+    select pm.code from fills fl join payment_methods pm on pm.id = fl.method_id where fl.id = ${fillId}`;
+  const needed = receiptCount(meth?.code ?? '');
   const [rc] = await sql<{ n: number }[]>`
     select count(*)::int n from receipts where ref_type='fill' and ref_id=${fillId}`;
-  if ((rc?.n ?? 1) < MAX_RECEIPTS) {
-    await ctx.reply('✅ Receipt saved. Send *one more* image if you have it, or tap /done.', { parse_mode: 'Markdown' });
+  const have = rc?.n ?? 1;
+
+  if (have < needed) {
+    await ctx.reply(`✅ Got it. Now send the *other* image (the transaction ID).`, { parse_mode: 'Markdown' });
     return;
   }
   await sendReceiptsToReviewer(fillId);
@@ -440,6 +441,6 @@ async function sendReceiptsToReviewer(fillId: string): Promise<void> {
 function finishedMessage(): string {
   return (
     `✅ *All set!*\n\nWe'll check your payment and add your money. ` +
-    `You'll get a message here the moment it's done. Check anytime with /me.`
+    `You'll get a message here the moment it's done. Check anytime with /pending.`
   );
 }

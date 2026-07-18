@@ -39,10 +39,10 @@ export async function start(ctx: Ctx): Promise<void> {
       : '';
     await ctx.reply(
       `You're all set${p.display_name ? ', ' + p.display_name : ''} — you already have an account.${acctLines}\n\n` +
-        `💵 /add — add money\n` +
-        `💸 /cashout — cash out\n` +
+        `💵 /deposit — add money\n` +
+        `💸 /withdraw — cash out\n` +
         `📄 /payments — your payments & receipts\n` +
-        `📋 /me — your account\n` +
+        `📋 /pending — your account\n` +
         `➕ /addplatform · 💳 /methods · 🏦 /payout — update your setup\n` +
         `💬 /support — message our team`,
     );
@@ -64,7 +64,7 @@ export async function start(ctx: Ctx): Promise<void> {
 }
 
 /**
- * /me — the player's account. NO available balance: that number does not exist.
+ * /pending — the player's account. NO available balance: that number does not exist.
  * Only what is actually in motion.
  */
 export async function me(ctx: Ctx): Promise<void> {

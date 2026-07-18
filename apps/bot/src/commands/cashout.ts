@@ -5,12 +5,12 @@ import {
 } from '@union/core';
 import type { Ctx } from '../session.js';
 import { requireActive } from '../player.js';
-import { money, whole, parseAmount, amountProblem, shortHandle, withdrawHandlePrompt } from '../words.js';
+import { money, whole, parseAmount, amountProblem, shortHandle, withdrawHandlePrompt, cashoutConfirm } from '../words.js';
 import { resolvePlatform, resolveMethod, platformKeyboard, methodKeyboard } from '../prefs.js';
 import { ask, clearQuestion } from '../ask.js';
 
 /**
- * /cashout — cash out. (withdraw)
+ * /withdraw — cash out. (withdraw)
  *
  * Flow: platform → amount → method → where to get paid → queue.
  * No available-balance check anywhere: we don't know what's on the tables. The
@@ -233,18 +233,9 @@ export async function cashoutHandle(
   ctx.session.step = { name: 'idle' };
   await clearQuestion(ctx);
 
-  // PayPal cash-outs work by the player REQUESTING money from our PayPal, so the
-  // instruction is different from methods where we send to their handle.
   const amt = money(w.requested_amount, w.currency);
-  const body = m?.code === 'paypal'
-    ? `✅ *Cash out started!*\n\nTo get your *${amt}*, open PayPal and send a *money request* to ` +
-      `\`${m.club_handle ?? 'our PayPal'}\` (tap to copy) for *${amt}*. We'll approve and pay it.\n\n` +
-      `We're taking it off your table now — you'll get a message here at each step.\n\n` +
-      `Changed your mind? You can cancel it from /me while it's still waiting.`
-    : `✅ *Cash out started!*\n\nWe're getting *${amt}* ready to send to \`${w.payout_handle}\`.\n\n` +
-      `We'll take that off your table and then pay you — you'll get a message here at each step. ` +
-      `Sometimes it comes in a few pieces from different people; that's normal, and we track every part.\n\n` +
-      `Changed your mind? You can cancel it from /me while it's still waiting.`;
+  const body = cashoutConfirm(m?.code ?? '', m?.name ?? 'payment', w.payout_handle, amt, m?.club_handle) +
+    `\n\nChanged your mind? You can cancel it from /pending while it's still waiting.`;
   await ctx.reply(
     body,
     { parse_mode: 'Markdown' },

@@ -209,14 +209,14 @@ export function renderNotification(n: Notification): Rendered | null {
     case 'value.taken':
       return { text: `📤 *${m(-Number(p.delta), p.currency)} taken off your table.*` };
     case 'player.linked':
-      return { text: `🎉 *You're all set!*\n\nYour ${p.platform} account (${p.uid}) is confirmed. Use /add to add money or /cashout to cash out.` };
+      return { text: `🎉 *You're all set!*\n\nYour ${p.platform} account (${p.uid}) is confirmed. Use /deposit to add money or /withdraw to cash out.` };
     case 'player.status_changed':
       return { text: p.status === 'active' ? `✅ Your account is active again.` : `Your account is now *${p.status}*.` + (p.reason ? `\n\n${p.reason}` : '') };
     case 'dispute.resolved':
       return { text: `⚖️ *Your case is resolved.*\n\n` +
         (p.resolution === 'release_to_depositor' ? 'The payment checked out. It has been released.'
           : p.resolution === 'refund_to_payee' ? 'We couldn\'t confirm the payment, so your cash out is back in the queue.'
-          : 'We split it between both sides.') + `\n\n/me for details.` };
+          : 'We split it between both sides.') + `\n\n/pending for details.` };
 
     // ── Admin group ──
     case 'loader.work': {
