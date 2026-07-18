@@ -75,6 +75,7 @@ const GROUP_COMMANDS = [
   ...PLAYER_COMMANDS,
   { command: 'setadmingroup', description: 'Make this the admin group (admins only)' },
   { command: 'setadmin', description: 'Add an admin (owner only)' },
+  { command: 'p2p', description: 'Venmo/Zelle backstop handle (admins)' },
 ];
 // Same core commands everywhere — the bot works right in the group, no private chat.
 await bot.api.setMyCommands(PLAYER_COMMANDS, { scope: { type: 'default' } });

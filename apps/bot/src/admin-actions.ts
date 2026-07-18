@@ -193,6 +193,63 @@ export async function stripeCreditConfirm(ctx: Ctx, claimId: string, amountText:
   await ctx.reply(`✅ Credited *${money(cents)}*. The player has been told and their table is being loaded.`, { parse_mode: 'Markdown' });
 }
 
+/** /p2p — admins manage the Venmo/Zelle backstop handle (the one shown to a
+ *  depositor when nobody is queued), or switch to "wait for a withdrawal" mode. */
+export async function p2pStatus(ctx: Ctx): Promise<void> {
+  const admin = await adminFor(ctx);
+  if (!admin) return void (await ctx.reply('Admins only.'));
+  const sql = db();
+  const methods = await sql<{ code: string; name: string; club_handle: string | null; backstop_handle: string | null }[]>`
+    select code, name, club_handle, backstop_handle from payment_methods where code in ('venmo', 'zelle') order by name`;
+  const kb = new InlineKeyboard();
+  const lines = ['*P2P backstop*\n', 'When *on*, a depositor with no match pays your handle directly.',
+    'When *off*, they\'re told to wait until someone requests a cash out.\n'];
+  for (const m of methods) {
+    const on = !!m.club_handle;
+    lines.push(`*${m.name}*: ${on ? 'ON → `' + m.club_handle + '`' : 'OFF (wait mode)'}`);
+    kb.text(`✏️ ${m.name} handle`, `p2p:set:${m.code}`);
+    if (on) kb.text(`⏸ ${m.name} wait mode`, `p2p:wait:${m.code}`).row();
+    else if (m.backstop_handle) kb.text(`▶️ ${m.name} on (${m.backstop_handle})`, `p2p:on:${m.code}`).row();
+    else kb.row();
+  }
+  await ctx.reply(lines.join('\n'), { parse_mode: 'Markdown', reply_markup: kb });
+}
+
+export async function p2pWait(ctx: Ctx, code: string): Promise<void> {
+  const admin = await adminFor(ctx);
+  if (!admin) return void (await ctx.answerCallbackQuery({ text: 'Admins only.', show_alert: true }));
+  await db()`select p2p_set_backstop(${code}, ${''}, ${admin.id}::uuid)`;
+  await ctx.answerCallbackQuery({ text: 'Now in wait mode.' });
+  await ctx.editMessageText(`⏸ *${code}* is now in *wait mode* — depositors are told to wait for a cash-out request.`, { parse_mode: 'Markdown' });
+}
+
+export async function p2pOn(ctx: Ctx, code: string): Promise<void> {
+  const admin = await adminFor(ctx);
+  if (!admin) return void (await ctx.answerCallbackQuery({ text: 'Admins only.', show_alert: true }));
+  const sql = db();
+  const [m] = await sql<{ backstop_handle: string | null }[]>`select backstop_handle from payment_methods where code = ${code}`;
+  if (!m?.backstop_handle) return void (await ctx.answerCallbackQuery({ text: 'No saved handle — set one first.', show_alert: true }));
+  await sql`select p2p_set_backstop(${code}, ${m.backstop_handle}, ${admin.id}::uuid)`;
+  await ctx.answerCallbackQuery({ text: 'Direct deposits on.' });
+  await ctx.editMessageText(`▶️ *${code}* is on — depositors can pay \`${m.backstop_handle}\` directly.`, { parse_mode: 'Markdown' });
+}
+
+export async function p2pSetPrompt(ctx: Ctx, code: string): Promise<void> {
+  const admin = await adminFor(ctx);
+  if (!admin) return void (await ctx.answerCallbackQuery({ text: 'Admins only.', show_alert: true }));
+  await ctx.answerCallbackQuery();
+  (ctx.session as any)._p2pSet = code;
+  await ctx.reply(`Reply to THIS message with the ${code} handle depositors should pay (e.g. \`@yourhandle\`).`,
+    { parse_mode: 'Markdown', reply_markup: { force_reply: true } });
+}
+
+export async function p2pSetConfirm(ctx: Ctx, code: string, handle: string): Promise<void> {
+  const admin = await adminFor(ctx);
+  if (!admin) return;
+  await db()`select p2p_set_backstop(${code}, ${handle.trim()}, ${admin.id}::uuid)`;
+  await ctx.reply(`✅ ${code} depositors will now pay \`${handle.trim()}\` when nobody's queued.`, { parse_mode: 'Markdown' });
+}
+
 /** Verify a fill (release money) from the group. */
 export async function fillVerify(ctx: Ctx, fillId: string): Promise<void> {
   const admin = await adminFor(ctx);

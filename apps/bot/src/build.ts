@@ -27,6 +27,7 @@ import { setAdmin, approvePlayer } from './admin-mgmt.js';
 import {
   loaderClaim, loaderDone, loaderShort, loaderFail, fillVerify, withdrawPayPrompt, withdrawPayConfirm,
   stripeCreditPrompt, stripeCreditConfirm, stripeCreditOk,
+  p2pStatus, p2pWait, p2pOn, p2pSetPrompt, p2pSetConfirm,
 } from './admin-actions.js';
 import { pgSessionStorage } from './session-store.js';
 
@@ -122,6 +123,9 @@ export function buildBot(token: string): Bot<Ctx> {
 
   // Owner adds admins by tagging them. Works in the group or a DM.
   bot.command('setadmin', setAdmin);
+
+  // Admins manage the Venmo/Zelle backstop handle (or switch to wait mode).
+  bot.command('p2p', p2pStatus);
 
   // ─── Only admins may add the bot to a group ──────────────────────────────────
   // When the bot is added somewhere, check who added it. If they are not an
@@ -229,6 +233,9 @@ export function buildBot(token: string): Bot<Ctx> {
   bot.callbackQuery(/^pl:approve:(.+)$/, (ctx) => approvePlayer(ctx, ctx.match![1]!));
   bot.callbackQuery(/^wd:pay:(.+)$/, (ctx) => withdrawPayPrompt(ctx, ctx.match![1]!));
   bot.callbackQuery(/^sb:made:(.+)$/, (ctx) => sbCreated(ctx, ctx.match![1]!));
+  bot.callbackQuery(/^p2p:set:(.+)$/, (ctx) => p2pSetPrompt(ctx, ctx.match![1]!));
+  bot.callbackQuery(/^p2p:wait:(.+)$/, (ctx) => p2pWait(ctx, ctx.match![1]!));
+  bot.callbackQuery(/^p2p:on:(.+)$/, (ctx) => p2pOn(ctx, ctx.match![1]!));
   bot.callbackQuery(/^st:ok:(.+)$/, (ctx) => stripeCreditOk(ctx, ctx.match![1]!));
   bot.callbackQuery(/^st:credit:(.+)$/, (ctx) => stripeCreditPrompt(ctx, ctx.match![1]!));
   bot.callbackQuery('noop', (ctx) => ctx.answerCallbackQuery({ text: 'Open the panel for full details.' }));
@@ -262,6 +269,14 @@ export function buildBot(token: string): Bot<Ctx> {
     if (claimId && /Reply to THIS message with the amount that was paid/.test(replyText)) {
       (ctx.session as any)._stripeClaim = undefined;
       await stripeCreditConfirm(ctx, claimId, ctx.message.text.trim());
+      return;
+    }
+
+    // Admin setting a Venmo/Zelle backstop handle.
+    const p2pCode = (ctx.session as any)._p2pSet as string | undefined;
+    if (p2pCode && /Reply to THIS message with the .* handle/.test(replyText)) {
+      (ctx.session as any)._p2pSet = undefined;
+      await p2pSetConfirm(ctx, p2pCode, ctx.message.text.trim());
       return;
     }
 
