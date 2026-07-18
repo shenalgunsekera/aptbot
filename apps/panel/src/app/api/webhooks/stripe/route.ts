@@ -48,26 +48,24 @@ export async function POST(req: Request): Promise<Response> {
     }
   }
 
-  // Our own Checkout links carry the fill id — match that exact request.
+  // ONE signal per payment: only checkout.session.completed. Stripe also fires
+  // charge.succeeded and payment_intent.succeeded for the same payment — handling
+  // those too would notify 3× per payment, so we ignore them. Dedup on the
+  // payment_intent (stable across retries), NOT the event id, so a retried or
+  // duplicated delivery can never post twice.
   if (event.type === 'checkout.session.completed') {
     const s = event.data?.object ?? {};
-    const fillId = s.metadata?.fill_id;
     const amount = Number(s.amount_total ?? 0);
-    if (fillId && amount > 0 && s.payment_status === 'paid') {
+    if (s.payment_status === 'paid' && amount > 0) {
+      const fillId = s.metadata?.fill_id;
       await recordDetection({
-        source: 'stripe', externalId: String(event.id), methodCode: 'stripe',
-        amount, currency: String(s.currency ?? 'usd').toUpperCase(), fillId, raw: { session: s.id },
-      });
-    }
-  } else if (event.type === 'charge.succeeded' || event.type === 'payment_intent.succeeded') {
-    // Fallback for any Stripe payment made outside our Checkout flow.
-    const obj = event.data?.object ?? {};
-    const amount = Number(obj.amount_received ?? obj.amount ?? 0);   // already in cents
-    const currency = String(obj.currency ?? 'usd').toUpperCase();
-    if (amount > 0) {
-      await recordDetection({
-        source: 'stripe', externalId: String(event.id), methodCode: 'stripe',
-        amount, currency, raw: { type: event.type, id: obj.id },
+        source: 'stripe',
+        externalId: `pay:${s.payment_intent ?? s.id}`,
+        methodCode: 'stripe',
+        amount,
+        currency: String(s.currency ?? 'usd').toUpperCase(),
+        ...(fillId ? { fillId } : {}),
+        raw: { session: s.id },
       });
     }
   }
