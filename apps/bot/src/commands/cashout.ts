@@ -238,7 +238,7 @@ export async function cashoutHandle(
   const amt = money(w.requested_amount, w.currency);
   const body = m?.code === 'paypal'
     ? `✅ *Cash out started!*\n\nTo get your *${amt}*, open PayPal and send a *money request* to ` +
-      `*${m.club_handle ?? 'our PayPal'}* for *${amt}*. We'll approve and pay it.\n\n` +
+      `\`${m.club_handle ?? 'our PayPal'}\` (tap to copy) for *${amt}*. We'll approve and pay it.\n\n` +
       `We're taking it off your table now — you'll get a message here at each step.\n\n` +
       `Changed your mind? You can cancel it from /me while it's still waiting.`
     : `✅ *Cash out started!*\n\nWe're getting *${amt}* ready to send to \`${w.payout_handle}\`.\n\n` +
