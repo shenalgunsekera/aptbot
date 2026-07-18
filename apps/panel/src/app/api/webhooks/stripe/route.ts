@@ -58,6 +58,7 @@ export async function POST(req: Request): Promise<Response> {
     const amount = Number(s.amount_total ?? 0);
     if (s.payment_status === 'paid' && amount > 0) {
       const fillId = s.metadata?.fill_id;
+      const payerName = s.customer_details?.name ?? null;   // Stripe billing name
       await recordDetection({
         source: 'stripe',
         externalId: `pay:${s.payment_intent ?? s.id}`,
@@ -65,7 +66,7 @@ export async function POST(req: Request): Promise<Response> {
         amount,
         currency: String(s.currency ?? 'usd').toUpperCase(),
         ...(fillId ? { fillId } : {}),
-        raw: { session: s.id },
+        raw: { session: s.id, name: payerName, email: s.customer_details?.email ?? null },
       });
     }
   }

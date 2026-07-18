@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { upsertMethod, deleteMethod } from '../../lib/actions';
 
 export function MethodsEditor({ methods }: { methods: any[] }) {
@@ -96,6 +97,7 @@ function DeleteMethodButton({ id, name }: { id: string; name: string }) {
 function MethodForm({ method }: { method: any | null }) {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
+  const router = useRouter();
 
   return (
     <form
@@ -117,6 +119,7 @@ function MethodForm({ method }: { method: any | null }) {
         start(async () => {
           const r = await upsertMethod(patch);
           setMsg(r.ok ? { ok: true, text: r.message ?? 'Saved.' } : { ok: false, text: r.error });
+          if (r.ok) router.refresh();   // pull the freshly-saved values back in
         });
       }}
     >

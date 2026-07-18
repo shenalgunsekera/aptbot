@@ -214,12 +214,10 @@ async function runMatch(ctx: Ctx, platformId: string, amount: number, methodId: 
   const sql = db();
 
   let fills: Fill[];
-  let cfg: { match_timeout_seconds: number };
   try {
     const [d] = await sql<{ id: string }[]>`
       select id from deposit_create(${p.id}::uuid, ${platformId}::uuid, ${methodId}::uuid, ${amount}::bigint)`;
     fills = await sql<Fill[]>`select * from fills where deposit_id = ${d.id} order by seq`;
-    [cfg] = await sql<{ match_timeout_seconds: number }[]>`select match_timeout_seconds from config where id`;
   } catch (err) {
     ctx.session.step = { name: 'idle' };
     if (isUserError(err)) return void (await ctx.reply(`❌ ${userMessage(err)}`));
@@ -229,8 +227,9 @@ async function runMatch(ctx: Ctx, platformId: string, amount: number, methodId: 
   }
 
   const [m] = await sql<PaymentMethod[]>`select * from payment_methods where id = ${methodId}`;
-  const mins = Math.round(cfg.match_timeout_seconds / 60);
-  const lines: string[] = [`*💸 Send your payment now — you have ${mins} minutes*\n`];
+  // We SAY 5 minutes to keep it snappy; the slice actually holds ~25 min (config
+  // match_timeout) so a slightly slow payer never fails.
+  const lines: string[] = [`*💸 Send your payment now — you have 5 minutes*\n`];
 
   if (fills.length > 1) {
     lines.push(`Your ${money(amount)} is split across *${fills.length} people*. Pay *each* separately:\n`);

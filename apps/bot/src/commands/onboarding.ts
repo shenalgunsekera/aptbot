@@ -370,10 +370,8 @@ export async function obWdHandle(ctx: Ctx, methodId: string, text: string): Prom
     try { ok = new RegExp(m.handle_pattern).test(text.trim()); } catch { ok = true; }
     if (!ok) return void (await ctx.reply(`That doesn't look right for ${m.name}. Send it again.`));
   }
-  // First method chosen becomes the default; every one gets its handle saved.
-  const [pref] = await sql<{ mid: string | null }[]>`
-    select default_withdraw_method_id as mid from player_prefs where player_id = ${p.id}`;
-  if (!pref?.mid) await sql`select prefs_set_withdraw_method(${p.id}::uuid, ${methodId}::uuid)`;
+  // Default method is set in obWdMethodsDone (first chosen). Here we just save the
+  // destination for this method.
   await sql`select payout_handle_remember(${p.id}::uuid, ${methodId}::uuid, ${text.trim()})`;
   await ctx.reply(`✅ Saved your *${m?.name}* — \`${text.trim()}\`.`, { parse_mode: 'Markdown' });
 
@@ -486,7 +484,9 @@ export async function obWdMethodsDone(ctx: Ctx): Promise<void> {
   if (!sel.length) return void (await ctx.answerCallbackQuery({ text: 'Pick at least one.' }));
   await ctx.answerCallbackQuery();
   try { await ctx.editMessageReplyMarkup(); } catch { /* buttons already gone */ }
-  // Now collect a destination for each chosen method, one at a time.
+  // The first chosen method becomes the default we use at cash-out — OVERWRITE
+  // any previous one (this is how /payout changes it). Handles are collected next.
+  await db()`select prefs_set_withdraw_method(${p.id}::uuid, ${sel[0]!}::uuid)`;
   if (ctx.session.ob) ctx.session.ob.wdQueue = [...sel];
   await askNextWdHandle(ctx);
 }

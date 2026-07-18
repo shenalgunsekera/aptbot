@@ -14,7 +14,7 @@ import { recordDetection } from './detect';
  * Everything is env-gated; with nothing configured it does nothing.
  */
 
-const TOL = Number(process.env.CRYPTO_TOLERANCE_BPS ?? 300);   // ±3%
+const TOL = Number(process.env.CRYPTO_TOLERANCE_BPS ?? 500);   // ±5%
 const cents = (coinAmount: number, priceUsd: number) => Math.round(coinAmount * priceUsd * 100);
 
 // ─── Stablecoins — exact match (no price needed) ─────────────────────────────

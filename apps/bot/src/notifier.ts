@@ -267,7 +267,7 @@ export function renderNotification(n: Notification): Rendered | null {
           }
         : {
             text: `💳 *Payment received* — ${m(p.amount, p.currency)} via ${p.method}` +
-              (p.ref ? `\nRef: \`${p.ref}\`` : '') +
+              (p.name ? `\nFrom: *${p.name}*` : '') +
               `\n\n_Match it to the player's receipt, then credit them._`,
           };
     case 'stripe.claim':
