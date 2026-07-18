@@ -18,7 +18,7 @@ import {
 } from './commands/add.js';
 import {
   cashoutStart, cashoutPickPlatform, cashoutAmount, cashoutPickMethod,
-  cashoutSavedHandle, cashoutHandle, cashoutRetract,
+  cashoutSavedHandle, cashoutSavedMethod, cashoutHandle, cashoutRetract,
 } from './commands/cashout.js';
 import { disputeReason } from './commands/confirm.js';
 import { payments } from './commands/payments.js';
@@ -215,6 +215,11 @@ export function buildBot(token: string): Bot<Ctx> {
     await ctx.answerCallbackQuery({ text: "Okay, I'll ask each time." });
     const p = await currentPlayer(ctx);
     if (p) await db()`select prefs_set_method(${p.id}::uuid, null)`;
+  });
+  bot.callbackQuery(/^out:sm:(.+)$/, async (ctx) => {
+    const s = ctx.session.step;
+    if (s.name !== 'out:method') return void (await ctx.answerCallbackQuery({ text: 'That expired — /cashout again.' }));
+    await cashoutSavedMethod(ctx, ctx.match![1]!, s.platformId, s.amount);
   });
   bot.callbackQuery(/^wd:retract:(.+)$/, (ctx) => cashoutRetract(ctx, ctx.match![1]!));
   bot.callbackQuery(/^out:h:(.+)$/, async (ctx) => {

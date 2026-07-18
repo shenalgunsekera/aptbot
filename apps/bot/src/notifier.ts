@@ -284,6 +284,11 @@ export function renderNotification(n: Notification): Rendered | null {
               `We haven't matched a payment amount yet. Check the "Payment received" alert, then enter the amount.`,
             keyboard: new InlineKeyboard().text('💵 Credit (enter amount)', `st:credit:${p.claim_id}`),
           };
+    case 'withdraw.retracted':
+      return {
+        text: `↩️ *Cash out cancelled by ${p.name ?? 'a player'}*\n\n` +
+          `*${m(p.amount, p.currency)}* had already come off their table — *re-load it* to reimburse them.`,
+      };
     case 'sportsbook.create':
       return {
         text: `🆕 *Create a Sportsbook account*\n\nFor: *${p.name}*\n` +

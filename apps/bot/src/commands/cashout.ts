@@ -78,16 +78,24 @@ export async function cashoutAmount(ctx: Ctx, platformId: string, text: string):
     return;
   }
 
-  // Onboarding stored a preferred cash-out method AND where to send it, so we
-  // don't ask again — straight to creating the request.
-  const [pref] = await sql0<{ mid: string | null; handle: string | null }[]>`
-    select pr.default_withdraw_method_id as mid,
-           (select h.handle from payout_handles h
-             where h.player_id = ${p.id} and h.method_id = pr.default_withdraw_method_id
-             order by h.last_used_at desc nulls last, h.created_at desc limit 1) as handle
-      from player_prefs pr where pr.player_id = ${p.id}`;
-  if (pref?.mid && pref.handle) {
-    await cashoutHandle(ctx, platformId, amount, pref.mid, pref.handle);
+  // The methods the player has already saved a destination for. One → use it;
+  // several → let them PICK which; none → fall through to the normal chooser.
+  const saved = await sql0<{ id: string; name: string; handle: string }[]>`
+    select distinct on (m.id) m.id, m.name,
+           first_value(h.handle) over (partition by m.id order by h.last_used_at desc nulls last, h.created_at desc) as handle
+      from payout_handles h
+      join payment_methods m on m.id = h.method_id
+     where h.player_id = ${p.id} and m.enabled and m.payout_enabled
+     order by m.id`;
+  if (saved.length === 1) {
+    await cashoutHandle(ctx, platformId, amount, saved[0]!.id, saved[0]!.handle);
+    return;
+  }
+  if (saved.length > 1) {
+    ctx.session.step = { name: 'out:method', platformId, amount };
+    const kb = new InlineKeyboard();
+    for (const s of saved) kb.text(s.name, `out:sm:${s.id}`).row();
+    await ask(ctx, `Cashing out *${whole(amount)}* — which method?`, { parse_mode: 'Markdown', reply_markup: kb });
     return;
   }
 
@@ -106,6 +114,24 @@ export async function cashoutAmount(ctx: Ctx, platformId: string, text: string):
     return;
   }
   await askHandle(ctx, platformId, amount, method.pick);
+}
+
+/** Player picked one of their SAVED cash-out methods → use its saved handle. */
+export async function cashoutSavedMethod(ctx: Ctx, methodId: string, platformId: string, amount: number): Promise<void> {
+  const p = await requireActive(ctx);
+  if (!p) return;
+  const sql = db();
+  const [h] = await sql<{ handle: string }[]>`
+    select handle from payout_handles where player_id = ${p.id} and method_id = ${methodId}
+     order by last_used_at desc nulls last, created_at desc limit 1`;
+  await ctx.answerCallbackQuery();
+  try { await ctx.editMessageReplyMarkup(); } catch { /* buttons already gone */ }
+  if (!h) {
+    const [m] = await sql<PaymentMethod[]>`select * from payment_methods where id = ${methodId}`;
+    if (m) await askHandle(ctx, platformId, amount, m);   // no saved handle → ask for one
+    return;
+  }
+  await cashoutHandle(ctx, platformId, amount, methodId, h.handle);
 }
 
 export async function cashoutPickMethod(
@@ -253,6 +279,14 @@ export async function cashoutRetract(ctx: Ctx, withdrawId: string): Promise<void
     throw err;
   }
 
+  // If money had already come off the player's table, an admin has to re-load it.
+  // (pending_unload = nothing was taken yet, so no reimbursement needed.)
+  if (w.status !== 'pending_unload' && returned > 0) {
+    await sql`select notify_admins('withdraw.retracted', 'withdraw_request', ${withdrawId}::uuid, ${sql.json({
+      name: p.display_name, amount: returned, currency: w.currency,
+    })}::jsonb)`;
+  }
+
   await ctx.answerCallbackQuery({ text: 'Cash out cancelled.' });
   if (w.status !== 'pending_unload' && assigned > 0) {
     await ctx.reply(
@@ -261,6 +295,6 @@ export async function cashoutRetract(ctx: Ctx, withdrawId: string): Promise<void
       { parse_mode: 'Markdown' },
     );
   } else {
-    await ctx.reply(`✅ Cancelled — nothing was taken from your account.`, { parse_mode: 'Markdown' });
+    await ctx.reply(`✅ Cancelled. If any amount was taken from your account, it will be reimbursed.`, { parse_mode: 'Markdown' });
   }
 }
