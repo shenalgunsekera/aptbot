@@ -50,7 +50,7 @@ export async function detectPaypalEmails(): Promise<number> {
           methodCode: 'paypal',
           amount: parsed.amount,
           currency: parsed.currency,
-          raw: { subject: mail.subject },
+          raw: { subject: mail.subject, name: parsed.name },
         });
         count++;
       }
@@ -63,9 +63,9 @@ export async function detectPaypalEmails(): Promise<number> {
   return count;
 }
 
-/** Pull an incoming-payment amount out of a PayPal email. Returns null if it's
- *  not a "money received" email or we can't find an amount. */
-function parsePaypal(subject: string, text: string): { amount: number; currency: string } | null {
+/** Pull the amount AND who sent it out of a PayPal "you've got money" email.
+ *  Returns null if it's not a money-received email or we can't find an amount. */
+function parsePaypal(subject: string, text: string): { amount: number; currency: string; name: string | null } | null {
   const hay = `${subject}\n${text}`;
   // Must read like money coming IN…
   if (!/(sent you|you'?ve got money|you got money|you received|received \$)/i.test(hay)) return null;
@@ -75,5 +75,13 @@ function parsePaypal(subject: string, text: string): { amount: number; currency:
   const m = hay.match(/\$\s?([\d,]+\.\d{2})/) ?? hay.match(/([\d,]+\.\d{2})\s?USD/i);
   if (!m) return null;
   const amount = Math.round(parseFloat(m[1]!.replace(/,/g, '')) * 100);
-  return amount > 0 ? { amount, currency: 'USD' } : null;
+  if (amount <= 0) return null;
+
+  // Who sent it: "Bob Smith sent you …" or "… received $X from Bob Smith".
+  const nm = subject.match(/^([A-Za-z][\w .'-]{1,40}?)\s+sent you/i)
+    ?? hay.match(/([A-Za-z][\w .'-]{1,40}?)\s+sent you/i)
+    ?? hay.match(/from\s+([A-Za-z][\w .'-]{1,40})/i);
+  const name = nm ? nm[1]!.trim() : null;
+
+  return { amount, currency: 'USD', name };
 }
