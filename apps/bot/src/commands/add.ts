@@ -245,7 +245,6 @@ async function runMatch(ctx: Ctx, platformId: string, amount: number, methodId: 
     lines.push('');
   }
   lines.push(`Once you've sent it, *send ${receiptInstruction(m!.code)}* here so we can confirm it.`);
-  lines.push('_You can send up to two images._');
 
   // The receipt IS the proof now. Collect it (up to two), submitting proof on the
   // first one. Every locked slice of this deposit is proven together.
@@ -328,6 +327,19 @@ export async function addReceipt(ctx: Ctx, fillId: string): Promise<void> {
   await sendReceiptsToReviewer(fillId);
   ctx.session.step = { name: 'idle' };
   await ctx.reply(finishedMessage());
+}
+
+/** /canceldeposit — drop the player's latest un-paid deposit. */
+export async function cancelDeposit(ctx: Ctx): Promise<void> {
+  const p = await requireActive(ctx);
+  if (!p) return;
+  const [d] = await db()<{ id: string }[]>`select id from deposit_cancel_latest(${p.id}::uuid)`;
+  ctx.session.step = { name: 'idle' };
+  if (!d?.id) {
+    await ctx.reply("You don't have a deposit to cancel. (If you already sent a receipt, it's being checked — /support if you need help.)");
+    return;
+  }
+  await ctx.reply('✅ Your deposit was cancelled. If you already sent the money, contact us with /support and we\'ll sort it out.');
 }
 
 /** Player sent a receipt for a Stripe (fixed-link) payment. Store it and alert

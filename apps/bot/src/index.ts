@@ -59,10 +59,11 @@ process.once('SIGTERM', () => void shutdown('SIGTERM'));
 
 const PLAYER_COMMANDS = [
   { command: 'start', description: 'Set up your account' },
-  { command: 'add', description: 'Add money' },
-  { command: 'cashout', description: 'Cash out' },
-  { command: 'me', description: 'Your account & receipts' },
-  { command: 'payments', description: 'Your payments & receipts' },
+  { command: 'deposit', description: 'Add money' },
+  { command: 'canceldeposit', description: 'Cancel your latest unpaid deposit' },
+  { command: 'withdraw', description: 'Cash out' },
+  { command: 'pending', description: 'Your pending cash-outs' },
+  { command: 'payments', description: 'Completed payments & receipts' },
   { command: 'addplatform', description: 'Add ClubGG or Sportsbook' },
   { command: 'methods', description: 'Change your payment methods' },
   { command: 'payout', description: 'Change how you get paid' },

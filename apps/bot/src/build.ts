@@ -14,7 +14,7 @@ import {
 import { sbCreated } from './admin-actions.js';
 import {
   addStart, addPickPlatform, addPickCrypto, addMethodBack, addAmount, addPickMethod,
-  addReceipt, addDone, stripeReceipt,
+  addReceipt, addDone, stripeReceipt, cancelDeposit,
 } from './commands/add.js';
 import {
   cashoutStart, cashoutPickPlatform, cashoutAmount, cashoutPickMethod,
@@ -91,12 +91,14 @@ export function buildBot(token: string): Bot<Ctx> {
     ctx.reply(
       `💵 /deposit — add money\n💸 /withdraw — cash out\n⏳ /pending — your pending cash-outs\n` +
         `📄 /payments — your completed payments & receipts\n` +
+        `✖️ /canceldeposit — cancel your latest unpaid deposit\n` +
         `➕ /addplatform · 💳 /methods · 🏦 /payout — update your setup\n` +
         `💬 /support — message our team\n/cancel — stop what you're doing`,
     ),
   );
 
   bot.command(['deposit', 'add'], dmOnly(addStart));
+  bot.command('canceldeposit', dmOnly(cancelDeposit));
   bot.command(['withdraw', 'cashout'], dmOnly(cashoutStart));
   bot.command(['pending', 'me'], dmOnly(me));
   bot.command(['payments', 'history', 'receipts'], dmOnly(payments));

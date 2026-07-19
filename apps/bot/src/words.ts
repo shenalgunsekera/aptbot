@@ -83,10 +83,9 @@ export function withdrawHandlePrompt(code: string, name: string, clubHandle?: st
   }
 }
 
-/** How many receipt images a method needs. PayPal wants two (the receipt AND the
- *  transaction-ID screen); everything else is one. */
-export function receiptCount(code: string): number {
-  return code === 'paypal' ? 2 : 1;
+/** How many receipt images a method needs. All are one image. */
+export function receiptCount(_code: string): number {
+  return 1;
 }
 
 /** What proof to send for a deposit, worded per method. This is what we need to
@@ -94,7 +93,7 @@ export function receiptCount(code: string): number {
 export function receiptInstruction(code: string): string {
   switch (code) {
     case 'venmo':  return 'a screenshot showing the *amount* and the *transaction ID*';
-    case 'paypal': return '*two* images — (1) your receipt showing the *amount sent*, and (2) the *transaction ID*';
+    case 'paypal': return 'an image showing your receipt and the *transaction ID*';
     case 'zelle':  return 'a screenshot of your receipt showing the *amount sent*';
     case 'cashapp':return 'a screenshot of your receipt showing the *amount sent*';
     default:       return 'a screenshot of your receipt showing the *amount sent*';   // crypto
