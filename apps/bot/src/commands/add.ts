@@ -227,9 +227,11 @@ async function runMatch(ctx: Ctx, platformId: string, amount: number, methodId: 
   }
 
   const [m] = await sql<PaymentMethod[]>`select * from payment_methods where id = ${methodId}`;
-  // We SAY 5 minutes to keep it snappy; the slice actually holds ~25 min (config
-  // match_timeout) so a slightly slow payer never fails.
-  const lines: string[] = [`*💸 Send your payment now — you have 5 minutes*\n`];
+  // Crypto takes time to send + confirm, so give it a realistic 30-min window.
+  // Fiat/P2P says 5 min for urgency (the slice actually holds ~25 min, and club
+  // deposits hold 24h, so a slightly slow payer never fails either way).
+  const windowMins = m && isCrypto(m) ? 30 : 5;
+  const lines: string[] = [`*💸 Send your payment now — you have ${windowMins} minutes*\n`];
 
   if (fills.length > 1) {
     lines.push(`Your ${money(amount)} is split across *${fills.length} people*. Pay *each* separately:\n`);
