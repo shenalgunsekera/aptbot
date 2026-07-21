@@ -256,20 +256,23 @@ export function renderNotification(n: Notification): Rendered | null {
       };
     case 'player.needs_club':
       return { text: `📍 *${p.name}* (${p.platform} ${p.uid}) is approved but not assigned to a club yet.` };
-    case 'payment.detected':
+    case 'payment.detected': {
+      // Icon per source: PayPal 💚, Stripe (card/Apple Pay) 💳, crypto 🪙.
+      const icon = p.source === 'paypal' ? '💚' : p.source === 'stripe' ? '💳' : '🪙';
       return p.matched
         ? {
-            text: `💚 *Payment received — ${p.approx ? '≈ ' : ''}${m(p.amount, p.currency)} via ${p.method}*` +
+            text: `${icon} *Payment received — ${p.approx ? '≈ ' : ''}${m(p.amount, p.currency)} via ${p.method}*` +
               (p.name ? `\nFrom: *${p.name}*` : '') +
               (p.ref ? `\nRef: \`${p.ref}\`` : '') +
               (p.approx ? `\n_(matched by live price — confirm the exact amount)_` : '') +
               `\n\n_Auto-detected. Check the receipt card above, then Verify & release._`,
           }
         : {
-            text: `💚 *Payment received* — ${m(p.amount, p.currency)} via ${p.method}` +
+            text: `${icon} *Payment received* — ${m(p.amount, p.currency)} via ${p.method}` +
               (p.name ? `\nFrom: *${p.name}*` : '') +
               `\n\n_Match it to the player's receipt, then credit them._`,
           };
+    }
     case 'stripe.claim':
       return p.amount
         ? {
