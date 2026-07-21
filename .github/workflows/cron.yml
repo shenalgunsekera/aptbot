@@ -15,27 +15,38 @@ name: sweep
 
 on:
   schedule:
-    # Every 15 minutes. Deliberately not tighter: Neon's free tier auto-suspends
-    # the database after ~5 min idle, and a shorter interval would keep it awake
-    # 24/7 and burn through Neon's free compute hours. At 15 min Neon can sleep
-    # between runs. This only affects how fast an expired deposit lock returns to
-    # the queue (~15 min worst case) — holds (72h) and escalations (24h) don't
-    # care, and player notifications are instant because they drain on the webhook.
-    - cron: '*/15 * * * *'
+    # GitHub fires this every 5 min (its reliable floor); the job then LOOPS,
+    # pinging /api/cron every ~60s, so detection (crypto/PayPal/Stripe fallback)
+    # is near-instant — roughly one minute end-to-end. This repo is public, so the
+    # Actions minutes are free.
+    #
+    # TRADE-OFF: polling this often keeps the Neon database awake ~24/7 instead of
+    # auto-suspending, which uses more of Neon's compute allowance. That's the cost
+    # of near-instant detection. The player's deposit window is unaffected — club
+    # deposits hold 24h — so a slow payer still has plenty of time.
+    - cron: '*/5 * * * *'
   workflow_dispatch: {}       # lets you trigger it by hand from the Actions tab
+
+# Never run two overlapping loops.
+concurrency:
+  group: sweep
+  cancel-in-progress: false
 
 jobs:
   sweep:
     runs-on: ubuntu-latest
+    timeout-minutes: 6
     steps:
-      - name: Hit the sweep endpoint
+      - name: Poll the cron endpoint every ~minute for the 5-min window
         run: |
           if [ -z "${{ secrets.CRON_URL }}" ]; then
             echo "CRON_URL secret not set — skipping"; exit 0
           fi
-          code=$(curl -s -o /tmp/out -w "%{http_code}" \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            "${{ secrets.CRON_URL }}")
-          echo "HTTP $code"; cat /tmp/out
-          # Don't fail the workflow on a transient blip — the next run covers it.
-          [ "$code" = "200" ] || echo "non-200 (will retry next run)"
+          for i in 1 2 3 4 5; do
+            code=$(curl -s -m 70 -o /tmp/out -w "%{http_code}" \
+              -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+              "${{ secrets.CRON_URL }}")
+            echo "[$i] HTTP $code"; cat /tmp/out; echo
+            [ "$i" = "5" ] && break
+            sleep 60
+          done
