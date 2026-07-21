@@ -170,7 +170,18 @@ export async function advance(ctx: Ctx, playerId: string): Promise<void> {
 // ─── Prompts (multi-select ones) ─────────────────────────────────────────────
 
 async function platformKb(ctx: Ctx): Promise<InlineKeyboard> {
-  const platforms = await db()<Platform[]>`select * from platforms where enabled order by sort_order`;
+  let platforms: Platform[] = await db()<Platform[]>`select * from platforms where enabled order by sort_order`;
+  // Adding a platform later: only offer ones the player doesn't already have —
+  // you can't un-link an existing account by unticking it.
+  if (ctx.session.ob?.mode === 'addplatform') {
+    const p = await currentPlayer(ctx);
+    if (p) {
+      const have = await db()<{ platform_id: string }[]>`
+        select platform_id from player_platforms where player_id = ${p.id}`;
+      const haveSet = new Set(have.map((r) => r.platform_id));
+      platforms = platforms.filter((pf) => !haveSet.has(pf.id));
+    }
+  }
   const sel = ctx.session.ob?.platforms ?? [];
   const kb = new InlineKeyboard();
   for (const pf of platforms) {
@@ -527,9 +538,17 @@ export async function updatePayout(ctx: Ctx): Promise<void> {
 export async function addPlatform(ctx: Ctx): Promise<void> {
   const p = await currentPlayer(ctx);
   if (!p || !(await isOnboarded(p.id))) return void (await ctx.reply('Finish setup first with /start.'));
-  const rows = await db()<{ platform_id: string }[]>`
-    select platform_id from player_platforms where player_id = ${p.id}`;
-  ctx.session.ob = { platforms: rows.map((r) => r.platform_id), mode: 'addplatform' };
+  const [all, have] = await Promise.all([
+    db()<{ id: string }[]>`select id from platforms where enabled`,
+    db()<{ platform_id: string }[]>`select platform_id from player_platforms where player_id = ${p.id}`,
+  ]);
+  const haveSet = new Set(have.map((r) => r.platform_id));
+  if (all.every((pf) => haveSet.has(pf.id))) {
+    await ctx.reply('You already have every platform set up. ✅');
+    return;
+  }
+  // Start empty — the picker only shows platforms they don't have yet.
+  ctx.session.ob = { platforms: [], mode: 'addplatform' };
   await askPlatforms(ctx);
 }
 

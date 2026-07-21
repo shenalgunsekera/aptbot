@@ -20,7 +20,9 @@ export const money = (minor: number, currency = 'USD') => {
   const neg = minor < 0;
   const abs = Math.abs(minor);
   const sym = currency === 'USD' ? '$' : currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : currency + ' ';
-  return `${neg ? '-' : ''}${sym}${(abs / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  // Show whole amounts without cents ($50, not $50.00) but keep real cents ($23.50).
+  const num = (abs / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace(/\.00$/, '');
+  return `${neg ? '-' : ''}${sym}${num}`;
 };
 
 /** Parse a typed amount into minor units. Strict: this is on the path where a

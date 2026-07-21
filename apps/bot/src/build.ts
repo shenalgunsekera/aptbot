@@ -19,6 +19,7 @@ import {
 import {
   cashoutStart, cashoutPickPlatform, cashoutAmount, cashoutPickMethod,
   cashoutSavedHandle, cashoutSavedMethod, cashoutHandle, cashoutRetract,
+  cashoutReducePrompt, cashoutReduceConfirm,
 } from './commands/cashout.js';
 import { disputeReason } from './commands/confirm.js';
 import { payments } from './commands/payments.js';
@@ -224,6 +225,7 @@ export function buildBot(token: string): Bot<Ctx> {
     await cashoutSavedMethod(ctx, ctx.match![1]!, s.platformId, s.amount);
   });
   bot.callbackQuery(/^wd:retract:(.+)$/, (ctx) => cashoutRetract(ctx, ctx.match![1]!));
+  bot.callbackQuery(/^wd:reduce:(.+)$/, (ctx) => cashoutReducePrompt(ctx, ctx.match![1]!));
   bot.callbackQuery(/^out:h:(.+)$/, async (ctx) => {
     const s = ctx.session.step;
     if (s.name !== 'out:handle') return void (await ctx.answerCallbackQuery({ text: 'That expired — /cashout again.' }));
@@ -284,6 +286,14 @@ export function buildBot(token: string): Bot<Ctx> {
     if (p2pCode && /Reply to THIS message with the .* handle/.test(replyText)) {
       (ctx.session as any)._p2pSet = undefined;
       await p2pSetConfirm(ctx, p2pCode, ctx.message.text.trim());
+      return;
+    }
+
+    // Player entering how much of a cash out to take back.
+    const reduceWd = (ctx.session as any)._reduceWd as string | undefined;
+    if (reduceWd && /How much of this cash out do you want/.test(replyText)) {
+      (ctx.session as any)._reduceWd = undefined;
+      await cashoutReduceConfirm(ctx, reduceWd, ctx.message.text.trim());
       return;
     }
 

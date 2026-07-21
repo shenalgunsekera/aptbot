@@ -242,6 +242,40 @@ export async function cashoutHandle(
   );
 }
 
+/** Player taps "Take some back" → ask how much to return. */
+export async function cashoutReducePrompt(ctx: Ctx, withdrawId: string): Promise<void> {
+  const p = await requireActive(ctx);
+  if (!p) return;
+  const sql = db();
+  const [w] = await sql<{ amount_remaining: number; currency: string; status: string }[]>`
+    select amount_remaining, currency, status from withdraw_requests where id = ${withdrawId} and player_id = ${p.id}`;
+  if (!w || !['queued', 'partially_filled'].includes(w.status)) {
+    return void (await ctx.answerCallbackQuery({ text: "That can't be changed anymore.", show_alert: true }));
+  }
+  await ctx.answerCallbackQuery();
+  (ctx.session as any)._reduceWd = withdrawId;
+  await ctx.reply(
+    `How much of this cash out do you want *back* on your table? ` +
+      `(up to ${money(w.amount_remaining - 1, w.currency)} — to take it all, use Cancel instead)\n\nJust send the number.`,
+    { parse_mode: 'Markdown', reply_markup: { force_reply: true } },
+  );
+}
+
+/** Player's reply with the amount to take back → lower the request. */
+export async function cashoutReduceConfirm(ctx: Ctx, withdrawId: string, text: string): Promise<void> {
+  const p = await requireActive(ctx);
+  if (!p) return;
+  const amount = parseAmount(text);
+  if (amount === null) return void (await ctx.reply('Send just the number, e.g. `20`.', { parse_mode: 'Markdown' }));
+  try {
+    await db()`select withdraw_reduce(${withdrawId}::uuid, ${amount}::bigint, null)`;
+  } catch (err) {
+    if (isUserError(err)) return void (await ctx.reply(`❌ ${userMessage(err)}`));
+    throw err;
+  }
+  await ctx.reply(`✅ Done — *${money(amount)}* is coming back to your table. The rest is still on its way.`, { parse_mode: 'Markdown' });
+}
+
 /**
  * Player retracts a cash out. Whatever hasn't been handed to someone else yet
  * comes straight back; any part already being paid stays in flight and finishes.

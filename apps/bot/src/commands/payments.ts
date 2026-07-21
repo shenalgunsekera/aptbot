@@ -96,7 +96,7 @@ function renderCashout(w: any, brief = false): string {
   const paid = w.amount_paid ?? 0;
   const out: string[] = [
     `*${money(total)}* via ${w.method} — _${friendlyStatus('withdraw', w.status)}_` +
-      (paid > 0 && paid < total ? `  (${money(paid)} of ${money(total)} paid)` : ''),
+      (paid > 0 && paid < total ? `  (${money(paid)} / ${money(total)} paid)` : ''),
   ];
   const pays = (w.payments ?? []) as any[];
   if (pays.length && !brief) {

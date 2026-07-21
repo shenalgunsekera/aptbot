@@ -107,10 +107,11 @@ export async function me(ctx: Ctx): Promise<void> {
     select amount, currency, status from deposit_requests
      where player_id = ${p.id} and status in ('matching','awaiting_payment','awaiting_confirmation')
      order by created_at`;
-  const outs = await sql<{ id: string; requested_amount: number; amount: number | null; currency: string; status: string }[]>`
-    select id, requested_amount, amount, currency, status from withdraw_requests
-     where player_id = ${p.id} and status in ('pending_unload','queued','partially_filled','filled')
-     order by created_at`;
+  const outs = await sql<{ id: string; requested_amount: number; amount: number | null; currency: string; status: string; method_code: string }[]>`
+    select w.id, w.requested_amount, w.amount, w.currency, w.status, pm.code as method_code
+      from withdraw_requests w join payment_methods pm on pm.id = w.method_id
+     where w.player_id = ${p.id} and w.status in ('pending_unload','queued','partially_filled','filled')
+     order by w.created_at`;
 
   if (deps.length || outs.length) {
     lines.push('*In progress*');
@@ -119,11 +120,18 @@ export async function me(ctx: Ctx): Promise<void> {
     lines.push('');
   }
 
-  // A cash out can be pulled back while it's still waiting (not fully paid).
+  // A cash out can be pulled back while it's still waiting (not fully paid). For
+  // methods where WE send (Venmo/Zelle/crypto) you can also take PART back;
+  // PayPal/Cash App requests can't be lowered, so it's cancel-all only.
   const cancellable = outs.filter((o) => ['pending_unload', 'queued', 'partially_filled'].includes(o.status));
+  const reducible = (code: string) => code !== 'paypal' && code !== 'cashapp';
   const kb = new InlineKeyboard();
   for (const o of cancellable) {
-    kb.text(`✖️ Cancel cash out ${money(o.amount ?? o.requested_amount, o.currency)}`, `wd:retract:${o.id}`).row();
+    kb.text(`✖️ Cancel ${money(o.amount ?? o.requested_amount, o.currency)}`, `wd:retract:${o.id}`);
+    if (reducible(o.method_code) && ['queued', 'partially_filled'].includes(o.status)) {
+      kb.text('➖ Take some back', `wd:reduce:${o.id}`);
+    }
+    kb.row();
   }
 
   await ctx.reply(lines.join('\n'), {

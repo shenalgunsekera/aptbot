@@ -244,7 +244,9 @@ async function runMatch(ctx: Ctx, platformId: string, amount: number, methodId: 
     if (f.withdraw_id !== null) lines.push(`_This is another player's ${m!.name}._`);
     lines.push('');
   }
+  if (m?.code === 'paypal') lines.push('⚠️ *Make sure to send as Friends & Family* (not Goods & Services).\n');
   lines.push(`Once you've sent it, *send ${receiptInstruction(m!.code)}* here so we can confirm it.`);
+  lines.push('_Changed your mind? /canceldeposit before you pay._');
 
   // The receipt IS the proof now. Collect it (up to two), submitting proof on the
   // first one. Every locked slice of this deposit is proven together.

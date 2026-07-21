@@ -266,7 +266,7 @@ export function renderNotification(n: Notification): Rendered | null {
               `\n\n_Auto-detected. Check the receipt card above, then Verify & release._`,
           }
         : {
-            text: `💳 *Payment received* — ${m(p.amount, p.currency)} via ${p.method}` +
+            text: `💚 *Payment received* — ${m(p.amount, p.currency)} via ${p.method}` +
               (p.name ? `\nFrom: *${p.name}*` : '') +
               `\n\n_Match it to the player's receipt, then credit them._`,
           };
@@ -289,6 +289,14 @@ export function renderNotification(n: Notification): Rendered | null {
         text: `↩️ *Cash out cancelled by ${p.name ?? 'a player'}*\n\n` +
           `*${m(p.amount, p.currency)}* had already come off their table — *re-load it* to reimburse them.`,
       };
+    case 'withdraw.reduced':
+      return {
+        text: `➖ *Cash out lowered by ${p.name ?? 'a player'}*\n\n` +
+          `They took *${m(p.amount, p.currency)}* back (now ${m(p.new_total, p.currency)}). ` +
+          `*Re-load ${m(p.amount, p.currency)}* to their table.`,
+      };
+    case 'withdraw.reduced_player':
+      return { text: `➖ *${m(p.back, p.currency)}* is coming back to your table. Your cash out is now *${m(p.new_total, p.currency)}*.` };
     case 'sportsbook.create':
       return {
         text: `🆕 *Create a Sportsbook account*\n\nFor: *${p.name}*\n` +
