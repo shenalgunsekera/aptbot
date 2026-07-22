@@ -68,20 +68,36 @@ export async function drainNotifications(bot: BotT, limit = 25): Promise<number>
 
   const [cfg] = await sql<{ admin_group_chat_id: number | null }[]>`
     select admin_group_chat_id from config where id`;
+  // Atomically LEASE the batch (push send_after out) so this drain and the bot's
+  // webhook drain can't both grab a row and send it twice — `for update skip
+  // locked` alone doesn't prevent that once the SELECT autocommits. See notifier.ts.
   const rows = await sql<any[]>`
-    select n.*, coalesce(p.chat_id, p.telegram_id) as player_chat, a.telegram_id as admin_tg
-      from notifications n
-      left join players p on p.id = n.player_id
-      left join admins a on a.id = n.admin_id
-     where n.status = 'pending' and n.send_after <= now()
-     order by n.id limit ${limit} for update of n skip locked`;
+    with c as (
+      select id from notifications
+       where status = 'pending' and send_after <= now()
+       order by id limit ${limit}
+         for update skip locked
+    )
+    update notifications n set send_after = now() + interval '90 seconds'
+      from c where n.id = c.id
+    returning n.*`;
+  const chats = rows.length
+    ? await sql<{ id: number; player_chat: number | null; admin_tg: number | null }[]>`
+        select n.id, coalesce(p.chat_id, p.telegram_id) as player_chat, a.telegram_id as admin_tg
+          from notifications n
+          left join players p on p.id = n.player_id
+          left join admins a on a.id = n.admin_id
+         where n.id = any(${sql.array(rows.map((r) => Number(r.id)))}::bigint[])`
+    : [];
+  const chatMap = new Map(chats.map((c) => [Number(c.id), c]));
 
   const { sendRendered } = await import('@union/bot/build');
   let sent = 0;
   for (const n of rows) {
+    const cm = chatMap.get(Number(n.id));
     // Player notifications go to the chat the player actually uses (their group),
     // not their DM — see 0020. Admin rows go to the admin group.
-    const chatId = n.audience === 'admins' ? cfg?.admin_group_chat_id : (n.player_chat ?? n.admin_tg);
+    const chatId = n.audience === 'admins' ? cfg?.admin_group_chat_id : (cm?.player_chat ?? cm?.admin_tg);
     const msg = renderNotification(n);
     if (!chatId || !msg) { await sql`update notifications set status='skipped' where id=${n.id}`; continue; }
     try {

@@ -143,7 +143,7 @@ export async function advance(ctx: Ctx, playerId: string): Promise<void> {
   if (plan.mode === 'addplatform') {
     ctx.session.ob = undefined;
     ctx.session.step = { name: 'idle' };
-    await ctx.reply('✅ Added! Our team will confirm the new account shortly, then you can use it.');
+    await ctx.reply('✅ All set — your platforms are updated. Any new account will be confirmed by our team shortly.');
     return;
   }
 
@@ -170,18 +170,7 @@ export async function advance(ctx: Ctx, playerId: string): Promise<void> {
 // ─── Prompts (multi-select ones) ─────────────────────────────────────────────
 
 async function platformKb(ctx: Ctx): Promise<InlineKeyboard> {
-  let platforms: Platform[] = await db()<Platform[]>`select * from platforms where enabled order by sort_order`;
-  // Adding a platform later: only offer ones the player doesn't already have —
-  // you can't un-link an existing account by unticking it.
-  if (ctx.session.ob?.mode === 'addplatform') {
-    const p = await currentPlayer(ctx);
-    if (p) {
-      const have = await db()<{ platform_id: string }[]>`
-        select platform_id from player_platforms where player_id = ${p.id}`;
-      const haveSet = new Set(have.map((r) => r.platform_id));
-      platforms = platforms.filter((pf) => !haveSet.has(pf.id));
-    }
-  }
+  const platforms = await db()<Platform[]>`select * from platforms where enabled order by sort_order`;
   const sel = ctx.session.ob?.platforms ?? [];
   const kb = new InlineKeyboard();
   for (const pf of platforms) {
@@ -412,6 +401,27 @@ export async function obPlatformsDone(ctx: Ctx): Promise<void> {
   await ctx.answerCallbackQuery();
   try { await ctx.editMessageReplyMarkup(); } catch { /* buttons already gone */ }
   const sql = db();
+  // Adding a platform later: un-link any the player un-ticked (had before, not selected now).
+  if (ctx.session.ob.mode === 'addplatform') {
+    const sel = new Set(ctx.session.ob.platforms);
+    const linked = await sql<{ platform_id: string; name: string }[]>`
+      select pp.platform_id, pl.name from player_platforms pp
+        join platforms pl on pl.id = pp.platform_id
+       where pp.player_id = ${p.id}`;
+    const blocked: string[] = [];
+    for (const row of linked) {
+      if (sel.has(row.platform_id)) continue;
+      try {
+        await sql`select player_unlink_platform(${p.id}::uuid, ${row.platform_id}::uuid)`;
+      } catch (e) {
+        blocked.push(`*${row.name}* — ${(e as Error).message.replace(/^.*?:\s*/, '')}`);
+        ctx.session.ob.platforms.push(row.platform_id); // couldn't remove — keep it ticked
+      }
+    }
+    if (blocked.length) {
+      await ctx.reply(`⚠️ Couldn't remove:\n${blocked.join('\n')}`, { parse_mode: 'Markdown' });
+    }
+  }
   const names = await sql<{ name: string }[]>`
     select name from platforms where id = any(${sql.array(ctx.session.ob.platforms)}::uuid[]) order by sort_order`;
   await ctx.reply(`✅ Playing on: *${names.map((n) => n.name).join(', ')}*`, { parse_mode: 'Markdown' });
@@ -538,17 +548,11 @@ export async function updatePayout(ctx: Ctx): Promise<void> {
 export async function addPlatform(ctx: Ctx): Promise<void> {
   const p = await currentPlayer(ctx);
   if (!p || !(await isOnboarded(p.id))) return void (await ctx.reply('Finish setup first with /start.'));
-  const [all, have] = await Promise.all([
-    db()<{ id: string }[]>`select id from platforms where enabled`,
-    db()<{ platform_id: string }[]>`select platform_id from player_platforms where player_id = ${p.id}`,
-  ]);
-  const haveSet = new Set(have.map((r) => r.platform_id));
-  if (all.every((pf) => haveSet.has(pf.id))) {
-    await ctx.reply('You already have every platform set up. ✅');
-    return;
-  }
-  // Start empty — the picker only shows platforms they don't have yet.
-  ctx.session.ob = { platforms: [], mode: 'addplatform' };
+  // Pre-tick the platforms they already have: ticking a new one ADDS it, unticking
+  // an existing one REMOVES it.
+  const have = await db()<{ platform_id: string }[]>`
+    select platform_id from player_platforms where player_id = ${p.id}`;
+  ctx.session.ob = { platforms: have.map((r) => r.platform_id), mode: 'addplatform' };
   await askPlatforms(ctx);
 }
 

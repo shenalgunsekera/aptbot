@@ -45,17 +45,37 @@ export class Notifier {
     const [cfg] = await sql<{ admin_group_chat_id: number | null }[]>`
       select admin_group_chat_id from config where id`;
 
-    const rows = await sql<(Notification & { player_chat: number | null; admin_tg: number | null })[]>`
-      select n.*, coalesce(p.chat_id, p.telegram_id) as player_chat, a.telegram_id as admin_tg
+    // Atomically LEASE a batch by pushing send_after 90s into the future. Two
+    // drainers run concurrently in production (this webhook path + the panel's
+    // cron), and `for update skip locked` alone does NOT stop them both grabbing
+    // the same row — its lock releases the instant the SELECT autocommits. The
+    // lease does: the claim is one statement, so only one drainer wins each row,
+    // and the other's `send_after <= now()` filter now skips it. A crash mid-send
+    // just lets the lease lapse and the row retries. (Was sending duplicates.)
+    const rows = await sql<Notification[]>`
+      with c as (
+        select id from notifications
+         where status = 'pending' and send_after <= now()
+         order by id limit 20
+           for update skip locked
+      )
+      update notifications n set send_after = now() + interval '90 seconds'
+        from c where n.id = c.id
+      returning n.*`;
+    if (rows.length === 0) return 0;
+
+    // Resolve destination chats for just the claimed rows.
+    const chats = await sql<{ id: number; player_chat: number | null; admin_tg: number | null }[]>`
+      select n.id, coalesce(p.chat_id, p.telegram_id) as player_chat, a.telegram_id as admin_tg
         from notifications n
         left join players p on p.id = n.player_id
         left join admins  a on a.id = n.admin_id
-       where n.status = 'pending' and n.send_after <= now()
-       order by n.id limit 20
-         for update of n skip locked`;
+       where n.id = any(${sql.array(rows.map((r) => Number(r.id)))}::bigint[])`;
+    const chatMap = new Map(chats.map((c) => [Number(c.id), c]));
 
     let sent = 0;
     for (const n of rows) {
+      const cm = chatMap.get(Number(n.id));
       // Resolve the destination chat.
       let chatId: number | null = null;
       if (n.audience === 'admins') {
@@ -63,7 +83,7 @@ export class Notifier {
         // No group set: fall back to fanning out to each linked admin.
         if (!chatId) { await this.fanOutToAdmins(n); continue; }
       } else {
-        chatId = n.player_chat ?? n.admin_tg;
+        chatId = cm?.player_chat ?? cm?.admin_tg ?? null;
       }
       if (!chatId) { await sql`update notifications set status='skipped' where id=${n.id}`; continue; }
 
@@ -257,8 +277,10 @@ export function renderNotification(n: Notification): Rendered | null {
     case 'player.needs_club':
       return { text: `📍 *${p.name}* (${p.platform} ${p.uid}) is approved but not assigned to a club yet.` };
     case 'payment.detected': {
-      // Icon per source: PayPal 💚, Stripe (card/Apple Pay) 💳, crypto 🪙.
-      const icon = p.source === 'paypal' ? '💚' : p.source === 'stripe' ? '💳' : '🪙';
+      // Icon per source: PayPal 💚, Cash App 💵, Stripe (card/Apple Pay) 💳, crypto 🪙.
+      const icon = p.source === 'paypal' ? '💚'
+        : p.source === 'cashapp' ? '💵'
+        : p.source === 'stripe' ? '💳' : '🪙';
       return p.matched
         ? {
             text: `${icon} *Payment received — ${p.approx ? '≈ ' : ''}${m(p.amount, p.currency)} via ${p.method}*` +
