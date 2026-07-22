@@ -401,30 +401,67 @@ export async function obPlatformsDone(ctx: Ctx): Promise<void> {
   await ctx.answerCallbackQuery();
   try { await ctx.editMessageReplyMarkup(); } catch { /* buttons already gone */ }
   const sql = db();
-  // Adding a platform later: un-link any the player un-ticked (had before, not selected now).
-  if (ctx.session.ob.mode === 'addplatform') {
-    const sel = new Set(ctx.session.ob.platforms);
-    const linked = await sql<{ platform_id: string; name: string }[]>`
-      select pp.platform_id, pl.name from player_platforms pp
-        join platforms pl on pl.id = pp.platform_id
-       where pp.player_id = ${p.id}`;
-    const blocked: string[] = [];
-    for (const row of linked) {
-      if (sel.has(row.platform_id)) continue;
-      try {
-        await sql`select player_unlink_platform(${p.id}::uuid, ${row.platform_id}::uuid)`;
-      } catch (e) {
-        blocked.push(`*${row.name}* — ${(e as Error).message.replace(/^.*?:\s*/, '')}`);
-        ctx.session.ob.platforms.push(row.platform_id); // couldn't remove — keep it ticked
-      }
-    }
-    if (blocked.length) {
-      await ctx.reply(`⚠️ Couldn't remove:\n${blocked.join('\n')}`, { parse_mode: 'Markdown' });
+
+  // ── First-run onboarding ── just confirm the pick and carry on with setup.
+  if (ctx.session.ob.mode !== 'addplatform') {
+    const names = await sql<{ name: string }[]>`
+      select name from platforms where id = any(${sql.array(ctx.session.ob.platforms)}::uuid[]) order by sort_order`;
+    await ctx.reply(`✅ Playing on: *${names.map((n) => n.name).join(', ')}*`, { parse_mode: 'Markdown' });
+    await advance(ctx, p.id);
+    return;
+  }
+
+  // ── /addplatform ── reconcile the ticks against what they already have.
+  const sel = new Set(ctx.session.ob.platforms);
+  const rows = await sql<{ platform_id: string; active: boolean; platform_uid: string | null; name: string }[]>`
+    select pp.platform_id, pp.active, pp.platform_uid, pl.name from player_platforms pp
+      join platforms pl on pl.id = pp.platform_id
+     where pp.player_id = ${p.id}`;
+  const byId = new Map(rows.map((r) => [r.platform_id, r]));
+
+  const removed: string[] = [];
+  const blocked: string[] = [];
+  let addedCount = 0;
+
+  // Remove: was ON, now un-ticked → soft-unlink (account is kept for next time).
+  for (const row of rows) {
+    if (!row.active || sel.has(row.platform_id)) continue;
+    try {
+      await sql`select player_unlink_platform(${p.id}::uuid, ${row.platform_id}::uuid)`;
+      removed.push(row.name);
+    } catch (e) {
+      blocked.push(`*${row.name}* — ${(e as Error).message.replace(/^.*?:\s*/, '')}`);
+      sel.add(row.platform_id); // couldn't remove — leave it on
     }
   }
-  const names = await sql<{ name: string }[]>`
-    select name from platforms where id = any(${sql.array(ctx.session.ob.platforms)}::uuid[]) order by sort_order`;
-  await ctx.reply(`✅ Playing on: *${names.map((n) => n.name).join(', ')}*`, { parse_mode: 'Markdown' });
+  // Re-add: ticked, and we already have the account on file → just switch it back
+  // on, no need to re-enter anything.
+  for (const pid of sel) {
+    const row = byId.get(pid);
+    if (row && !row.active) {
+      await sql`update player_platforms set active = true where player_id = ${p.id} and platform_id = ${pid}`;
+      addedCount++;
+    }
+  }
+  // Brand-new: ticked with no account yet → advance() walks them through creating it.
+  addedCount += [...sel].filter((pid) => !byId.has(pid)).length;
+
+  if (blocked.length) {
+    await ctx.reply(`⚠️ Couldn't remove:\n${blocked.join('\n')}`, { parse_mode: 'Markdown' });
+  }
+
+  // Nothing added → no account setup and NO "all set" message; just confirm.
+  if (addedCount === 0) {
+    ctx.session.ob = undefined;
+    ctx.session.step = { name: 'idle' };
+    if (removed.length) {
+      await ctx.reply(`✅ Removed *${removed.join(', ')}*. You can add it back anytime with /addplatform.`, { parse_mode: 'Markdown' });
+    } else {
+      await ctx.reply('No changes made.');
+    }
+    return;
+  }
+
   await advance(ctx, p.id);
 }
 
@@ -548,10 +585,10 @@ export async function updatePayout(ctx: Ctx): Promise<void> {
 export async function addPlatform(ctx: Ctx): Promise<void> {
   const p = await currentPlayer(ctx);
   if (!p || !(await isOnboarded(p.id))) return void (await ctx.reply('Finish setup first with /start.'));
-  // Pre-tick the platforms they already have: ticking a new one ADDS it, unticking
-  // an existing one REMOVES it.
+  // Pre-tick the platforms they currently have ON (active): ticking a new one
+  // ADDS it, unticking an active one REMOVES it (soft — the account is kept).
   const have = await db()<{ platform_id: string }[]>`
-    select platform_id from player_platforms where player_id = ${p.id}`;
+    select platform_id from player_platforms where player_id = ${p.id} and active`;
   ctx.session.ob = { platforms: have.map((r) => r.platform_id), mode: 'addplatform' };
   await askPlatforms(ctx);
 }

@@ -33,7 +33,7 @@ export async function resolvePlatform(playerId: string): Promise<Resolved<Platfo
   const linked = await sql<Platform[]>`
     select pf.* from platforms pf
      join player_platforms pp on pp.platform_id = pf.id
-    where pp.player_id = ${playerId} and pp.platform_uid is not null and pf.enabled
+    where pp.player_id = ${playerId} and pp.platform_uid is not null and pp.active and pf.enabled
     order by pf.sort_order`;
 
   if (linked.length === 0) return { ask: [], offerRemember: false };

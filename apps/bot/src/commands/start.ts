@@ -31,7 +31,7 @@ export async function start(ctx: Ctx): Promise<void> {
     const accts = await sql<{ name: string; uid: string | null; claimed: string | null }[]>`
       select pf.name, pp.platform_uid as uid, pp.platform_uid_claimed as claimed
         from player_platforms pp join platforms pf on pf.id = pp.platform_id
-       where pp.player_id = ${p.id}
+       where pp.player_id = ${p.id} and pp.active
        order by pf.sort_order`;
     const acctLines = accts.length
       ? '\n\nYour accounts:\n' + accts.map((a) =>
@@ -57,7 +57,7 @@ export async function start(ctx: Ctx): Promise<void> {
   if (!ctx.session.ob) {
     // Session was reset mid-setup; rebuild the plan from what's already stored.
     const rows = await sql<{ platform_id: string }[]>`
-      select platform_id from player_platforms where player_id = ${p.id}`;
+      select platform_id from player_platforms where player_id = ${p.id} and active`;
     ctx.session.ob = { platforms: rows.map((r) => r.platform_id) };
   }
   await advance(ctx, p.id);
@@ -84,7 +84,7 @@ export async function me(ctx: Ctx): Promise<void> {
   const platforms = await sql<{ name: string; platform_uid: string | null; platform_uid_claimed: string | null }[]>`
     select pf.name, pp.platform_uid, pp.platform_uid_claimed
       from player_platforms pp join platforms pf on pf.id = pp.platform_id
-     where pp.player_id = ${p.id} order by pf.sort_order`;
+     where pp.player_id = ${p.id} and pp.active order by pf.sort_order`;
   if (platforms.length) {
     lines.push('*Your accounts*');
     for (const pl of platforms) {
