@@ -88,19 +88,31 @@ export async function setAdmin(ctx: Ctx): Promise<void> {
   }
 }
 
-/** Approve a player's platform claim, from the group button. */
+/** Approve a player from the group button. Links EVERY platform they've given an
+ *  id for — not just this one claim — so a player who picked both ClubGG and
+ *  Sportsbook is fully set up from a single tap. */
 export async function approvePlayer(ctx: Ctx, ppId: string): Promise<void> {
   const sql = db();
   const [adm] = await sql<{ id: string }[]>`
     select id from admins where telegram_id = ${ctx.from!.id} and not disabled`;
   if (!adm) return void (await ctx.answerCallbackQuery({ text: 'Admins only.', show_alert: true }));
 
+  const [pp] = await sql<{ player_id: string }[]>`
+    select player_id from player_platforms where id = ${ppId}`;
+  if (!pp) return void (await ctx.answerCallbackQuery({ text: 'That request no longer exists.', show_alert: true }));
+
+  let linked = 0;
   try {
-    await sql`select player_link_pp(${ppId}::uuid, ${adm.id}::uuid)`;
+    [{ linked }] = await sql<{ linked: number }[]>`
+      select player_link_all(${pp.player_id}::uuid, ${adm.id}::uuid) as linked`;
   } catch (err) {
     if (isUserError(err)) return void (await ctx.answerCallbackQuery({ text: userMessage(err), show_alert: true }));
     throw err;
   }
-  await ctx.answerCallbackQuery({ text: 'Approved!' });
-  await ctx.editMessageText(`✅ *Approved* by ${ctx.from?.first_name ?? 'admin'} — the player has been told.`, { parse_mode: 'Markdown' });
+  await ctx.answerCallbackQuery({ text: linked > 0 ? 'Approved!' : 'Already approved.' });
+  const what = linked > 1 ? `${linked} accounts linked` : linked === 1 ? 'account linked' : 'already linked';
+  await ctx.editMessageText(
+    `✅ *Approved* by ${ctx.from?.first_name ?? 'admin'} — ${what}, the player has been told.`,
+    { parse_mode: 'Markdown' },
+  );
 }
