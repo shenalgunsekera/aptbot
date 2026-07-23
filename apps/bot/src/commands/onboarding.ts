@@ -138,6 +138,12 @@ export async function advance(ctx: Ctx, playerId: string): Promise<void> {
     }
   }
 
+  // 4.5 — Which club(s)? For any chosen platform with more than one club, the
+  // player picks which they play in (one club → auto-joined, no question asked).
+  for (const platId of plan.platforms) {
+    if (await ensureClubs(ctx, playerId, platId)) return;
+  }
+
   // Adding a platform later is done the moment its account is collected — the
   // rest of setup (methods, cash-out) is already on file.
   if (plan.mode === 'addplatform') {
@@ -357,6 +363,76 @@ export async function obClubggId(ctx: Ctx, text: string): Promise<void> {
     if (isUserError(err)) return void (await ctx.reply(userMessage(err)));
     throw err;
   }
+  await advance(ctx, p.id);
+}
+
+interface Club { id: string; name: string }
+
+/** Clubs a player can pick for a platform, and which they're already in. */
+async function clubState(playerId: string, platformId: string): Promise<{ clubs: Club[]; mine: Set<string> }> {
+  const sql = db();
+  const clubs = await sql<Club[]>`
+    select id, name from clubs where platform_id = ${platformId} and enabled order by name`;
+  const mine = await sql<{ club_id: string }[]>`
+    select pc.club_id from player_clubs pc join clubs c on c.id = pc.club_id
+     where pc.player_id = ${playerId} and c.platform_id = ${platformId}`;
+  return { clubs, mine: new Set(mine.map((r) => r.club_id)) };
+}
+
+function clubKb(clubs: Club[], sel: string[]): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  for (const c of clubs) kb.text(`${sel.includes(c.id) ? '✅' : '⬜'} ${c.name}`, `ob:club:${c.id}`).row();
+  if (sel.length) kb.text('➡️ Done', 'ob:clubsdone');
+  return kb;
+}
+
+/** During onboarding: make sure the player has chosen their club(s) for a
+ *  platform. Returns true if it asked a question (advance should stop). */
+async function ensureClubs(ctx: Ctx, playerId: string, platformId: string): Promise<boolean> {
+  const { clubs, mine } = await clubState(playerId, platformId);
+  if (clubs.length === 0 || mine.size > 0) return false;   // nothing to pick, or already picked
+  if (clubs.length === 1) {
+    await db()`select player_set_clubs(${playerId}::uuid, ${platformId}::uuid, array[${clubs[0]!.id}]::uuid[])`;
+    return false;
+  }
+  const [pf] = await db()<{ name: string }[]>`select name from platforms where id = ${platformId}`;
+  if (!ctx.session.ob) ctx.session.ob = { platforms: [] };
+  ctx.session.ob.clubSel = [];
+  ctx.session.step = { name: 'ob:clubs', platformId };
+  await ask(ctx,
+    `Which *${pf?.name}* club(s) do you play in? Tap all that apply, then *Done*.`,
+    { parse_mode: 'Markdown', reply_markup: clubKb(clubs, []) },
+  );
+  return true;
+}
+
+export async function obToggleClub(ctx: Ctx, clubId: string): Promise<void> {
+  const s = ctx.session.step;
+  if (s.name !== 'ob:clubs') return void (await ctx.answerCallbackQuery());
+  if (!ctx.session.ob) ctx.session.ob = { platforms: [] };
+  const sel = ctx.session.ob.clubSel ?? (ctx.session.ob.clubSel = []);
+  const i = sel.indexOf(clubId);
+  if (i >= 0) sel.splice(i, 1); else sel.push(clubId);
+  await ctx.answerCallbackQuery();
+  const { clubs } = await clubState((await currentPlayer(ctx))!.id, s.platformId);
+  try { await ctx.editMessageReplyMarkup({ reply_markup: clubKb(clubs, sel) }); } catch { /* unchanged */ }
+}
+
+export async function obClubsDone(ctx: Ctx): Promise<void> {
+  const s = ctx.session.step;
+  if (s.name !== 'ob:clubs') return void (await ctx.answerCallbackQuery());
+  const p = await currentPlayer(ctx);
+  if (!p) return;
+  const sel = ctx.session.ob?.clubSel ?? [];
+  if (!sel.length) return void (await ctx.answerCallbackQuery({ text: 'Pick at least one club.' }));
+  const sql = db();
+  await sql`select player_set_clubs(${p.id}::uuid, ${s.platformId}::uuid, ${sql.array(sel)}::uuid[])`;
+  await ctx.answerCallbackQuery();
+  try { await ctx.editMessageReplyMarkup(); } catch { /* buttons already gone */ }
+  const names = await sql<{ name: string }[]>`
+    select name from clubs where id = any(${sql.array(sel)}::uuid[]) order by name`;
+  await ctx.reply(`✅ Club${names.length > 1 ? 's' : ''}: *${names.map((n) => n.name).join(', ')}*`, { parse_mode: 'Markdown' });
+  if (ctx.session.ob) ctx.session.ob.clubSel = undefined;
   await advance(ctx, p.id);
 }
 

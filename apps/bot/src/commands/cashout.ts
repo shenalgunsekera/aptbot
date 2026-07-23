@@ -33,7 +33,46 @@ export async function cashoutStart(ctx: Ctx): Promise<void> {
     });
     return;
   }
-  await askAmount(ctx, platform.pick);
+  await afterPlatform(ctx, platform.pick);
+}
+
+/** Platform chosen → if the player is in more than one club on it, ask which
+ *  they're cashing out from (one club → set it silently); then on to the amount. */
+async function afterPlatform(ctx: Ctx, platform: Platform): Promise<void> {
+  const p = await requireActive(ctx);
+  if (!p) return;
+  const sql = db();
+  const clubs = await sql<{ id: string; name: string }[]>`
+    select c.id, c.name from clubs c join player_clubs pc on pc.club_id = c.id
+     where pc.player_id = ${p.id} and c.platform_id = ${platform.id} and c.enabled
+     order by c.name`;
+  if (clubs.length > 1) {
+    ctx.session.step = { name: 'out:club', platformId: platform.id };
+    const kb = new InlineKeyboard();
+    for (const c of clubs) kb.text(c.name, `out:club:${c.id}`).row();
+    await ask(ctx, 'Which club are you cashing out from?', { reply_markup: kb });
+    return;
+  }
+  if (clubs.length === 1) {
+    await sql`select player_set_active_club(${p.id}::uuid, ${platform.id}::uuid, ${clubs[0]!.id}::uuid)`;
+  }
+  await askAmount(ctx, platform);
+}
+
+export async function cashoutPickClub(ctx: Ctx, platformId: string, clubId: string): Promise<void> {
+  const p = await requireActive(ctx);
+  if (!p) return;
+  const sql = db();
+  try {
+    await sql`select player_set_active_club(${p.id}::uuid, ${platformId}::uuid, ${clubId}::uuid)`;
+  } catch (err) {
+    if (isUserError(err)) return void (await ctx.answerCallbackQuery({ text: userMessage(err), show_alert: true }));
+    throw err;
+  }
+  const [pf] = await sql<Platform[]>`select * from platforms where id = ${platformId}`;
+  await ctx.answerCallbackQuery();
+  try { await ctx.editMessageReplyMarkup(); } catch { /* buttons already gone */ }
+  await askAmount(ctx, pf!);
 }
 
 async function askAmount(ctx: Ctx, platform: Platform): Promise<void> {
@@ -58,7 +97,7 @@ export async function cashoutPickPlatform(ctx: Ctx, platformId: string, remember
   const [pf] = await sql<Platform[]>`select * from platforms where id = ${platformId}`;
   await ctx.answerCallbackQuery();
   try { await ctx.editMessageReplyMarkup(); } catch { /* buttons already gone */ }
-  await askAmount(ctx, pf!);
+  await afterPlatform(ctx, pf!);
 }
 
 export async function cashoutAmount(ctx: Ctx, platformId: string, text: string): Promise<void> {

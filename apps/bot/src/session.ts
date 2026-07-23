@@ -19,18 +19,21 @@ export type Step =
   | { name: 'ob:sb_wait' }
   | { name: 'ob:sb_username' }
   | { name: 'ob:clubgg_id' }
+  | { name: 'ob:clubs'; platformId: string }
   | { name: 'ob:dep_methods' }
   | { name: 'ob:wd_method' }
   | { name: 'ob:wd_handle'; methodId: string }
   // add money — method is chosen BEFORE amount, so Stripe (fixed link) can skip
   // the amount step entirely.
   | { name: 'add:platform' }
+  | { name: 'add:club'; platformId: string }
   | { name: 'add:method'; platformId: string }
   | { name: 'add:amount'; platformId: string; methodId: string }
   | { name: 'add:receipt'; fillId: string }
   | { name: 'add:stripe'; platformId: string }
   // cash out
   | { name: 'out:platform' }
+  | { name: 'out:club'; platformId: string }
   | { name: 'out:amount'; platformId: string }
   | { name: 'out:method'; platformId: string; amount: number }
   | { name: 'out:handle'; platformId: string; amount: number; methodId: string }
@@ -41,6 +44,7 @@ export type Step =
 export interface OnboardingPlan {
   platforms: string[];        // platform ids the player chose
   sbHasAccount?: boolean;     // answered the "already have APT Sports?" question
+  clubSel?: string[];         // club ids toggled so far (multi-club platforms)
   depSel?: string[];          // deposit method ids toggled so far (real ids, incl. coins)
   depView?: 'main' | 'crypto';// which screen of the deposit-method picker is showing
   wdSel?: string[];           // cash-out method ids toggled so far

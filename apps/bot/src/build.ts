@@ -10,14 +10,15 @@ import {
   advance, obName, obSbUser, obSbPass, obSbUsername, obClubggId, obWdHandle,
   obTogglePlatform, obPlatformsDone, obSbHasAccount, obToggleDepMethod, obDepView, obDepMethodsDone,
   obToggleWdMethod, obWdView, obWdMethodsDone, obResume, updateMethods, updatePayout, addPlatform,
+  obToggleClub, obClubsDone,
 } from './commands/onboarding.js';
 import { sbCreated } from './admin-actions.js';
 import {
-  addStart, addPickPlatform, addPickCrypto, addMethodBack, addAmount, addPickMethod,
+  addStart, addPickPlatform, addPickClub, addPickCrypto, addMethodBack, addAmount, addPickMethod,
   addReceipt, addDone, stripeReceipt, cancelDeposit,
 } from './commands/add.js';
 import {
-  cashoutStart, cashoutPickPlatform, cashoutAmount, cashoutPickMethod,
+  cashoutStart, cashoutPickPlatform, cashoutPickClub, cashoutAmount, cashoutPickMethod,
   cashoutSavedHandle, cashoutSavedMethod, cashoutHandle, cashoutRetract,
   cashoutReducePrompt, cashoutReduceConfirm,
 } from './commands/cashout.js';
@@ -158,6 +159,8 @@ export function buildBot(token: string): Bot<Ctx> {
   // Onboarding
   bot.callbackQuery(/^ob:pf:(.+)$/, (ctx) => obTogglePlatform(ctx, ctx.match![1]!));
   bot.callbackQuery('ob:pfdone', (ctx) => obPlatformsDone(ctx));
+  bot.callbackQuery(/^ob:club:(.+)$/, (ctx) => obToggleClub(ctx, ctx.match![1]!));
+  bot.callbackQuery('ob:clubsdone', (ctx) => obClubsDone(ctx));
   bot.callbackQuery('ob:sb:yes', (ctx) => obSbHasAccount(ctx, true));
   bot.callbackQuery('ob:sb:no', (ctx) => obSbHasAccount(ctx, false));
   bot.callbackQuery('ob:dmcrypto', (ctx) => obDepView(ctx, 'crypto'));
@@ -177,6 +180,11 @@ export function buildBot(token: string): Bot<Ctx> {
     await ctx.answerCallbackQuery({ text: "Okay, I'll ask each time." });
     const p = await currentPlayer(ctx);
     if (p) await db()`select prefs_set_platform(${p.id}::uuid, null)`;
+  });
+  bot.callbackQuery(/^add:club:(.+)$/, async (ctx) => {
+    const s = ctx.session.step;
+    if (s.name !== 'add:club') return void (await ctx.answerCallbackQuery({ text: 'That expired — /deposit again.' }));
+    await addPickClub(ctx, s.platformId, ctx.match![1]!);
   });
   bot.callbackQuery('add:crypto', (ctx) => addPickCrypto(ctx));
   bot.callbackQuery('add:mback', (ctx) => addMethodBack(ctx));
@@ -203,6 +211,11 @@ export function buildBot(token: string): Bot<Ctx> {
     await ctx.answerCallbackQuery({ text: "Okay, I'll ask each time." });
     const p = await currentPlayer(ctx);
     if (p) await db()`select prefs_set_platform(${p.id}::uuid, null)`;
+  });
+  bot.callbackQuery(/^out:club:(.+)$/, async (ctx) => {
+    const s = ctx.session.step;
+    if (s.name !== 'out:club') return void (await ctx.answerCallbackQuery({ text: 'That expired — /withdraw again.' }));
+    await cashoutPickClub(ctx, s.platformId, ctx.match![1]!);
   });
   bot.callbackQuery(/^out:m:(.+)$/, async (ctx) => {
     const s = ctx.session.step;

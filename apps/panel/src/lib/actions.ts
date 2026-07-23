@@ -346,3 +346,30 @@ export async function setClubDetails(
     return 'Club saved.';
   }, ['/config']);
 }
+
+export async function createClub(
+  platformId: string, name: string, platformClubId: string,
+): Promise<Result> {
+  return run(async () => {
+    const s = await requireOwner();
+    const sql = db();
+    const [c] = await sql<{ name: string }[]>`
+      select name from club_create(${platformId}::uuid, ${name}, ${platformClubId}, ${s.admin.id}::uuid)`;
+    await sql`select audit(${s.admin.id}::uuid, 'club.create', 'club', null,
+                           ${sql.json({ name, platform_id: platformId }) as any}::jsonb)`;
+    return `Club "${c?.name ?? name}" created.`;
+  }, ['/config']);
+}
+
+export async function updateClub(
+  clubId: string, name: string, platformClubId: string, enabled: boolean,
+): Promise<Result> {
+  return run(async () => {
+    const s = await requireOwner();
+    const sql = db();
+    await sql`select club_update(${clubId}::uuid, ${name}, ${platformClubId}, ${enabled})`;
+    await sql`select audit(${s.admin.id}::uuid, 'club.update', 'club', ${clubId}::uuid,
+                           ${sql.json({ name, enabled }) as any}::jsonb)`;
+    return 'Club saved.';
+  }, ['/config']);
+}

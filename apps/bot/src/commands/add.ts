@@ -33,13 +33,50 @@ export async function addStart(ctx: Ctx): Promise<void> {
     });
     return;
   }
-  await askAddMethod(ctx, platform.pick.id);
+  await afterPlatform(ctx, platform.pick.id);
 }
 
 export async function addPickPlatform(ctx: Ctx, platformId: string, remember: boolean): Promise<void> {
   const p = await requireActive(ctx);
   if (!p) return;
   if (remember) await db()`select prefs_set_platform(${p.id}::uuid, ${platformId}::uuid)`;
+  await ctx.answerCallbackQuery();
+  try { await ctx.editMessageReplyMarkup(); } catch { /* buttons already gone */ }
+  await afterPlatform(ctx, platformId);
+}
+
+/** Platform chosen → if the player is in more than one club on it, ask which the
+ *  money is going to (one club → set it silently); then on to the method. */
+async function afterPlatform(ctx: Ctx, platformId: string): Promise<void> {
+  const p = await requireActive(ctx);
+  if (!p) return;
+  const sql = db();
+  const clubs = await sql<{ id: string; name: string }[]>`
+    select c.id, c.name from clubs c join player_clubs pc on pc.club_id = c.id
+     where pc.player_id = ${p.id} and c.platform_id = ${platformId} and c.enabled
+     order by c.name`;
+  if (clubs.length > 1) {
+    ctx.session.step = { name: 'add:club', platformId };
+    const kb = new InlineKeyboard();
+    for (const c of clubs) kb.text(c.name, `add:club:${c.id}`).row();
+    await ask(ctx, 'Which club is this going to?', { reply_markup: kb });
+    return;
+  }
+  if (clubs.length === 1) {
+    await sql`select player_set_active_club(${p.id}::uuid, ${platformId}::uuid, ${clubs[0]!.id}::uuid)`;
+  }
+  await askAddMethod(ctx, platformId);
+}
+
+export async function addPickClub(ctx: Ctx, platformId: string, clubId: string): Promise<void> {
+  const p = await requireActive(ctx);
+  if (!p) return;
+  try {
+    await db()`select player_set_active_club(${p.id}::uuid, ${platformId}::uuid, ${clubId}::uuid)`;
+  } catch (err) {
+    if (isUserError(err)) return void (await ctx.answerCallbackQuery({ text: userMessage(err), show_alert: true }));
+    throw err;
+  }
   await ctx.answerCallbackQuery();
   try { await ctx.editMessageReplyMarkup(); } catch { /* buttons already gone */ }
   await askAddMethod(ctx, platformId);
