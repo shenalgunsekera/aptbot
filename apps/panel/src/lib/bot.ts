@@ -26,9 +26,13 @@ export async function getBot(): Promise<BotT> {
 
   // The bot's wiring is exported from @union/bot as a factory so it can be
   // driven by either polling (local) or webhook (Vercel) without duplication.
-  const { buildBot } = await import('@union/bot/build');
+  const { buildBot, syncCommands } = await import('@union/bot/build');
   _bot = buildBot(token);
   await _bot.init();
+  // Push the "/" command menu to Telegram once per cold start — the webhook
+  // runtime never runs index.ts, so this is where a renamed/added command
+  // actually reaches Telegram after a deploy. Fire-and-forget; never block.
+  void syncCommands(_bot).catch((e) => console.error('[bot] syncCommands failed:', e));
   return _bot;
 }
 

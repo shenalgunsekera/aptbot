@@ -34,6 +34,40 @@ import {
 import { pgSessionStorage } from './session-store.js';
 
 /**
+ * The command menu Telegram shows (the list that pops up when you type "/").
+ * Single source of truth for BOTH runtimes — polling (index.ts) and the Vercel
+ * webhook (via syncCommands on cold start) — so a renamed command can never go
+ * stale in one place.
+ */
+export const PLAYER_COMMANDS = [
+  { command: 'start', description: 'Set up your account' },
+  { command: 'deposit', description: 'Add money' },
+  { command: 'canceldeposit', description: 'Cancel your latest unpaid deposit' },
+  { command: 'withdraw', description: 'Cash out' },
+  { command: 'pending', description: 'Your pending cash-outs' },
+  { command: 'payments', description: 'Completed payments & receipts' },
+  { command: 'editplatform', description: 'Add or remove ClubGG / Sportsbook' },
+  { command: 'editclubs', description: 'Change which clubs you play in' },
+  { command: 'methods', description: 'Change your payment methods' },
+  { command: 'payout', description: 'Change how you get paid' },
+  { command: 'support', description: 'Message our team' },
+  { command: 'help', description: 'What I can do' },
+];
+export const GROUP_COMMANDS = [
+  ...PLAYER_COMMANDS,
+  { command: 'setadmingroup', description: 'Make this the admin group (admins only)' },
+  { command: 'setadmin', description: 'Add an admin (owner only)' },
+  { command: 'p2p', description: 'Venmo/Zelle backstop handle (admins)' },
+];
+
+/** Push the menus to Telegram for every scope. Safe to call repeatedly. */
+export async function syncCommands(bot: Bot<Ctx>): Promise<void> {
+  await bot.api.setMyCommands(PLAYER_COMMANDS, { scope: { type: 'default' } });
+  await bot.api.setMyCommands(GROUP_COMMANDS, { scope: { type: 'all_group_chats' } });
+  await bot.api.setMyCommands(PLAYER_COMMANDS, { scope: { type: 'all_private_chats' } });
+}
+
+/**
  * buildBot — constructs the fully-wired bot WITHOUT starting it.
  *
  * Split out so the same handlers drive two runtimes: long polling locally

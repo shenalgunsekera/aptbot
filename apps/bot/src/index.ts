@@ -1,5 +1,5 @@
 import { db, closeDb } from '@union/core';
-import { buildBot } from './build.js';
+import { buildBot, syncCommands } from './build.js';
 import { Notifier } from './notifier.js';
 
 /**
@@ -57,32 +57,9 @@ async function shutdown(sig: string) {
 process.once('SIGINT', () => void shutdown('SIGINT'));
 process.once('SIGTERM', () => void shutdown('SIGTERM'));
 
-const PLAYER_COMMANDS = [
-  { command: 'start', description: 'Set up your account' },
-  { command: 'deposit', description: 'Add money' },
-  { command: 'canceldeposit', description: 'Cancel your latest unpaid deposit' },
-  { command: 'withdraw', description: 'Cash out' },
-  { command: 'pending', description: 'Your pending cash-outs' },
-  { command: 'payments', description: 'Completed payments & receipts' },
-  { command: 'editplatform', description: 'Add or remove ClubGG / Sportsbook' },
-  { command: 'editclubs', description: 'Change which clubs you play in' },
-  { command: 'methods', description: 'Change your payment methods' },
-  { command: 'payout', description: 'Change how you get paid' },
-  { command: 'support', description: 'Message our team' },
-  { command: 'help', description: 'What I can do' },
-];
-// In groups, admins also need the setup commands (harmless for players — the
-// handlers check admin status and politely refuse otherwise).
-const GROUP_COMMANDS = [
-  ...PLAYER_COMMANDS,
-  { command: 'setadmingroup', description: 'Make this the admin group (admins only)' },
-  { command: 'setadmin', description: 'Add an admin (owner only)' },
-  { command: 'p2p', description: 'Venmo/Zelle backstop handle (admins)' },
-];
-// Same core commands everywhere — the bot works right in the group, no private chat.
-await bot.api.setMyCommands(PLAYER_COMMANDS, { scope: { type: 'default' } });
-await bot.api.setMyCommands(GROUP_COMMANDS, { scope: { type: 'all_group_chats' } });
-await bot.api.setMyCommands(PLAYER_COMMANDS, { scope: { type: 'all_private_chats' } });
+// Same core commands everywhere — one source of truth in build.ts, shared with
+// the webhook runtime so the "/" menu never drifts between the two.
+await syncCommands(bot);
 
 notifier.start();
 console.log('[bot] starting (long polling)…');
