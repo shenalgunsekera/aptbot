@@ -10,7 +10,7 @@ import {
   advance, obName, obSbUser, obSbPass, obSbUsername, obClubggId, obWdHandle,
   obTogglePlatform, obPlatformsDone, obSbHasAccount, obToggleDepMethod, obDepView, obDepMethodsDone,
   obToggleWdMethod, obWdView, obWdMethodsDone, obResume, updateMethods, updatePayout, addPlatform,
-  obToggleClub, obClubsDone,
+  obToggleClub, obClubsDone, editClubs, clubsPickPlatform, clubsEditToggle, clubsEditDone,
 } from './commands/onboarding.js';
 import { sbCreated } from './admin-actions.js';
 import {
@@ -94,7 +94,7 @@ export function buildBot(token: string): Bot<Ctx> {
       `💵 /deposit — add money\n💸 /withdraw — cash out\n⏳ /pending — your pending cash-outs\n` +
         `📄 /payments — your completed payments & receipts\n` +
         `✖️ /canceldeposit — cancel your latest unpaid deposit\n` +
-        `➕ /addplatform · 💳 /methods · 🏦 /payout — update your setup\n` +
+        `➕ /editplatform · 🏆 /editclubs · 💳 /methods · 🏦 /payout — update your setup\n` +
         `💬 /support — message our team\n/cancel — stop what you're doing`,
     ),
   );
@@ -109,7 +109,8 @@ export function buildBot(token: string): Bot<Ctx> {
   // Update your setup later.
   bot.command(['methods', 'depositmethods'], dmOnly(updateMethods));
   bot.command(['payout', 'cashoutmethod'], dmOnly(updatePayout));
-  bot.command('addplatform', dmOnly(addPlatform));
+  bot.command(['editplatform', 'addplatform'], dmOnly(addPlatform));
+  bot.command(['editclubs', 'clubs'], dmOnly(editClubs));
 
   // The admin group adopts the chat it is added to (never creates one). Only an
   // enabled admin's telegram_id can set it — the DB function is the whole check.
@@ -161,6 +162,9 @@ export function buildBot(token: string): Bot<Ctx> {
   bot.callbackQuery('ob:pfdone', (ctx) => obPlatformsDone(ctx));
   bot.callbackQuery(/^ob:club:(.+)$/, (ctx) => obToggleClub(ctx, ctx.match![1]!));
   bot.callbackQuery('ob:clubsdone', (ctx) => obClubsDone(ctx));
+  bot.callbackQuery(/^clubs:pf:(.+)$/, (ctx) => clubsPickPlatform(ctx, ctx.match![1]!));
+  bot.callbackQuery(/^clubs:c:(.+)$/, (ctx) => clubsEditToggle(ctx, ctx.match![1]!));
+  bot.callbackQuery('clubs:done', (ctx) => clubsEditDone(ctx));
   bot.callbackQuery('ob:sb:yes', (ctx) => obSbHasAccount(ctx, true));
   bot.callbackQuery('ob:sb:no', (ctx) => obSbHasAccount(ctx, false));
   bot.callbackQuery('ob:dmcrypto', (ctx) => obDepView(ctx, 'crypto'));

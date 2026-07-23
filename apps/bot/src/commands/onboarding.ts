@@ -379,10 +379,10 @@ async function clubState(playerId: string, platformId: string): Promise<{ clubs:
   return { clubs, mine: new Set(mine.map((r) => r.club_id)) };
 }
 
-function clubKb(clubs: Club[], sel: string[]): InlineKeyboard {
+function clubKb(clubs: Club[], sel: string[], togglePrefix = 'ob:club:', doneCb = 'ob:clubsdone'): InlineKeyboard {
   const kb = new InlineKeyboard();
-  for (const c of clubs) kb.text(`${sel.includes(c.id) ? '✅' : '⬜'} ${c.name}`, `ob:club:${c.id}`).row();
-  if (sel.length) kb.text('➡️ Done', 'ob:clubsdone');
+  for (const c of clubs) kb.text(`${sel.includes(c.id) ? '✅' : '⬜'} ${c.name}`, `${togglePrefix}${c.id}`).row();
+  if (sel.length) kb.text('➡️ Done', doneCb);
   return kb;
 }
 
@@ -434,6 +434,78 @@ export async function obClubsDone(ctx: Ctx): Promise<void> {
   await ctx.reply(`✅ Club${names.length > 1 ? 's' : ''}: *${names.map((n) => n.name).join(', ')}*`, { parse_mode: 'Markdown' });
   if (ctx.session.ob) ctx.session.ob.clubSel = undefined;
   await advance(ctx, p.id);
+}
+
+// ── /editclubs — change which clubs you're in later (add or leave) ──
+export async function editClubs(ctx: Ctx): Promise<void> {
+  const p = await currentPlayer(ctx);
+  if (!p || !(await isOnboarded(p.id))) return void (await ctx.reply('Finish setup first with /start.'));
+  const sql = db();
+  // Confirmed platforms the player is on that actually have more than one club
+  // to choose between — nothing to edit otherwise.
+  const plats = await sql<{ id: string; name: string }[]>`
+    select pf.id, pf.name from platforms pf
+      join player_platforms pp on pp.platform_id = pf.id
+     where pp.player_id = ${p.id} and pp.active and pp.platform_uid is not null
+       and (select count(*) from clubs c where c.platform_id = pf.id and c.enabled) > 1
+     order by pf.sort_order`;
+  if (plats.length === 0) {
+    return void (await ctx.reply("There aren't any other clubs to switch between right now."));
+  }
+  if (plats.length === 1) return void (await openClubEditor(ctx, p.id, plats[0]!.id));
+  const kb = new InlineKeyboard();
+  for (const pf of plats) kb.text(pf.name, `clubs:pf:${pf.id}`).row();
+  await ask(ctx, "Which platform's clubs do you want to edit?", { reply_markup: kb });
+}
+
+async function openClubEditor(ctx: Ctx, playerId: string, platformId: string): Promise<void> {
+  const { clubs, mine } = await clubState(playerId, platformId);
+  const [pf] = await db()<{ name: string }[]>`select name from platforms where id = ${platformId}`;
+  if (!ctx.session.ob) ctx.session.ob = { platforms: [] };
+  ctx.session.ob.clubSel = [...mine];   // pre-tick the clubs they're already in
+  ctx.session.step = { name: 'clubs:edit', platformId };
+  await ask(ctx,
+    `Which *${pf?.name}* club(s) are you in? Tick to add, untick to leave, then *Done*.`,
+    { parse_mode: 'Markdown', reply_markup: clubKb(clubs, [...mine], 'clubs:c:', 'clubs:done') },
+  );
+}
+
+export async function clubsPickPlatform(ctx: Ctx, platformId: string): Promise<void> {
+  const p = await currentPlayer(ctx);
+  if (!p) return;
+  await ctx.answerCallbackQuery();
+  try { await ctx.editMessageReplyMarkup(); } catch { /* buttons already gone */ }
+  await openClubEditor(ctx, p.id, platformId);
+}
+
+export async function clubsEditToggle(ctx: Ctx, clubId: string): Promise<void> {
+  const s = ctx.session.step;
+  if (s.name !== 'clubs:edit') return void (await ctx.answerCallbackQuery());
+  if (!ctx.session.ob) ctx.session.ob = { platforms: [] };
+  const sel = ctx.session.ob.clubSel ?? (ctx.session.ob.clubSel = []);
+  const i = sel.indexOf(clubId);
+  if (i >= 0) sel.splice(i, 1); else sel.push(clubId);
+  await ctx.answerCallbackQuery();
+  const { clubs } = await clubState((await currentPlayer(ctx))!.id, s.platformId);
+  try { await ctx.editMessageReplyMarkup({ reply_markup: clubKb(clubs, sel, 'clubs:c:', 'clubs:done') }); } catch { /* unchanged */ }
+}
+
+export async function clubsEditDone(ctx: Ctx): Promise<void> {
+  const s = ctx.session.step;
+  if (s.name !== 'clubs:edit') return void (await ctx.answerCallbackQuery());
+  const p = await currentPlayer(ctx);
+  if (!p) return;
+  const sel = ctx.session.ob?.clubSel ?? [];
+  if (!sel.length) return void (await ctx.answerCallbackQuery({ text: 'Stay in at least one club.' }));
+  const sql = db();
+  await sql`select player_set_clubs(${p.id}::uuid, ${s.platformId}::uuid, ${sql.array(sel)}::uuid[])`;
+  await ctx.answerCallbackQuery();
+  try { await ctx.editMessageReplyMarkup(); } catch { /* buttons already gone */ }
+  const names = await sql<{ name: string }[]>`
+    select name from clubs where id = any(${sql.array(sel)}::uuid[]) order by name`;
+  await ctx.reply(`✅ You're in: *${names.map((n) => n.name).join(', ')}*`, { parse_mode: 'Markdown' });
+  ctx.session.ob = undefined;
+  ctx.session.step = { name: 'idle' };
 }
 
 export async function obWdHandle(ctx: Ctx, methodId: string, text: string): Promise<void> {
@@ -531,7 +603,7 @@ export async function obPlatformsDone(ctx: Ctx): Promise<void> {
     ctx.session.ob = undefined;
     ctx.session.step = { name: 'idle' };
     if (removed.length) {
-      await ctx.reply(`✅ Removed *${removed.join(', ')}*. You can add it back anytime with /addplatform.`, { parse_mode: 'Markdown' });
+      await ctx.reply(`✅ Removed *${removed.join(', ')}*. You can add it back anytime with /editplatform.`, { parse_mode: 'Markdown' });
     } else {
       await ctx.reply('No changes made.');
     }

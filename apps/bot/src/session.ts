@@ -20,6 +20,7 @@ export type Step =
   | { name: 'ob:sb_username' }
   | { name: 'ob:clubgg_id' }
   | { name: 'ob:clubs'; platformId: string }
+  | { name: 'clubs:edit'; platformId: string }
   | { name: 'ob:dep_methods' }
   | { name: 'ob:wd_method' }
   | { name: 'ob:wd_handle'; methodId: string }
