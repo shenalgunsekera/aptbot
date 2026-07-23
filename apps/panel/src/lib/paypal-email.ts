@@ -30,6 +30,12 @@ export async function detectPaypalEmails(): Promise<number> {
     logger: false,
   });
 
+  const { db } = await import('@union/core');
+  const sql = db();
+  const [cfg] = await sql<{ email_watermark: Date | null }[]>`select email_watermark from config where id`;
+  const watermark = cfg?.email_watermark ? new Date(cfg.email_watermark) : null;
+  const seen = { max: watermark };   // newest email date we've come across this run
+
   let count = 0;
   await client.connect();
   try {
@@ -38,21 +44,29 @@ export async function detectPaypalEmails(): Promise<number> {
       const since = new Date(Date.now() - 2 * 24 * 3600 * 1000);   // last 2 days
       // PayPal, then Cash App — same inbox, one login. Message-ID dedupe means a
       // provider we scan twice (Cash App uses more than one sender domain) is safe.
-      count += await scan(client, since, process.env.PAYPAL_IMAP_FROM ?? 'paypal.com', parsePaypal, 'paypal', 'paypal');
-      count += await scan(client, since, process.env.CASHAPP_IMAP_FROM ?? 'square.com', parseCashapp, 'cashapp', 'cashapp');
-      count += await scan(client, since, 'cash.app', parseCashapp, 'cashapp', 'cashapp');
+      count += await scan(client, since, process.env.PAYPAL_IMAP_FROM ?? 'paypal.com', parsePaypal, 'paypal', 'paypal', watermark, seen);
+      count += await scan(client, since, process.env.CASHAPP_IMAP_FROM ?? 'square.com', parseCashapp, 'cashapp', 'cashapp', watermark, seen);
+      count += await scan(client, since, 'cash.app', parseCashapp, 'cashapp', 'cashapp', watermark, seen);
     } finally {
       lock.release();
     }
   } finally {
     await client.logout().catch(() => {});
   }
+
+  // Advance the watermark past everything we saw, so next run only announces mail
+  // newer than this. Never moves backwards.
+  if (seen.max && (!watermark || seen.max > watermark)) {
+    await sql`update config set email_watermark = ${seen.max} where id`;
+  }
   return count;
 }
 
 type Parsed = { amount: number; currency: string; name: string | null };
 
-/** Search one sender, parse each match, and record any money-received emails. */
+/** Search one sender, parse each match, and record any money-received emails.
+ *  An email is ANNOUNCED only when it's newer than the watermark — so a real
+ *  payment is never held back by cron lag, and a re-scan of old mail stays quiet. */
 async function scan(
   client: ImapFlow,
   since: Date,
@@ -60,13 +74,11 @@ async function scan(
   parse: (subject: string, text: string) => Parsed | null,
   source: 'paypal' | 'cashapp',
   methodCode: string,
+  watermark: Date | null,
+  seen: { max: Date | null },
 ): Promise<number> {
   const uids = await client.search({ since, from }, { uid: true });
   if (!uids || uids.length === 0) return 0;
-  // Only NEW arrivals should ping the admins. An email older than this is
-  // recorded (so it dedupes) but announced silently — otherwise a re-scan after
-  // a data reset or fresh deploy would replay days of old payments at once.
-  const FRESH_MS = Number(process.env.EMAIL_FRESH_MINUTES ?? 30) * 60 * 1000;
   let count = 0;
   for (const uid of uids.slice(-30)) {
     const msg = await client.fetchOne(String(uid), { source: true }, { uid: true });
@@ -74,10 +86,11 @@ async function scan(
     const mail = await simpleParser(msg.source);
     const parsed = parse(mail.subject ?? '', mail.text ?? '');
     if (!parsed) continue;
-    // Stale ONLY when the email has a date header and it's clearly old. A brand
-    // new email (or one with no date) always notifies — new payments must never
-    // be held back; the gate exists purely to mute a re-scan of old mail.
-    const stale = !!mail.date && Date.now() - mail.date.getTime() > FRESH_MS;
+    const date = mail.date ?? null;
+    if (date && (!seen.max || date > seen.max)) seen.max = date;
+    // New (announce) unless the watermark is set and this email isn't newer. A
+    // missing date always announces — never hold back a possible fresh payment.
+    const stale = !!watermark && !!date && date <= watermark;
     await recordDetection({
       source,
       externalId: mail.messageId ?? `imap-uid:${uid}`,
@@ -93,7 +106,7 @@ async function scan(
 
 /** Pull the amount AND who sent it out of a PayPal "you've got money" email.
  *  Returns null if it's not a money-received email or we can't find an amount. */
-function parsePaypal(subject: string, text: string): Parsed | null {
+export function parsePaypal(subject: string, text: string): Parsed | null {
   const hay = `${subject}\n${text}`;
   // Must read like money coming IN…
   if (!/(sent you|you'?ve got money|you got money|you received|received \$)/i.test(hay)) return null;
@@ -116,7 +129,7 @@ function parsePaypal(subject: string, text: string): Parsed | null {
 
 /** Same idea for Cash App. Its emails read "John Doe sent you $50" or "You
  *  received $50.00 from John Doe" — and amounts are often whole ($50, no cents). */
-function parseCashapp(subject: string, text: string): Parsed | null {
+export function parseCashapp(subject: string, text: string): Parsed | null {
   const hay = `${subject}\n${text}`;
   if (!/(sent you|you received|received \$|paid you)/i.test(hay)) return null;
   if (/(you sent|you paid|payment to|receipt|refund)/i.test(hay)) return null;

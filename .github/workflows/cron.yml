@@ -35,18 +35,21 @@ concurrency:
 jobs:
   sweep:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 10
     steps:
       - name: Poll the cron endpoint every ~minute for the 5-min window
+        shell: bash
         run: |
+          set +e   # a slow/failed curl must NOT fail the whole job
           if [ -z "${{ secrets.CRON_URL }}" ]; then
             echo "CRON_URL secret not set — skipping"; exit 0
           fi
           for i in 1 2 3 4 5; do
-            code=$(curl -s -m 70 -o /tmp/out -w "%{http_code}" \
+            code=$(curl -s -m 90 -o /tmp/out -w "%{http_code}" \
               -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
               "${{ secrets.CRON_URL }}")
-            echo "[$i] HTTP $code"; cat /tmp/out; echo
+            echo "[$i] HTTP $code"; cat /tmp/out 2>/dev/null; echo
             [ "$i" = "5" ] && break
-            sleep 60
+            sleep 55
           done
+          exit 0
