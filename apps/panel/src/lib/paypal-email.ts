@@ -63,6 +63,10 @@ async function scan(
 ): Promise<number> {
   const uids = await client.search({ since, from }, { uid: true });
   if (!uids || uids.length === 0) return 0;
+  // Only NEW arrivals should ping the admins. An email older than this is
+  // recorded (so it dedupes) but announced silently — otherwise a re-scan after
+  // a data reset or fresh deploy would replay days of old payments at once.
+  const FRESH_MS = Number(process.env.EMAIL_FRESH_MINUTES ?? 30) * 60 * 1000;
   let count = 0;
   for (const uid of uids.slice(-30)) {
     const msg = await client.fetchOne(String(uid), { source: true }, { uid: true });
@@ -70,13 +74,17 @@ async function scan(
     const mail = await simpleParser(msg.source);
     const parsed = parse(mail.subject ?? '', mail.text ?? '');
     if (!parsed) continue;
+    // Stale ONLY when the email has a date header and it's clearly old. A brand
+    // new email (or one with no date) always notifies — new payments must never
+    // be held back; the gate exists purely to mute a re-scan of old mail.
+    const stale = !!mail.date && Date.now() - mail.date.getTime() > FRESH_MS;
     await recordDetection({
       source,
       externalId: mail.messageId ?? `imap-uid:${uid}`,
       methodCode,
       amount: parsed.amount,
       currency: parsed.currency,
-      raw: { subject: mail.subject, name: parsed.name },
+      raw: { subject: mail.subject, name: parsed.name, stale },
     });
     count++;
   }
