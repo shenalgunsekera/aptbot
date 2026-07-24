@@ -104,40 +104,47 @@ async function scan(
   return count;
 }
 
-/** Parse a PayPal email into a payment received OR a money REQUEST (someone
- *  asking to be paid — e.g. a cash-out request to our handle). Returns null if
- *  it's neither, or an outgoing/receipt email, or we can't find an amount. */
+/** Pull the sender/requester name out of a payment email — it lives in different
+ *  places per provider and per kind (subject start, "X has canceled…", "sent $X
+ *  by NAME", "request from NAME"). Tries each until one hits. */
+function senderName(subject: string, text: string): string | null {
+  const hay = `${subject}\n${text}`;
+  const pats = [
+    /^([A-Z][A-Za-z'.-]+(?:\s+[A-Z][A-Za-z'.-]+){0,2})\s+(?:sent you|requested|is requesting|wants|cancel(?:l)?ed|declined)/,
+    /([A-Z][A-Za-z'.-]+(?:\s+[A-Z][A-Za-z'.-]+){0,2})\s+has\s+cancel(?:l)?ed/,
+    /sent\s+\$[\d,.]+\s+by\s+([A-Za-z][\w .'-]{0,40}?)[.\s]/i,
+    /request\s+from\s+([A-Za-z][\w .'-]{0,40}?)\s+(?:for\b|\.)/i,
+    /\bfrom\s+([A-Z][A-Za-z'.-]+(?:\s+[A-Z][A-Za-z'.-]+){0,2})/,
+  ];
+  for (const re of pats) { const m = hay.match(re); if (m && m[1]) return m[1].trim(); }
+  return null;
+}
+
+/** Parse a PayPal email into payment received / money REQUEST / CANCELLED request.
+ *  Null if it's outgoing, a receipt, or has no amount. */
 export function parsePaypal(subject: string, text: string): Parsed | null {
   const hay = `${subject}\n${text}`;
-  // Skip only OUR OWN outgoing payments and plain purchase receipts — everything
-  // else with an amount is forwarded, so no incoming payment is ever missed.
-  if (/(you sent|payment sent|you'?ve sent|receipt for your payment|you paid|authori[sz]ed a payment)/i.test(hay)) return null;
+  // Direction is in the SUBJECT — check exclusions there ONLY. A word like
+  // "receipt" in the email body/footer must not drop a real incoming payment.
+  if (/(you sent|payment sent|you'?ve sent|receipt for your payment|you paid|authori[sz]ed a payment)/i.test(subject)) return null;
 
   const m = hay.match(/\$\s?([\d,]+\.\d{2})/) ?? hay.match(/([\d,]+\.\d{2})\s?USD/i);
-  if (!m) return null;   // no amount at all → a login/security/marketing email, not money
+  if (!m) return null;   // no amount → a login/security/marketing email, not money
   const amount = Math.round(parseFloat(m[1]!.replace(/,/g, '')) * 100);
   if (amount <= 0) return null;
 
-  // Three kinds: a CANCELLED request ("X canceled a request…"), an open REQUEST
-  // ("sent you a money request"), or money actually RECEIVED.
   const isCancel = /(cancel(l)?ed|declined)/i.test(subject) && /request/i.test(hay);
   const isRequest = /(money request|requested \$|requesting \$|requests \$|is requesting|sent you a request|wants \$)/i.test(hay);
 
-  const nm = subject.match(/^([A-Za-z][\w .'-]{1,40}?)\s+(?:sent you|requested|is requesting|wants|cancel(?:l)?ed|declined)/i)
-    ?? hay.match(/([A-Za-z][\w .'-]{1,40}?)\s+sent you/i)
-    ?? hay.match(/from\s+([A-Za-z][\w .'-]{1,40})/i);
-  const name = nm ? nm[1]!.trim() : null;
-
-  return { amount, currency: 'USD', name, kind: isCancel ? 'cancel' : isRequest ? 'request' : 'payment' };
+  return { amount, currency: 'USD', name: senderName(subject, text), kind: isCancel ? 'cancel' : isRequest ? 'request' : 'payment' };
 }
 
-/** Same idea for Cash App: a payment received OR a request. Amounts are often
- *  whole ($50, no cents). Cancellations are ignored. */
+/** Same for Cash App. Amounts are often whole ($50). */
 export function parseCashapp(subject: string, text: string): Parsed | null {
   const hay = `${subject}\n${text}`;
-  // Skip our own outgoing payments, receipts and refunds. Cancellations DO come
-  // through (labelled), so they're not excluded here.
-  if (/(you sent|payment sent|you paid|payment to|receipt|refund)/i.test(hay)) return null;
+  // Subject-only exclusion — Cash App bodies carry "receipt" links and other
+  // words that would otherwise drop real incoming payments/requests.
+  if (/(you sent|payment sent|you paid|payment to|refund)/i.test(subject)) return null;
 
   // Cents optional: "$50" or "$50.00".
   const m = hay.match(/\$\s?([\d,]+(?:\.\d{2})?)/) ?? hay.match(/([\d,]+(?:\.\d{2})?)\s?USD/i);
@@ -146,12 +153,7 @@ export function parseCashapp(subject: string, text: string): Parsed | null {
   if (amount <= 0) return null;
 
   const isCancel = /(cancel(l)?ed|declined)/i.test(subject) && /request/i.test(hay);
-  const isRequest = /(requested \$|is requesting|request for \$|money request|sent you a request|request received)/i.test(hay);
+  const isRequest = /(requested \$|is requesting|request for \$|money request|sent you a request|request received|request from)/i.test(hay);
 
-  const nm = subject.match(/^([A-Za-z][\w .'-]{1,40}?)\s+(?:sent you|requested|is requesting|cancel(?:l)?ed|declined)/i)
-    ?? hay.match(/([A-Za-z][\w .'-]{1,40}?)\s+sent you/i)
-    ?? hay.match(/from\s+([A-Za-z][\w .'-]{1,40})/i);
-  const name = nm ? nm[1]!.trim() : null;
-
-  return { amount, currency: 'USD', name, kind: isCancel ? 'cancel' : isRequest ? 'request' : 'payment' };
+  return { amount, currency: 'USD', name: senderName(subject, text), kind: isCancel ? 'cancel' : isRequest ? 'request' : 'payment' };
 }
