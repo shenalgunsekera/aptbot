@@ -109,19 +109,17 @@ async function scan(
  *  it's neither, or an outgoing/receipt email, or we can't find an amount. */
 export function parsePaypal(subject: string, text: string): Parsed | null {
   const hay = `${subject}\n${text}`;
-  // Money leaving us or a plain receipt — ignore entirely.
+  // Skip only OUR OWN outgoing payments and plain purchase receipts — everything
+  // else with an amount is forwarded, so no incoming payment is ever missed.
   if (/(you sent|payment sent|you'?ve sent|receipt for your payment|you paid|authori[sz]ed a payment)/i.test(hay)) return null;
 
-  // A REQUEST for money ("sent you a money request", "is requesting $…").
-  const isRequest = /(money request|requested \$|requesting \$|requests \$|is requesting|sent you a request|wants \$)/i.test(hay);
-  // Money actually coming IN.
-  const moneyIn = /(sent you|you'?ve got money|you got money|you received|received \$)/i.test(hay);
-  if (!isRequest && !moneyIn) return null;
-
   const m = hay.match(/\$\s?([\d,]+\.\d{2})/) ?? hay.match(/([\d,]+\.\d{2})\s?USD/i);
-  if (!m) return null;
+  if (!m) return null;   // no amount at all → a login/security/marketing email, not money
   const amount = Math.round(parseFloat(m[1]!.replace(/,/g, '')) * 100);
   if (amount <= 0) return null;
+
+  // Is it a REQUEST for money ("sent you a money request", "is requesting $…")?
+  const isRequest = /(money request|requested \$|requesting \$|requests \$|is requesting|sent you a request|wants \$)/i.test(hay);
 
   const nm = subject.match(/^([A-Za-z][\w .'-]{1,40}?)\s+(?:sent you|requested|is requesting|wants)/i)
     ?? hay.match(/([A-Za-z][\w .'-]{1,40}?)\s+sent you/i)
@@ -135,17 +133,16 @@ export function parsePaypal(subject: string, text: string): Parsed | null {
  *  whole ($50, no cents). Cancellations are ignored. */
 export function parseCashapp(subject: string, text: string): Parsed | null {
   const hay = `${subject}\n${text}`;
+  // Skip our own outgoing, receipts, refunds, and cancellations.
   if (/(you sent|you paid|payment to|receipt|refund|cancel)/i.test(hay)) return null;
-
-  const isRequest = /(requested \$|is requesting|request for \$|money request|sent you a request|request received)/i.test(hay);
-  const moneyIn = /(sent you|you received|received \$|paid you)/i.test(hay);
-  if (!isRequest && !moneyIn) return null;
 
   // Cents optional: "$50" or "$50.00".
   const m = hay.match(/\$\s?([\d,]+(?:\.\d{2})?)/) ?? hay.match(/([\d,]+(?:\.\d{2})?)\s?USD/i);
   if (!m) return null;
   const amount = Math.round(parseFloat(m[1]!.replace(/,/g, '')) * 100);
   if (amount <= 0) return null;
+
+  const isRequest = /(requested \$|is requesting|request for \$|money request|sent you a request|request received)/i.test(hay);
 
   const nm = subject.match(/^([A-Za-z][\w .'-]{1,40}?)\s+(?:sent you|requested|is requesting)/i)
     ?? hay.match(/([A-Za-z][\w .'-]{1,40}?)\s+sent you/i)
