@@ -281,6 +281,15 @@ export function renderNotification(n: Notification): Rendered | null {
       const icon = p.source === 'paypal' ? '💚'
         : p.source === 'cashapp' ? '💵'
         : p.source === 'stripe' ? '💳' : '🪙';
+      // A money REQUEST (someone asking to be paid), not a payment in. Same source
+      // icon + 🧾 so it's instantly distinguishable from money received.
+      if (p.request) {
+        return {
+          text: `${icon}🧾 *Payment request* — ${m(p.amount, p.currency)} via ${p.method}` +
+            (p.name ? `\nFrom: *${p.name}*` : '') +
+            `\n\n_Someone is requesting this amount — pay it if it matches a cash-out._`,
+        };
+      }
       return p.matched
         ? {
             text: `${icon} *Payment received — ${p.approx ? '≈ ' : ''}${m(p.amount, p.currency)} via ${p.method}*` +

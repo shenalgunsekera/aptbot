@@ -62,7 +62,7 @@ export async function detectPaypalEmails(): Promise<number> {
   return count;
 }
 
-type Parsed = { amount: number; currency: string; name: string | null };
+type Parsed = { amount: number; currency: string; name: string | null; kind: 'payment' | 'request' };
 
 /** Search one sender, parse each match, and record any money-received emails.
  *  An email is ANNOUNCED only when it's newer than the watermark — so a real
@@ -97,42 +97,49 @@ async function scan(
       methodCode,
       amount: parsed.amount,
       currency: parsed.currency,
-      raw: { subject: mail.subject, name: parsed.name, stale },
+      raw: { subject: mail.subject, name: parsed.name, stale, request: parsed.kind === 'request' },
     });
     count++;
   }
   return count;
 }
 
-/** Pull the amount AND who sent it out of a PayPal "you've got money" email.
- *  Returns null if it's not a money-received email or we can't find an amount. */
+/** Parse a PayPal email into a payment received OR a money REQUEST (someone
+ *  asking to be paid — e.g. a cash-out request to our handle). Returns null if
+ *  it's neither, or an outgoing/receipt email, or we can't find an amount. */
 export function parsePaypal(subject: string, text: string): Parsed | null {
   const hay = `${subject}\n${text}`;
-  // Must read like money coming IN…
-  if (!/(sent you|you'?ve got money|you got money|you received|received \$)/i.test(hay)) return null;
-  // …and NOT like money going out or a plain receipt.
+  // Money leaving us or a plain receipt — ignore entirely.
   if (/(you sent|payment sent|you'?ve sent|receipt for your payment|you paid|authori[sz]ed a payment)/i.test(hay)) return null;
+
+  // A REQUEST for money ("sent you a money request", "is requesting $…").
+  const isRequest = /(money request|requested \$|requesting \$|requests \$|is requesting|sent you a request|wants \$)/i.test(hay);
+  // Money actually coming IN.
+  const moneyIn = /(sent you|you'?ve got money|you got money|you received|received \$)/i.test(hay);
+  if (!isRequest && !moneyIn) return null;
 
   const m = hay.match(/\$\s?([\d,]+\.\d{2})/) ?? hay.match(/([\d,]+\.\d{2})\s?USD/i);
   if (!m) return null;
   const amount = Math.round(parseFloat(m[1]!.replace(/,/g, '')) * 100);
   if (amount <= 0) return null;
 
-  // Who sent it: "Bob Smith sent you …" or "… received $X from Bob Smith".
-  const nm = subject.match(/^([A-Za-z][\w .'-]{1,40}?)\s+sent you/i)
+  const nm = subject.match(/^([A-Za-z][\w .'-]{1,40}?)\s+(?:sent you|requested|is requesting|wants)/i)
     ?? hay.match(/([A-Za-z][\w .'-]{1,40}?)\s+sent you/i)
     ?? hay.match(/from\s+([A-Za-z][\w .'-]{1,40})/i);
   const name = nm ? nm[1]!.trim() : null;
 
-  return { amount, currency: 'USD', name };
+  return { amount, currency: 'USD', name, kind: isRequest ? 'request' : 'payment' };
 }
 
-/** Same idea for Cash App. Its emails read "John Doe sent you $50" or "You
- *  received $50.00 from John Doe" — and amounts are often whole ($50, no cents). */
+/** Same idea for Cash App: a payment received OR a request. Amounts are often
+ *  whole ($50, no cents). Cancellations are ignored. */
 export function parseCashapp(subject: string, text: string): Parsed | null {
   const hay = `${subject}\n${text}`;
-  if (!/(sent you|you received|received \$|paid you)/i.test(hay)) return null;
-  if (/(you sent|you paid|payment to|receipt|refund)/i.test(hay)) return null;
+  if (/(you sent|you paid|payment to|receipt|refund|cancel)/i.test(hay)) return null;
+
+  const isRequest = /(requested \$|is requesting|request for \$|money request|sent you a request|request received)/i.test(hay);
+  const moneyIn = /(sent you|you received|received \$|paid you)/i.test(hay);
+  if (!isRequest && !moneyIn) return null;
 
   // Cents optional: "$50" or "$50.00".
   const m = hay.match(/\$\s?([\d,]+(?:\.\d{2})?)/) ?? hay.match(/([\d,]+(?:\.\d{2})?)\s?USD/i);
@@ -140,10 +147,10 @@ export function parseCashapp(subject: string, text: string): Parsed | null {
   const amount = Math.round(parseFloat(m[1]!.replace(/,/g, '')) * 100);
   if (amount <= 0) return null;
 
-  const nm = subject.match(/^([A-Za-z][\w .'-]{1,40}?)\s+sent you/i)
+  const nm = subject.match(/^([A-Za-z][\w .'-]{1,40}?)\s+(?:sent you|requested|is requesting)/i)
     ?? hay.match(/([A-Za-z][\w .'-]{1,40}?)\s+sent you/i)
     ?? hay.match(/from\s+([A-Za-z][\w .'-]{1,40})/i);
   const name = nm ? nm[1]!.trim() : null;
 
-  return { amount, currency: 'USD', name };
+  return { amount, currency: 'USD', name, kind: isRequest ? 'request' : 'payment' };
 }

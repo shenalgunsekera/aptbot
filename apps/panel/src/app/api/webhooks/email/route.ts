@@ -47,8 +47,8 @@ export async function POST(req: Request): Promise<Response> {
     amount: parsed.amount,
     currency: parsed.currency,
     // A push is always a fresh arrival — never mark it stale, always announce.
-    raw: { subject, name: parsed.name, stale: false },
+    raw: { subject, name: parsed.name, stale: false, request: parsed.kind === 'request' },
   });
 
-  return Response.json({ ok: true, detected: true, amount: parsed.amount, name: parsed.name });
+  return Response.json({ ok: true, detected: true, kind: parsed.kind, amount: parsed.amount, name: parsed.name });
 }
