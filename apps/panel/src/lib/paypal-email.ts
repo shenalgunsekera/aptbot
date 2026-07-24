@@ -105,19 +105,41 @@ async function scan(
 }
 
 /** Pull the sender/requester name out of a payment email — it lives in different
- *  places per provider and per kind (subject start, "X has canceled…", "sent $X
- *  by NAME", "request from NAME"). Tries each until one hits. */
+ *  places per provider and per kind. Names can be lower-case ("jennifer Setton"),
+ *  so the subject-start patterns are case-insensitive; the last-resort "from X"
+ *  is constrained and provider words ("PayPal", "Cash App") are rejected so we
+ *  never show "From: PayPal". */
 function senderName(subject: string, text: string): string | null {
   const hay = `${subject}\n${text}`;
-  const pats = [
-    /^([A-Z][A-Za-z'.-]+(?:\s+[A-Z][A-Za-z'.-]+){0,2})\s+(?:sent you|requested|is requesting|wants|cancel(?:l)?ed|declined)/,
-    /([A-Z][A-Za-z'.-]+(?:\s+[A-Z][A-Za-z'.-]+){0,2})\s+has\s+cancel(?:l)?ed/,
-    /sent\s+\$[\d,.]+\s+by\s+([A-Za-z][\w .'-]{0,40}?)[.\s]/i,
-    /request\s+from\s+([A-Za-z][\w .'-]{0,40}?)\s+(?:for\b|\.)/i,
-    /\bfrom\s+([A-Z][A-Za-z'.-]+(?:\s+[A-Z][A-Za-z'.-]+){0,2})/,
-  ];
-  for (const re of pats) { const m = hay.match(re); if (m && m[1]) return m[1].trim(); }
-  return null;
+  // A name is 1–3 word-tokens, ANY case (PayPal shows names as the user typed
+  // them, e.g. "jennifer Setton"). Word-bounded so it can't sweep across unrelated
+  // words, and each candidate spot is tried until one hits.
+  const raw =
+    // "jennifer Setton sent you …" / "… sent you a money request" — name leads the subject.
+    subject.match(/^(.{2,40}?)\s+(?:sent you|is requesting|wants\b)/i)?.[1]
+    // "Michael Luvish requested $30" / "… canceled a request" — name leads the subject.
+    ?? subject.match(/^([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,2})\s+(?:requested\b|cancel(?:l)?ed|declined)/i)?.[1]
+    // PayPal cancel body: "Brady Peters has canceled a money request".
+    ?? hay.match(/([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,2})\s+has\s+cancel(?:l)?ed/i)?.[1]
+    // Cash App payment body: "You were sent $100 by cake." / "… by John Doe. Receipt".
+    ?? hay.match(/sent\s+\$[\d,.]+\s+by\s+([A-Za-z][A-Za-z'. -]*?)(?:[.\n]|$)/i)?.[1]
+    // Cash App request body: "the $60 request from Ali Salem for …".
+    ?? hay.match(/\brequest\s+from\s+([A-Za-z][A-Za-z'. -]*?)(?:\s+for\b|[.\n]|$)/i)?.[1]
+    // "requested $30 from jennifer" / "requesting … from NAME".
+    ?? hay.match(/request(?:ed|ing)?\b[^.\n]*?\bfrom\s+([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,2})/i)?.[1]
+    // Last resort: "from Name".
+    ?? hay.match(/\bfrom\s+([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,2})/i)?.[1]
+    ?? null;
+
+  if (!raw) return null;
+  // Trim trailing punctuation and any leading provider word ("PayPal Brady Peters"
+  // → "Brady Peters"). A bare provider name is not a person → no name at all.
+  const name = raw.trim()
+    .replace(/[,;:]+$/, '')
+    .replace(/^(paypal|cash\s?app|venmo|zelle|square)\s+/i, '')
+    .trim();
+  if (!name || /^(paypal|cash\s?app|venmo|zelle|square)$/i.test(name)) return null;
+  return name;
 }
 
 /** Parse a PayPal email into payment received / money REQUEST / CANCELLED request.
