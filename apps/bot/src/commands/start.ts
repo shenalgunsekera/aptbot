@@ -43,8 +43,8 @@ export async function start(ctx: Ctx): Promise<void> {
         `💸 /withdraw — cash out\n` +
         `📄 /payments — your payments & receipts\n` +
         `📋 /pending — your account\n` +
-        `➕ /editplatform · 🏆 /editclubs · 💳 /methods · 🏦 /payout — update your setup\n` +
-        `💬 /support — message our team`,
+        `➕ /editplatform · 🏆 /editclubs · 💳 /editdeposit · 🏦 /editwithdraw — update your setup\n` +
+        `💬 /support — message our team · 📖 /guide — what each command does`,
     );
     return;
   }

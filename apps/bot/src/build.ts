@@ -48,9 +48,10 @@ export const PLAYER_COMMANDS = [
   { command: 'payments', description: 'Completed payments & receipts' },
   { command: 'editplatform', description: 'Add or remove ClubGG / Sportsbook' },
   { command: 'editclubs', description: 'Change which clubs you play in' },
-  { command: 'methods', description: 'Change your payment methods' },
-  { command: 'payout', description: 'Change how you get paid' },
+  { command: 'editdeposit', description: 'Change how you deposit (payment methods)' },
+  { command: 'editwithdraw', description: 'Change how you get paid' },
   { command: 'support', description: 'Message our team' },
+  { command: 'guide', description: 'What each command does' },
   { command: 'help', description: 'What I can do' },
 ];
 export const GROUP_COMMANDS = [
@@ -128,8 +129,26 @@ export function buildBot(token: string): Bot<Ctx> {
       `💵 /deposit — add money\n💸 /withdraw — cash out\n⏳ /pending — your pending cash-outs\n` +
         `📄 /payments — your completed payments & receipts\n` +
         `✖️ /canceldeposit — cancel your latest unpaid deposit\n` +
-        `➕ /editplatform · 🏆 /editclubs · 💳 /methods · 🏦 /payout — update your setup\n` +
-        `💬 /support — message our team\n/cancel — stop what you're doing`,
+        `➕ /editplatform · 🏆 /editclubs · 💳 /editdeposit · 🏦 /editwithdraw — update your setup\n` +
+        `💬 /support — message our team\n📖 /guide — what each command does\n/cancel — stop what you're doing`,
+    ),
+  );
+  bot.command('guide', (ctx) =>
+    ctx.reply(
+      `📖 *What each command does*\n\n` +
+        `💵 */deposit* — add money to your account. Pick where it goes, how you're paying, and the amount.\n` +
+        `✖️ */canceldeposit* — cancel your most recent deposit if you haven't paid yet.\n` +
+        `💸 */withdraw* — cash out. We take it off your table and pay you the way you've set up.\n` +
+        `⏳ */pending* — see deposits and cash-outs still in progress, and cancel a cash-out if you need to.\n` +
+        `📄 */payments* — your history of completed payments and receipts.\n\n` +
+        `*Change your setup anytime:*\n` +
+        `➕ */editplatform* — add or remove ClubGG / Sportsbook.\n` +
+        `🏆 */editclubs* — change which clubs you play in.\n` +
+        `💳 */editdeposit* — change which payment methods you deposit with.\n` +
+        `🏦 */editwithdraw* — change how you get paid when you cash out.\n\n` +
+        `💬 */support* — message our team directly.\n` +
+        `🛑 */cancel* — stop whatever you're in the middle of.`,
+      { parse_mode: 'Markdown' },
     ),
   );
 
@@ -141,8 +160,8 @@ export function buildBot(token: string): Bot<Ctx> {
   bot.command(['support', 'help_me', 'contact'], dmOnly(supportStart));
 
   // Update your setup later.
-  bot.command(['methods', 'depositmethods'], dmOnly(updateMethods));
-  bot.command(['payout', 'cashoutmethod'], dmOnly(updatePayout));
+  bot.command(['editdeposit', 'methods', 'depositmethods'], dmOnly(updateMethods));
+  bot.command(['editwithdraw', 'payout', 'cashoutmethod'], dmOnly(updatePayout));
   bot.command(['editplatform', 'addplatform'], dmOnly(addPlatform));
   bot.command(['editclubs', 'clubs'], dmOnly(editClubs));
 

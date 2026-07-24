@@ -281,13 +281,20 @@ export function renderNotification(n: Notification): Rendered | null {
       const icon = p.source === 'paypal' ? '💚'
         : p.source === 'cashapp' ? '💵'
         : p.source === 'stripe' ? '💳' : '🪙';
-      // A money REQUEST (someone asking to be paid), not a payment in. Same source
-      // icon + 🧾 so it's instantly distinguishable from money received.
-      if (p.request) {
+      // Not money received: a REQUEST to be paid, or a CANCELLED request. Same
+      // source icon + a unique emoji so each is distinguishable at a glance.
+      if (p.kind === 'request' || p.request) {
         return {
           text: `${icon}🧾 *Payment request* — ${m(p.amount, p.currency)} via ${p.method}` +
             (p.name ? `\nFrom: *${p.name}*` : '') +
             `\n\n_Someone is requesting this amount — pay it if it matches a cash-out._`,
+        };
+      }
+      if (p.kind === 'cancel') {
+        return {
+          text: `${icon}🚫 *Request cancelled* — ${m(p.amount, p.currency)} via ${p.method}` +
+            (p.name ? `\nFrom: *${p.name}*` : '') +
+            `\n\n_A money request was cancelled — no action needed._`,
         };
       }
       return p.matched

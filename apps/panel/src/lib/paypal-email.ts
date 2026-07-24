@@ -62,7 +62,7 @@ export async function detectPaypalEmails(): Promise<number> {
   return count;
 }
 
-type Parsed = { amount: number; currency: string; name: string | null; kind: 'payment' | 'request' };
+type Parsed = { amount: number; currency: string; name: string | null; kind: 'payment' | 'request' | 'cancel' };
 
 /** Search one sender, parse each match, and record any money-received emails.
  *  An email is ANNOUNCED only when it's newer than the watermark — so a real
@@ -97,7 +97,7 @@ async function scan(
       methodCode,
       amount: parsed.amount,
       currency: parsed.currency,
-      raw: { subject: mail.subject, name: parsed.name, stale, request: parsed.kind === 'request' },
+      raw: { subject: mail.subject, name: parsed.name, stale, kind: parsed.kind },
     });
     count++;
   }
@@ -118,23 +118,26 @@ export function parsePaypal(subject: string, text: string): Parsed | null {
   const amount = Math.round(parseFloat(m[1]!.replace(/,/g, '')) * 100);
   if (amount <= 0) return null;
 
-  // Is it a REQUEST for money ("sent you a money request", "is requesting $…")?
+  // Three kinds: a CANCELLED request ("X canceled a request…"), an open REQUEST
+  // ("sent you a money request"), or money actually RECEIVED.
+  const isCancel = /(cancel(l)?ed|declined)/i.test(subject) && /request/i.test(hay);
   const isRequest = /(money request|requested \$|requesting \$|requests \$|is requesting|sent you a request|wants \$)/i.test(hay);
 
-  const nm = subject.match(/^([A-Za-z][\w .'-]{1,40}?)\s+(?:sent you|requested|is requesting|wants)/i)
+  const nm = subject.match(/^([A-Za-z][\w .'-]{1,40}?)\s+(?:sent you|requested|is requesting|wants|cancel(?:l)?ed|declined)/i)
     ?? hay.match(/([A-Za-z][\w .'-]{1,40}?)\s+sent you/i)
     ?? hay.match(/from\s+([A-Za-z][\w .'-]{1,40})/i);
   const name = nm ? nm[1]!.trim() : null;
 
-  return { amount, currency: 'USD', name, kind: isRequest ? 'request' : 'payment' };
+  return { amount, currency: 'USD', name, kind: isCancel ? 'cancel' : isRequest ? 'request' : 'payment' };
 }
 
 /** Same idea for Cash App: a payment received OR a request. Amounts are often
  *  whole ($50, no cents). Cancellations are ignored. */
 export function parseCashapp(subject: string, text: string): Parsed | null {
   const hay = `${subject}\n${text}`;
-  // Skip our own outgoing, receipts, refunds, and cancellations.
-  if (/(you sent|you paid|payment to|receipt|refund|cancel)/i.test(hay)) return null;
+  // Skip our own outgoing payments, receipts and refunds. Cancellations DO come
+  // through (labelled), so they're not excluded here.
+  if (/(you sent|payment sent|you paid|payment to|receipt|refund)/i.test(hay)) return null;
 
   // Cents optional: "$50" or "$50.00".
   const m = hay.match(/\$\s?([\d,]+(?:\.\d{2})?)/) ?? hay.match(/([\d,]+(?:\.\d{2})?)\s?USD/i);
@@ -142,12 +145,13 @@ export function parseCashapp(subject: string, text: string): Parsed | null {
   const amount = Math.round(parseFloat(m[1]!.replace(/,/g, '')) * 100);
   if (amount <= 0) return null;
 
+  const isCancel = /(cancel(l)?ed|declined)/i.test(subject) && /request/i.test(hay);
   const isRequest = /(requested \$|is requesting|request for \$|money request|sent you a request|request received)/i.test(hay);
 
-  const nm = subject.match(/^([A-Za-z][\w .'-]{1,40}?)\s+(?:sent you|requested|is requesting)/i)
+  const nm = subject.match(/^([A-Za-z][\w .'-]{1,40}?)\s+(?:sent you|requested|is requesting|cancel(?:l)?ed|declined)/i)
     ?? hay.match(/([A-Za-z][\w .'-]{1,40}?)\s+sent you/i)
     ?? hay.match(/from\s+([A-Za-z][\w .'-]{1,40})/i);
   const name = nm ? nm[1]!.trim() : null;
 
-  return { amount, currency: 'USD', name, kind: isRequest ? 'request' : 'payment' };
+  return { amount, currency: 'USD', name, kind: isCancel ? 'cancel' : isRequest ? 'request' : 'payment' };
 }
