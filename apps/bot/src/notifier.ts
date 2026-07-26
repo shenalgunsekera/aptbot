@@ -338,6 +338,22 @@ export function renderNotification(n: Notification): Rendered | null {
       };
     case 'withdraw.reduced_player':
       return { text: `➖ *${m(p.back, p.currency)}* is coming back to your table. Your cash out is now *${m(p.new_total, p.currency)}*.` };
+    case 'withdraw.adjusted': {
+      const up = Number(p.delta) > 0;
+      return {
+        text: `✏️ *Cash out adjusted for ${p.name ?? 'a player'}*\n\n` +
+          `${up ? 'Added' : 'Removed'} *${m(Math.abs(Number(p.delta)), p.currency)}* ${up ? 'to' : 'from'} their cash out ` +
+          `(now ${m(p.new_total, p.currency)}).${p.reason ? `\n_Reason: ${p.reason}_` : ''}`,
+      };
+    }
+    case 'withdraw.adjusted_player': {
+      const up = Number(p.delta) > 0;
+      return {
+        text: up
+          ? `➕ *${m(Number(p.delta), p.currency)}* was added to your cash out — it's now *${m(p.new_total, p.currency)}*.${p.reason ? `\n_${p.reason}_` : ''}`
+          : `➖ *${m(-Number(p.delta), p.currency)}* was taken off your cash out — it's now *${m(p.new_total, p.currency)}*.${p.reason ? `\n_${p.reason}_` : ''}`,
+      };
+    }
     case 'sportsbook.create':
       return {
         text: `🆕 *Create a Sportsbook account*\n\nFor: *${p.name}*\n` +

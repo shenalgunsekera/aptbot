@@ -17,6 +17,7 @@ import {
   addStart, addPickPlatform, addPickClub, addPickCrypto, addMethodBack, addAmount, addPickMethod,
   addReceipt, addDone, stripeReceipt, cancelDeposit,
 } from './commands/add.js';
+import { adminAdd, adminRemove } from './commands/adjust.js';
 import {
   cashoutStart, cashoutPickPlatform, cashoutPickClub, cashoutAmount, cashoutPickMethod,
   cashoutSavedHandle, cashoutSavedMethod, cashoutHandle, cashoutRetract,
@@ -152,7 +153,13 @@ export function buildBot(token: string): Bot<Ctx> {
     ),
   );
 
-  bot.command(['deposit', 'add'], dmOnly(addStart));
+  bot.command('deposit', dmOnly(addStart));
+  // /add and /remove are admin cash-out adjustments run in the player's own chat
+  // (auto-detected). For a non-admin, /add falls back to the deposit flow, so the
+  // player-facing meaning of /add is unchanged. NOT dmOnly — admins act in the
+  // chat where the issue is.
+  bot.command('add', adminAdd);
+  bot.command('remove', adminRemove);
   bot.command('canceldeposit', dmOnly(cancelDeposit));
   bot.command(['withdraw', 'cashout'], dmOnly(cashoutStart));
   bot.command(['pending', 'me'], dmOnly(me));
