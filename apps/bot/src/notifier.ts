@@ -42,8 +42,8 @@ export class Notifier {
 
   async tick(): Promise<number> {
     const sql = db();
-    const [cfg] = await sql<{ admin_group_chat_id: number | null }[]>`
-      select admin_group_chat_id from config where id`;
+    const [cfg] = await sql<{ admin_group_chat_id: number | null; payments_channel_chat_id: number | null }[]>`
+      select admin_group_chat_id, payments_channel_chat_id from config where id`;
 
     // Atomically LEASE a batch by pushing send_after 90s into the future. Two
     // drainers run concurrently in production (this webhook path + the panel's
@@ -55,7 +55,7 @@ export class Notifier {
     const rows = await sql<Notification[]>`
       with c as (
         select id from notifications
-         where status = 'pending' and send_after <= now()
+         where status = 'pending' and send_after <= now() and platform = 'telegram'
          order by id limit 20
            for update skip locked
       )
@@ -79,7 +79,10 @@ export class Notifier {
       // Resolve the destination chat.
       let chatId: number | null = null;
       if (n.audience === 'admins') {
-        chatId = cfg?.admin_group_chat_id ?? null;
+        // The money-in feed goes to its own channel when one is set; everything
+        // else (adjustments, verify, loader work…) stays in the admin group.
+        chatId = (n.kind === 'payment.detected' ? cfg?.payments_channel_chat_id : null)
+          ?? cfg?.admin_group_chat_id ?? null;
         // No group set: fall back to fanning out to each linked admin.
         if (!chatId) { await this.fanOutToAdmins(n); continue; }
       } else {

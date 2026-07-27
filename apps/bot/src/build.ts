@@ -58,6 +58,7 @@ export const PLAYER_COMMANDS = [
 export const GROUP_COMMANDS = [
   ...PLAYER_COMMANDS,
   { command: 'setadmingroup', description: 'Make this the admin group (admins only)' },
+  { command: 'paymentchannel', description: 'Make this the payments feed (admins only)' },
   { command: 'setadmin', description: 'Add an admin (owner only)' },
   { command: 'p2p', description: 'Venmo/Zelle backstop handle (admins)' },
 ];
@@ -184,6 +185,26 @@ export function buildBot(token: string): Bot<Ctx> {
     await ctx.reply(row?.admin_group_claim
       ? '✅ This group is now the admin group. All notifications and jobs will come here.'
       : '⛔ Only an admin can do that. (Your Telegram account must be linked as an admin first.)');
+  });
+
+  // The money-in feed gets its own channel. Run /paymentchannel inside the group
+  // you want the "payment received" alerts to go to. /adminchannel is an alias
+  // for /setadmingroup for symmetry.
+  bot.command(['paymentchannel', 'setpaymentchannel'], async (ctx) => {
+    if (ctx.chat?.type === 'private') return void (await ctx.reply('Run this inside the group you want the payments feed in.'));
+    const [row] = await db()<{ payment_channel_claim: boolean }[]>`
+      select payment_channel_claim(${ctx.chat.id}::bigint, ${ctx.from!.id}::bigint)`;
+    await ctx.reply(row?.payment_channel_claim
+      ? '✅ This channel is now the *payments feed* — every detected payment lands here.'
+      : '⛔ Only an admin can do that.', { parse_mode: 'Markdown' });
+  });
+  bot.command('adminchannel', async (ctx) => {
+    if (ctx.chat?.type === 'private') return void (await ctx.reply('Run this inside your admin group.'));
+    const [row] = await db()<{ admin_group_claim: boolean }[]>`
+      select admin_group_claim(${ctx.chat.id}::bigint, ${ctx.from!.id}::bigint)`;
+    await ctx.reply(row?.admin_group_claim
+      ? '✅ This group is now the admin group (adjustments, verifications, and everything except the payments feed).'
+      : '⛔ Only an admin can do that.', { parse_mode: 'Markdown' });
   });
 
   // Owner adds admins by tagging them. Works in the group or a DM.

@@ -70,15 +70,15 @@ export async function drainNotifications(bot: BotT, limit = 25): Promise<number>
   const { renderNotification } = await import('@union/bot/build');
   const sql = db();
 
-  const [cfg] = await sql<{ admin_group_chat_id: number | null }[]>`
-    select admin_group_chat_id from config where id`;
+  const [cfg] = await sql<{ admin_group_chat_id: number | null; payments_channel_chat_id: number | null }[]>`
+    select admin_group_chat_id, payments_channel_chat_id from config where id`;
   // Atomically LEASE the batch (push send_after out) so this drain and the bot's
   // webhook drain can't both grab a row and send it twice — `for update skip
   // locked` alone doesn't prevent that once the SELECT autocommits. See notifier.ts.
   const rows = await sql<any[]>`
     with c as (
       select id from notifications
-       where status = 'pending' and send_after <= now()
+       where status = 'pending' and send_after <= now() and platform = 'telegram'
        order by id limit ${limit}
          for update skip locked
     )
@@ -101,7 +101,9 @@ export async function drainNotifications(bot: BotT, limit = 25): Promise<number>
     const cm = chatMap.get(Number(n.id));
     // Player notifications go to the chat the player actually uses (their group),
     // not their DM — see 0020. Admin rows go to the admin group.
-    const chatId = n.audience === 'admins' ? cfg?.admin_group_chat_id : (cm?.player_chat ?? cm?.admin_tg);
+    const chatId = n.audience === 'admins'
+      ? ((n.kind === 'payment.detected' ? cfg?.payments_channel_chat_id : null) ?? cfg?.admin_group_chat_id)
+      : (cm?.player_chat ?? cm?.admin_tg);
     const msg = renderNotification(n);
     if (!chatId || !msg) { await sql`update notifications set status='skipped' where id=${n.id}`; continue; }
     try {
