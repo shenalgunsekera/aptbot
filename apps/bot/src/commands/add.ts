@@ -227,6 +227,9 @@ export async function addPickMethod(
 
 // ─── Stripe: one fixed payment link, player types the amount on Stripe ────────
 const STRIPE_LINK = () => process.env.STRIPE_PAYMENT_LINK ?? 'https://buy.stripe.com/5kQbJ2gdf2BE9TtbGDc3m07';
+// The Stripe payment link caps at $500, so show that ceiling here rather than the
+// global deposit max_amount.
+const STRIPE_MAX_CENTS = 50000;
 
 async function startStripeDeposit(ctx: Ctx, platformId: string): Promise<void> {
   const [cfg] = await db()<{ min_amount: number; max_amount: number }[]>`
@@ -236,7 +239,7 @@ async function startStripeDeposit(ctx: Ctx, platformId: string): Promise<void> {
   await ctx.reply(
     `💳 *Pay by Card, Apple Pay, or Cash App Pay*\n\n` +
       `Tap below, then on the page *enter the amount you want to add* ` +
-      `(between ${whole(cfg.min_amount)} and ${whole(cfg.max_amount)}) and pay.\n\n` +
+      `(between ${whole(cfg.min_amount)} and ${whole(STRIPE_MAX_CENTS)}) and pay.\n\n` +
       `When you're done, come back here and *send a screenshot of the "Thanks for your payment" screen* ` +
       `so we can confirm it and add your money.`,
     { parse_mode: 'Markdown', reply_markup: new InlineKeyboard().url('💳 Pay now', STRIPE_LINK()) },
