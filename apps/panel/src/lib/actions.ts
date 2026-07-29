@@ -95,6 +95,17 @@ export async function adjustPlayer(
   }, ['/players', '/']);
 }
 
+/** HARD-DELETE a player and every record tied to them (both platforms). Owner
+ *  only, irreversible — the DB function wipes deposits, cash-outs, fills, ledger,
+ *  receipts, disputes, notifications, handles, and identities in one transaction. */
+export async function deletePlayer(playerId: string): Promise<Result> {
+  return run(async () => {
+    const s = await requireOwner();
+    await db()`select player_delete(${playerId}::uuid, ${s.admin.id}::uuid)`;
+    return 'Player and all their records were permanently deleted.';
+  }, ['/players', '/']);
+}
+
 // ─── Payments (fills) ────────────────────────────────────────────────────────
 
 export async function verifyPayment(fillId: string, note: string): Promise<Result> {

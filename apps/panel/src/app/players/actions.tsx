@@ -1,7 +1,7 @@
 'use client';
 
 import { ActionButton, PromptAction } from '../../components/ui';
-import { confirmPlayer, setPlayerStatus, adjustPlayer, approveSportsbook } from '../../lib/actions';
+import { confirmPlayer, setPlayerStatus, adjustPlayer, approveSportsbook, deletePlayer } from '../../lib/actions';
 
 /** A Sportsbook account the club must CREATE. Shows the desired credentials; the
  *  button marks it created (on APT Sports) and auto-resumes the player. */
@@ -99,6 +99,20 @@ export function PlayerActions({
             const pf = platforms.find((p) => p.name.toLowerCase() === v.platform?.trim().toLowerCase());
             if (!pf) return { ok: false as const, error: `Unknown platform. Use: ${platforms.map((p) => p.name).join(', ')}` };
             return adjustPlayer(player.id, pf.id, minor, player.currency, v.reason ?? '');
+          }}
+        />
+      )}
+
+      {isOwner && (
+        <PromptAction
+          label="Delete player"
+          title={`Permanently delete ${player.name}`}
+          variant="danger"
+          confirm={`This ERASES ${player.name} and ALL their history — deposits, cash-outs, payments, receipts, ledger entries, and both platform identities. It CANNOT be undone.`}
+          fields={[{ name: 'name', label: `Type the player's name to confirm`, placeholder: player.name, required: true }]}
+          action={async (v) => {
+            if ((v.name ?? '').trim() !== player.name) return { ok: false as const, error: 'Name did not match — nothing was deleted.' };
+            return deletePlayer(player.id);
           }}
         />
       )}
