@@ -40,6 +40,7 @@ export async function sendConfirmCard(ctx: Ctx, f: Fill, methodName: string): Pr
       `Amount: *${money(f.amount, f.currency)}*\n` +
       `Method: ${methodName}\n` +
       `Sent to: \`${f.payout_handle}\`\n` +
+      (f.payout_name ? `Name: *${f.payout_name}*\n` : '') +
       `Transaction ID: \`${f.payment_ref}\`\n\n` +
       `*Check your ${methodName} before you answer.*\n` +
       `Saying yes releases their money — it can't be undone.` +

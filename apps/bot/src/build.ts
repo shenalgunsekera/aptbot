@@ -7,7 +7,7 @@ import { dmOnly, playerOnly, isAdminGroup } from './guards.js';
 import { Notifier } from './notifier.js';
 import { start, me } from './commands/start.js';
 import {
-  advance, obName, obSbUser, obSbPass, obSbUsername, obClubggId, obWdHandle,
+  advance, obName, obSbUser, obSbPass, obSbUsername, obClubggId, obWdHandle, obWdName,
   obTogglePlatform, obPlatformsDone, obSbHasAccount, obToggleDepMethod, obDepView, obDepMethodsDone,
   obToggleWdMethod, obWdView, obWdMethodsDone, obResume, updateMethods, updatePayout, addPlatform,
   obToggleClub, obClubsDone, editClubs, clubsPickPlatform, clubsEditToggle, clubsEditDone,
@@ -425,6 +425,7 @@ export function buildBot(token: string): Bot<Ctx> {
       case 'ob:sb_username': return void (await obSbUsername(ctx, text));
       case 'ob:clubgg_id': return void (await obClubggId(ctx, text));
       case 'ob:wd_handle': return void (await obWdHandle(ctx, step.methodId, text));
+      case 'ob:wd_name': return void (await obWdName(ctx, step.methodId, step.handle, text));
       case 'ob:sb_wait':
         return void (await ctx.reply("We're still setting up your Sportsbook account — you'll get a message here the moment it's ready. 🙏"));
       // Money flows

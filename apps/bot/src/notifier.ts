@@ -193,6 +193,8 @@ export function renderNotification(n: Notification): Rendered | null {
       const text = `*🏦 Payment to verify — receipt${imgs.length > 1 ? 's' : ''} attached*\n\n` +
         `${p.name ? 'From: *' + p.name + '*\n' : ''}` +
         `Amount: *${m(p.amount, p.currency)}* (${p.method})` +
+        (p.payout_handle ? `\nTo: \`${p.payout_handle}\`` : '') +
+        (p.payout_name ? `\nName: *${p.payout_name}*` : '') +
         (p.payment_ref ? `\nReference: \`${p.payment_ref}\`` : '') +
         `\n\nCheck it landed, then release.`;
       const keyboard = new InlineKeyboard().text('✅ Verify & release', `fl:verify:${p.fill_id}`);

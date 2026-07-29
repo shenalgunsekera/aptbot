@@ -521,9 +521,31 @@ export async function obWdHandle(ctx: Ctx, methodId: string, text: string): Prom
   // Default method is set in obWdMethodsDone (first chosen). Here we just save the
   // destination for this method.
   await sql`select payout_handle_remember(${p.id}::uuid, ${methodId}::uuid, ${text.trim()})`;
+
+  // Zelle is addressed by handle AND the account holder's name — collect it now.
+  if (m?.code === 'zelle') {
+    ctx.session.step = { name: 'ob:wd_name', methodId, handle: text.trim() };
+    await ctx.reply(
+      `✅ Saved your *Zelle* — \`${text.trim()}\`.\n\nZelle also needs the *name on the account*. ` +
+        `What's the *first & last name* on your Zelle?`,
+      { parse_mode: 'Markdown' },
+    );
+    return;
+  }
+
   await ctx.reply(`✅ Saved your *${m?.name}* — \`${text.trim()}\`.`, { parse_mode: 'Markdown' });
 
   // Move to the next chosen method that still needs a handle.
+  if (ctx.session.ob) ctx.session.ob.wdQueue = (ctx.session.ob.wdQueue ?? []).filter((id) => id !== methodId);
+  await askNextWdHandle(ctx);
+}
+
+/** Zelle only: the account holder's name, saved onto the handle we just stored. */
+export async function obWdName(ctx: Ctx, methodId: string, handle: string, text: string): Promise<void> {
+  const p = await currentPlayer(ctx);
+  if (!p) return;
+  await db()`select payout_handle_remember(${p.id}::uuid, ${methodId}::uuid, ${handle}, null, ${text.trim()})`;
+  await ctx.reply(`✅ Zelle name saved — *${text.trim()}*.`, { parse_mode: 'Markdown' });
   if (ctx.session.ob) ctx.session.ob.wdQueue = (ctx.session.ob.wdQueue ?? []).filter((id) => id !== methodId);
   await askNextWdHandle(ctx);
 }

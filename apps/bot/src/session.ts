@@ -24,6 +24,7 @@ export type Step =
   | { name: 'ob:dep_methods' }
   | { name: 'ob:wd_method' }
   | { name: 'ob:wd_handle'; methodId: string }
+  | { name: 'ob:wd_name'; methodId: string; handle: string }
   // add money — method is chosen BEFORE amount, so Stripe (fixed link) can skip
   // the amount step entirely.
   | { name: 'add:platform' }

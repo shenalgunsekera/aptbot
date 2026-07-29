@@ -111,6 +111,7 @@ export interface Fill {
   credit_amount: number;
   gross_to_send: number;
   payout_handle: string;
+  payout_name: string | null;
   status: FillStatus;
   lock_expires_at: string;
   payment_ref: string | null;

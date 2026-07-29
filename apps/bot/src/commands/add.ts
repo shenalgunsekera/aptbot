@@ -281,6 +281,7 @@ async function runMatch(ctx: Ctx, platformId: string, amount: number, methodId: 
       lines.push(`_(${money(f.amount, f.currency)} + ${money(f.gross_to_send - f.amount, f.currency)} ${m!.name} fee, so they get the full amount)_`);
     }
     lines.push(`Address: \`${f.payout_handle}\`  _(tap to copy)_`);
+    if (f.payout_name) lines.push(`Name on ${m!.name}: *${f.payout_name}*`);
     if (f.withdraw_id !== null) lines.push(`_This is another player's ${m!.name}._`);
     lines.push('');
   }
@@ -465,10 +466,10 @@ async function sendReceiptsToReviewer(fillId: string): Promise<void> {
   const sql = db();
   const [f] = await sql<{
     amount: number; currency: string; payment_ref: string | null;
-    method: string; depositor_name: string | null;
+    method: string; depositor_name: string | null; payout_handle: string | null; payout_name: string | null;
   }[]>`
     select f.amount, f.currency, f.payment_ref, pm.name as method,
-           dp.display_name as depositor_name
+           f.payout_handle, f.payout_name, dp.display_name as depositor_name
       from fills f
       join payment_methods pm on pm.id = f.method_id
       left join deposit_requests d on d.id = f.deposit_id
@@ -488,6 +489,7 @@ async function sendReceiptsToReviewer(fillId: string): Promise<void> {
     fill_id: fillId, file_ids: fileIds, urls,
     amount: f.amount, currency: f.currency, payment_ref: f.payment_ref,
     method: f.method, name: f.depositor_name,
+    payout_handle: f.payout_handle, payout_name: f.payout_name,
   };
   await sql`select notify_admins('fill.receipt_admin', 'fill', ${fillId}::uuid, ${sql.json(payload)}::jsonb)`;
 }
