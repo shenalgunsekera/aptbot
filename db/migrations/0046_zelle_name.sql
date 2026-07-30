@@ -11,6 +11,9 @@ alter table payout_handles add column if not exists holder_name text;
 alter table fills          add column if not exists payout_name text;
 
 -- Remember a payout destination, now optionally with the holder's name (Zelle).
+-- Adding a parameter would create an OVERLOAD (not replace), making the existing
+-- 3-arg calls ambiguous — so drop the old 4-arg version first.
+drop function if exists payout_handle_remember(uuid, uuid, text, text);
 create or replace function payout_handle_remember(
   p_player_id uuid,
   p_method_id uuid,
