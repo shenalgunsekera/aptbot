@@ -28,7 +28,7 @@ import { payments } from './commands/payments.js';
 import { supportStart, relayInquiryToAdmins, maybeRelayAdminReply } from './commands/support.js';
 import { setAdmin, approvePlayer } from './admin-mgmt.js';
 import {
-  loaderClaim, loaderDone, loaderShort, loaderFail, fillVerify, withdrawPayPrompt, withdrawPayConfirm,
+  loaderClaim, loaderDone, loaderShort, loaderFail, fillVerify, fillDiscard, withdrawPayPrompt, withdrawPayConfirm,
   stripeCreditPrompt, stripeCreditConfirm, stripeCreditOk,
   p2pStatus, p2pWait, p2pOn, p2pSetPrompt, p2pSetConfirm,
 } from './admin-actions.js';
@@ -337,6 +337,8 @@ export function buildBot(token: string): Bot<Ctx> {
   bot.callbackQuery(/^lo:short:(.+)$/, (ctx) => loaderShort(ctx, ctx.match![1]!));
   bot.callbackQuery(/^lo:fail:(.+)$/, (ctx) => loaderFail(ctx, ctx.match![1]!));
   bot.callbackQuery(/^fl:verify:(.+)$/, (ctx) => fillVerify(ctx, ctx.match![1]!));
+  bot.callbackQuery(/^fv:verify:(.+)$/, (ctx) => fillVerify(ctx, ctx.match![1]!));
+  bot.callbackQuery(/^fv:discard:(.+)$/, (ctx) => fillDiscard(ctx, ctx.match![1]!));
   bot.callbackQuery(/^pl:approve:(.+)$/, (ctx) => approvePlayer(ctx, ctx.match![1]!));
   bot.callbackQuery(/^wd:pay:(.+)$/, (ctx) => withdrawPayPrompt(ctx, ctx.match![1]!));
   bot.callbackQuery(/^sb:made:(.+)$/, (ctx) => sbCreated(ctx, ctx.match![1]!));

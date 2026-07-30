@@ -75,7 +75,8 @@ export async function loaderDone(ctx: Ctx, orderId: string, actualDelta: number)
     throw err;
   }
   await ctx.answerCallbackQuery({ text: 'Done — saved.' });
-  await ctx.editMessageText(`✅ *Done* — ${actualDelta === 0 ? 'nothing was available' : money(Math.abs(actualDelta))} · by ${ctx.from?.first_name ?? 'admin'}`, { parse_mode: 'Markdown' });
+  await editCard(ctx, `✅ *Transaction completed by ${ctx.from?.first_name ?? 'admin'}*` +
+    (actualDelta === 0 ? ' — nothing was available' : ` — ${money(Math.abs(actualDelta))}`));
 }
 
 /** Loader taps "different amount" → we ask them to type it. */
@@ -104,7 +105,7 @@ export async function loaderFail(ctx: Ctx, orderId: string): Promise<void> {
     throw err;
   }
   await ctx.answerCallbackQuery({ text: 'Marked failed.' });
-  await ctx.editMessageText(`❌ *Failed* · by ${ctx.from?.first_name ?? 'admin'}`, { parse_mode: 'Markdown' });
+  await editCard(ctx, `❌ *Failed* · by ${ctx.from?.first_name ?? 'admin'}`);
 }
 
 /** Admin taps "I paid it" on a club-mediated cash out → ask for the tx id. */
@@ -251,6 +252,20 @@ export async function p2pSetConfirm(ctx: Ctx, code: string, handle: string): Pro
 }
 
 /** Verify a fill (release money) from the group. */
+/** Update the card IN PLACE — works whether it's a photo (receipt) card, whose
+ *  text lives in the caption, or a plain text card. */
+async function editCard(ctx: Ctx, text: string, kb?: InlineKeyboard): Promise<void> {
+  const opts = { parse_mode: 'Markdown' as const, ...(kb ? { reply_markup: kb } : {}) };
+  try { await ctx.editMessageCaption({ caption: text, ...opts }); }
+  catch { try { await ctx.editMessageText(text, opts); } catch { /* gone or unchanged */ } }
+}
+
+/**
+ * ✅ Verify — the whole thing in ONE message. Verifies & releases the payment
+ * (the player is told their money is on its way), then immediately CLAIMS the
+ * loader task the release created — locking it to this admin — and turns the
+ * same card into the Done/Failed step. No separate "claim" message.
+ */
 export async function fillVerify(ctx: Ctx, fillId: string): Promise<void> {
   const admin = await adminFor(ctx);
   if (!admin) return void (await ctx.answerCallbackQuery({ text: 'Admins only.', show_alert: true }));
@@ -261,6 +276,39 @@ export async function fillVerify(ctx: Ctx, fillId: string): Promise<void> {
     if (isUserError(err)) return void (await ctx.answerCallbackQuery({ text: userMessage(err), show_alert: true }));
     throw err;
   }
-  await ctx.answerCallbackQuery({ text: 'Verified & released.' });
-  await ctx.editMessageText(`✅ *Verified & released* · by ${ctx.from?.first_name ?? 'admin'}`, { parse_mode: 'Markdown' });
+  await ctx.answerCallbackQuery({ text: 'Verified — money on its way.' });
+
+  const who = ctx.from?.first_name ?? 'admin';
+  const [o] = await sql<{ id: string; delta: number; currency: string; player_name: string; platform_uid: string }[]>`
+    select id, delta, currency, player_name, platform_uid from loader_orders
+     where ref_type = 'fill' and ref_id = ${fillId} order by created_at desc limit 1`;
+  if (!o) { await editCard(ctx, `✅ *Verified & released* · by ${who}`); return; }
+
+  // Lock the loader task to this admin (mutex), and suppress the standalone
+  // loader card — this same message now IS the loader step.
+  try { await sql`select loader_order_claim(${o.id}::uuid, ${admin.id}::uuid)`; } catch { /* raced; fine */ }
+  await sql`update notifications set status='skipped'
+             where kind='loader.work' and ref_type='loader_order' and ref_id=${o.id} and status='pending'`;
+  await editCard(ctx,
+    `🎰 *ADD ${money(o.delta, o.currency)}* to their table\n` +
+      `Player: *${o.player_name}*\nID: \`${o.platform_uid}\`\n\n_Claimed by ${who}._ Add it on the platform, then:`,
+    new InlineKeyboard()
+      .text(`✅ Done — added ${money(o.delta, o.currency)}`, `lo:done:${o.id}:${o.delta}`)
+      .text('❌ Failed', `lo:fail:${o.id}`),
+  );
+}
+
+/** 🗑 Discard — the payment didn't land. Silent reject: no credit, no message to
+ *  the player; the payee's slice goes back to the queue. */
+export async function fillDiscard(ctx: Ctx, fillId: string): Promise<void> {
+  const admin = await adminFor(ctx);
+  if (!admin) return void (await ctx.answerCallbackQuery({ text: 'Admins only.', show_alert: true }));
+  try {
+    await db()`select fill_admin_discard(${fillId}::uuid, ${admin.id}::uuid)`;
+  } catch (err) {
+    if (isUserError(err)) return void (await ctx.answerCallbackQuery({ text: userMessage(err), show_alert: true }));
+    throw err;
+  }
+  await ctx.answerCallbackQuery({ text: 'Payment discarded.' });
+  await editCard(ctx, `🗑 *Payment discarded* · by ${ctx.from?.first_name ?? 'admin'}`);
 }

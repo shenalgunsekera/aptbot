@@ -218,8 +218,10 @@ export function renderNotification(n: Notification): Rendered | null {
         (p.payout_handle ? `\nTo: \`${p.payout_handle}\`` : '') +
         (p.payout_name ? `\nName: *${p.payout_name}*` : '') +
         (p.payment_ref ? `\nReference: \`${p.payment_ref}\`` : '') +
-        `\n\nCheck it landed, then release.`;
-      const keyboard = new InlineKeyboard().text('✅ Verify & release', `fl:verify:${p.fill_id}`);
+        `\n\nCheck it landed, then Verify — or Discard if it didn't.`;
+      const keyboard = new InlineKeyboard()
+        .text('✅ Verify', `fv:verify:${p.fill_id}`)
+        .text('🗑 Discard', `fv:discard:${p.fill_id}`);
       return imgs.length > 1 ? { photos: imgs, text, keyboard } : { photo: imgs[0], text, keyboard };
     }
     case 'fill.released':
@@ -279,13 +281,15 @@ export function renderNotification(n: Notification): Rendered | null {
       return {
         text: `⏰ *Needs a look*\n${m(p.amount, p.currency)} — ref \`${p.payment_ref}\`\n_${p.cause ?? 'awaiting review'}_`,
         keyboard: new InlineKeyboard()
-          .text('✅ Verify & release', `fl:verify:${n.ref_id}`)
-          .text('👁 Open in panel', `noop`),
+          .text('✅ Verify', `fv:verify:${n.ref_id}`)
+          .text('🗑 Discard', `fv:discard:${n.ref_id}`),
       };
     case 'fill.club_review':
       return {
-        text: `🏦 *Money to verify* (${p.method})\n${m(p.amount, p.currency)} — ref \`${p.payment_ref}\`\nCheck it landed, then verify.`,
-        keyboard: new InlineKeyboard().text('✅ Verify & release', `fl:verify:${n.ref_id}`),
+        text: `🏦 *Money to verify* (${p.method})\n${m(p.amount, p.currency)} — ref \`${p.payment_ref}\`\nCheck it landed, then Verify — or Discard if it didn't.`,
+        keyboard: new InlineKeyboard()
+          .text('✅ Verify', `fv:verify:${n.ref_id}`)
+          .text('🗑 Discard', `fv:discard:${n.ref_id}`),
       };
     case 'dispute.opened':
       return { text: `🚩 *Dispute*\n${m(p.amount, p.currency)} — ref \`${p.payment_ref}\`\n_${p.reason}_\n\nHandle it in the panel.` };
