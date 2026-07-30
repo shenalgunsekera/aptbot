@@ -131,7 +131,7 @@ export async function advance(ctx: Ctx, playerId: string): Promise<void> {
     if (!r || (!r.platform_uid_claimed && !r.platform_uid)) {
       ctx.session.step = { name: 'ob:clubgg_id' };
       await ask(ctx,
-        `What's your *ClubGG ID*? Copy it exactly — money gets sent using this.`,
+        `What's your *ClubGG ID*? Copy it exactly — money gets sent using this.\n_(e.g. \`1234-5678\`)_`,
         { parse_mode: 'Markdown' },
       );
       return;
