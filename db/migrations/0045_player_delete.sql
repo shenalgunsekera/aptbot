@@ -19,6 +19,7 @@ declare
   v_fills     uuid[];
   v_accounts  uuid[];
   v_txns      uuid[];
+  v_affected  uuid[];
   v_tg        bigint;
 begin
   if not exists (select 1 from players where id = p_player) then
@@ -40,6 +41,11 @@ begin
     where deposit_id = any(v_deposits) or withdraw_id = any(v_withdraws);
   select coalesce(array_agg(id), '{}') into v_accounts from accounts where player_id = p_player;
   select coalesce(array_agg(distinct tx_id), '{}') into v_txns from ledger_entries where account_id = any(v_accounts);
+  -- Other accounts (house, counterparties) whose entries live in those shared
+  -- transactions — their cached balance must be recomputed after the delete,
+  -- because the balance-maintaining trigger only fires on INSERT, never DELETE.
+  select coalesce(array_agg(distinct account_id), '{}') into v_affected
+    from ledger_entries where tx_id = any(v_txns) and account_id <> all(v_accounts);
 
   -- Keep global payment detections; just drop their link to a fill we're deleting.
   update payment_events set matched_fill_id = null where matched_fill_id = any(v_fills);
@@ -78,4 +84,10 @@ begin
   alter table receipts             enable trigger user;
   alter table ledger_entries       enable trigger user;
   alter table ledger_transactions  enable trigger user;
+
+  -- Resync the surviving accounts whose shared transactions we removed, so the
+  -- cached balance matches the entries that remain (keeps the books consistent).
+  update accounts a
+     set balance = coalesce((select sum(e.amount) from ledger_entries e where e.account_id = a.id), 0)
+   where a.id = any(v_affected);
 end $$;
