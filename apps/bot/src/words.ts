@@ -108,11 +108,12 @@ export function cashoutConfirm(
   code: string, methodName: string, handle: string, amount: string, clubHandle?: string | null,
 ): string {
   const club = clubHandle ? '`' + clubHandle + '`' : 'our account';
+  const copy = clubHandle ? ' _(tap to copy)_' : '';
   switch (code) {
     case 'cashapp':
-      return `✅ *Cash out started!*\n\nPlease request *${amount}* from ${club} on Cash App. Your request will be fulfilled in less than 24 hours.`;
+      return `✅ *Cash out started!*\n\nPlease request *${amount}* from ${club}${copy} on Cash App. Your request will be fulfilled in less than 24 hours.`;
     case 'paypal':
-      return `✅ *Cash out started!*\n\nPlease request *${amount}* from ${club} on PayPal. Your request will be fulfilled in less than 24 hours.`;
+      return `✅ *Cash out started!*\n\nPlease request *${amount}* from ${club}${copy} on PayPal. Your request will be fulfilled in less than 24 hours.`;
     case 'venmo':
       return `✅ *Cash out started!*\n\nYour Venmo \`${handle}\` has been added to the queue. You'll receive *${amount}* within 24 hours.`;
     case 'zelle':

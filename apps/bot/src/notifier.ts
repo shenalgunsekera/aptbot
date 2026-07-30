@@ -375,7 +375,7 @@ export function renderNotification(n: Notification): Rendered | null {
           }
         : {
             text: `💸 *Cash out to pay* (${p.method})\n\n${p.name ? 'To: *' + p.name + '*\n' : ''}` +
-              `Amount: *${m(p.amount, p.currency)}*\nSend to: \`${p.handle}\`\n\n` +
+              `Amount: *${m(p.amount, p.currency)}*\nSend to: \`${p.handle}\` _(tap to copy)_\n\n` +
               `Pay it, then tap below and send the transaction ID.`,
             keyboard: new InlineKeyboard().text('✅ I paid it', `wd:pay:${p.withdraw_id}`),
           };
