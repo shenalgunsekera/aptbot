@@ -148,28 +148,50 @@ interface Rendered { text: string; keyboard?: InlineKeyboard; photo?: string; ph
  * clipped for the caption case.
  */
 export async function sendRendered(bot: Bot<Ctx>, chatId: number, msg: Rendered): Promise<void> {
-  const opts = { parse_mode: 'Markdown' as const, ...(msg.keyboard ? { reply_markup: msg.keyboard } : {}) };
+  const kb = msg.keyboard ? { reply_markup: msg.keyboard } : {};
+  const md = { parse_mode: 'Markdown' as const, ...kb };   // with Markdown
+  const cap = msg.text.slice(0, 1024);
+  // Never let a stray Markdown character in a name/handle, or a receipt that's a
+  // PDF, silently drop an admin message: on a parse error resend as plain text;
+  // on a "not a photo" error resend as a document.
+  const desc = (e: unknown) => String((e as { description?: string })?.description ?? e);
+  const isEntity = (e: unknown) => /can't parse entities/i.test(desc(e));
+  const isDocAsPhoto = (e: unknown) => /type Document as Photo|as Photo|wrong type of the web page content/i.test(desc(e));
 
-  // Multiple images → ONE album (media group), so several receipts arrive as a
-  // single grouped message, not one message per image. Albums can't carry an
-  // inline keyboard, so the action button follows in a short message.
+  // Multiple images → ONE album; albums can't carry a keyboard, so the button
+  // follows in a short message.
   if (msg.photos && msg.photos.length > 1) {
-    await bot.api.sendMediaGroup(chatId, msg.photos.slice(0, 10).map((media, i) => ({
-      type: 'photo' as const,
-      media,
-      ...(i === 0 ? { caption: msg.text.slice(0, 1024), parse_mode: 'Markdown' as const } : {}),
-    })));
-    if (msg.keyboard) {
-      await bot.api.sendMessage(chatId, '👆 Receipts above — verify when you\'ve checked them.', { reply_markup: msg.keyboard });
+    const album = (parse: boolean) => msg.photos!.slice(0, 10).map((media, i) => ({
+      type: 'photo' as const, media,
+      ...(i === 0 ? { caption: cap, ...(parse ? { parse_mode: 'Markdown' as const } : {}) } : {}),
+    }));
+    try { await bot.api.sendMediaGroup(chatId, album(true)); }
+    catch (e) {
+      if (isEntity(e)) { await bot.api.sendMediaGroup(chatId, album(false)); }
+      else if (isDocAsPhoto(e)) {
+        for (let i = 0; i < Math.min(msg.photos.length, 10); i++) {
+          await bot.api.sendDocument(chatId, msg.photos[i]!, i === 0 ? { caption: cap } : {}).catch(() => { /* skip a bad one */ });
+        }
+      } else throw e;
     }
+    if (msg.keyboard) await bot.api.sendMessage(chatId, '👆 Receipts above — verify when you\'ve checked them.', { reply_markup: msg.keyboard });
     return;
   }
 
   const single = msg.photo ?? msg.photos?.[0];
   if (single) {
-    await bot.api.sendPhoto(chatId, single, { caption: msg.text.slice(0, 1024), ...opts });
+    try { await bot.api.sendPhoto(chatId, single, { caption: cap, ...md }); }
+    catch (e) {
+      if (isDocAsPhoto(e)) {
+        try { await bot.api.sendDocument(chatId, single, { caption: cap, ...md }); }
+        catch (e2) { if (isEntity(e2)) await bot.api.sendDocument(chatId, single, { caption: cap, ...kb }); else throw e2; }
+      } else if (isEntity(e)) {
+        await bot.api.sendPhoto(chatId, single, { caption: cap, ...kb });
+      } else throw e;
+    }
   } else {
-    await bot.api.sendMessage(chatId, msg.text, opts);
+    try { await bot.api.sendMessage(chatId, msg.text, md); }
+    catch (e) { if (isEntity(e)) await bot.api.sendMessage(chatId, msg.text, kb); else throw e; }
   }
 }
 
