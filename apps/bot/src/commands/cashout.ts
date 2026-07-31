@@ -10,7 +10,7 @@ import { resolvePlatform, resolveMethod, platformKeyboard, methodKeyboard } from
 import { ask, clearQuestion } from '../ask.js';
 
 /**
- * /withdraw — cash out. (withdraw)
+ * /withdraw — cash-out. (withdraw)
  *
  * Flow: platform → amount → method → where to get paid → queue.
  * No available-balance check anywhere: we don't know what's on the tables. The
@@ -28,7 +28,7 @@ export async function cashoutStart(ctx: Ctx): Promise<void> {
       return;
     }
     ctx.session.step = { name: 'out:platform' };
-    await ask(ctx, 'Where do you want to cash out from?', {
+    await ask(ctx, 'Where do you want to cash-out from?', {
       reply_markup: platformKeyboard('out', platform.ask, platform.offerRemember),
     });
     return;
@@ -81,7 +81,7 @@ async function askAmount(ctx: Ctx, platform: Platform): Promise<void> {
     select min_amount, max_amount, amount_step from config where id`;
   ctx.session.step = { name: 'out:amount', platformId: platform.id };
   await ask(ctx,
-    `How much do you want to cash out from *${platform.name}*?\n\n` +
+    `How much do you want to cash-out from *${platform.name}*?\n\n` +
       `Between ${whole(cfg.min_amount)} and ${whole(cfg.max_amount)}, in multiples of ` +
       `${whole(cfg.amount_step)}. Send the number, like \`50\`. ` +
       `We'll take that much off your table if it's there.\n\n/cancel to stop.`,
@@ -294,7 +294,7 @@ export async function cashoutReducePrompt(ctx: Ctx, withdrawId: string): Promise
   await ctx.answerCallbackQuery();
   (ctx.session as any)._reduceWd = withdrawId;
   await ctx.reply(
-    `How much of this cash out do you want *back* on your table? ` +
+    `How much of this cash-out do you want *back* on your table? ` +
       `(up to ${money(w.amount_remaining - 1, w.currency)} — to take it all, use Cancel instead)\n\nJust send the number.`,
     { parse_mode: 'Markdown', reply_markup: { force_reply: true } },
   );
@@ -316,7 +316,7 @@ export async function cashoutReduceConfirm(ctx: Ctx, withdrawId: string, text: s
 }
 
 /**
- * Player retracts a cash out. Whatever hasn't been handed to someone else yet
+ * Player retracts a cash-out. Whatever hasn't been handed to someone else yet
  * comes straight back; any part already being paid stays in flight and finishes.
  * If it's already fully claimed or paid, it can't be pulled back.
  */
@@ -360,9 +360,9 @@ export async function cashoutRetract(ctx: Ctx, withdrawId: string): Promise<void
   const [w] = await sql<{ status: string; amount: number | null; amount_remaining: number; requested_amount: number; currency: string }[]>`
     select status, amount, amount_remaining, requested_amount, currency
       from withdraw_requests where id = ${withdrawId} and player_id = ${p.id}`;
-  if (!w) return void (await ctx.answerCallbackQuery({ text: "Can't find that cash out.", show_alert: true }));
+  if (!w) return void (await ctx.answerCallbackQuery({ text: "Can't find that cash-out.", show_alert: true }));
   if (['completed', 'cancelled'].includes(w.status)) {
-    return void (await ctx.answerCallbackQuery({ text: `That cash out is already ${w.status}.`, show_alert: true }));
+    return void (await ctx.answerCallbackQuery({ text: `That cash-out is already ${w.status}.`, show_alert: true }));
   }
 
   const returned = w.status === 'pending_unload' ? (w.requested_amount) : w.amount_remaining;
@@ -383,7 +383,7 @@ export async function cashoutRetract(ctx: Ctx, withdrawId: string): Promise<void
     })}::jsonb)`;
   }
 
-  await ctx.answerCallbackQuery({ text: 'Cash out cancelled.' });
+  await ctx.answerCallbackQuery({ text: 'Cash-out cancelled.' });
   if (w.status !== 'pending_unload' && assigned > 0) {
     await ctx.reply(
       `✅ Cancelled. We put *${money(returned, w.currency)}* back for you. ` +

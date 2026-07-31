@@ -44,7 +44,7 @@ export const PLAYER_COMMANDS = [
   { command: 'start', description: 'Set up your account' },
   { command: 'deposit', description: 'Add money' },
   { command: 'canceldeposit', description: 'Cancel your latest unpaid deposit' },
-  { command: 'withdraw', description: 'Cash out' },
+  { command: 'withdraw', description: 'Cash-out' },
   { command: 'cancelwithdraw', description: 'Cancel a cash-out that has not been paid' },
   { command: 'pending', description: 'Your pending cash-outs' },
   { command: 'payments', description: 'Completed payments & receipts' },
@@ -131,7 +131,7 @@ export function buildBot(token: string): Bot<Ctx> {
       `📖 *What each command does*\n\n` +
         `💵 */deposit* — add money to your account. Pick where it goes, how you're paying, and the amount.\n` +
         `✖️ */canceldeposit* — cancel your most recent deposit if you haven't paid yet.\n` +
-        `💸 */withdraw* — cash out. We take it off your table and pay you the way you've set up.\n` +
+        `💸 */withdraw* — cash-out. We take it off your table and pay you the way you've set up.\n` +
         `✖️ */cancelwithdraw* — cancel a cash-out that hasn't been paid yet.\n` +
         `⏳ */pending* — see deposits and cash-outs still in progress, and cancel a cash-out if you need to.\n` +
         `📄 */payments* — your history of completed payments and receipts.\n\n` +
@@ -139,7 +139,7 @@ export function buildBot(token: string): Bot<Ctx> {
         `➕ */editplatform* — add or remove ClubGG / Sportsbook.\n` +
         `🏆 */editclubs* — change which clubs you play in.\n` +
         `💳 */editdeposit* — change which payment methods you deposit with.\n` +
-        `🏦 */editwithdraw* — change which payment methods you cashout with.\n\n` +
+        `🏦 */editwithdraw* — change which payment methods you cash-out with.\n\n` +
         `💬 */support* — message our team directly.\n` +
         `🛑 */cancel* — stop whatever you're in the middle of.`,
       { parse_mode: 'Markdown' },
@@ -282,7 +282,7 @@ export function buildBot(token: string): Bot<Ctx> {
     if (p) await db()`select prefs_set_method(${p.id}::uuid, null)`;
   });
   
-  // Cash out
+  // Cash-out
   bot.callbackQuery(/^out:pf:(.+)$/, (ctx) => cashoutPickPlatform(ctx, ctx.match![1]!, false));
   bot.callbackQuery(/^out:pfsave:(.+)$/, (ctx) => cashoutPickPlatform(ctx, ctx.match![1]!, true));
   bot.callbackQuery(/^out:pfremember:/, async (ctx) => {
@@ -297,12 +297,12 @@ export function buildBot(token: string): Bot<Ctx> {
   });
   bot.callbackQuery(/^out:m:(.+)$/, async (ctx) => {
     const s = ctx.session.step;
-    if (s.name !== 'out:method') return void (await ctx.answerCallbackQuery({ text: 'That expired — /cashout again.' }));
+    if (s.name !== 'out:method') return void (await ctx.answerCallbackQuery({ text: 'That expired — /withdraw again.' }));
     await cashoutPickMethod(ctx, s.platformId, s.amount, ctx.match![1]!, false);
   });
   bot.callbackQuery(/^out:msave:(.+)$/, async (ctx) => {
     const s = ctx.session.step;
-    if (s.name !== 'out:method') return void (await ctx.answerCallbackQuery({ text: 'That expired — /cashout again.' }));
+    if (s.name !== 'out:method') return void (await ctx.answerCallbackQuery({ text: 'That expired — /withdraw again.' }));
     await cashoutPickMethod(ctx, s.platformId, s.amount, ctx.match![1]!, true);
   });
   bot.callbackQuery(/^out:mremember:/, async (ctx) => {
@@ -312,14 +312,14 @@ export function buildBot(token: string): Bot<Ctx> {
   });
   bot.callbackQuery(/^out:sm:(.+)$/, async (ctx) => {
     const s = ctx.session.step;
-    if (s.name !== 'out:method') return void (await ctx.answerCallbackQuery({ text: 'That expired — /cashout again.' }));
+    if (s.name !== 'out:method') return void (await ctx.answerCallbackQuery({ text: 'That expired — /withdraw again.' }));
     await cashoutSavedMethod(ctx, ctx.match![1]!, s.platformId, s.amount);
   });
   bot.callbackQuery(/^wd:retract:(.+)$/, (ctx) => cashoutRetract(ctx, ctx.match![1]!));
   bot.callbackQuery(/^wd:reduce:(.+)$/, (ctx) => cashoutReducePrompt(ctx, ctx.match![1]!));
   bot.callbackQuery(/^out:h:(.+)$/, async (ctx) => {
     const s = ctx.session.step;
-    if (s.name !== 'out:handle') return void (await ctx.answerCallbackQuery({ text: 'That expired — /cashout again.' }));
+    if (s.name !== 'out:handle') return void (await ctx.answerCallbackQuery({ text: 'That expired — /withdraw again.' }));
     await cashoutSavedHandle(ctx, ctx.match![1]!, s.platformId, s.amount, s.methodId);
   });
   
@@ -358,7 +358,7 @@ export function buildBot(token: string): Bot<Ctx> {
       return;
     }
 
-    // Admin giving the tx id for a club-mediated cash out they paid.
+    // Admin giving the tx id for a club-mediated cash-out they paid.
     const payId = (ctx.session as any)._payWithdraw as string | undefined;
     if (payId && /Reply to THIS message with the transaction ID/.test(replyText)) {
       (ctx.session as any)._payWithdraw = undefined;
@@ -382,9 +382,9 @@ export function buildBot(token: string): Bot<Ctx> {
       return;
     }
 
-    // Player entering how much of a cash out to take back.
+    // Player entering how much of a cash-out to take back.
     const reduceWd = (ctx.session as any)._reduceWd as string | undefined;
-    if (reduceWd && /How much of this cash out do you want/.test(replyText)) {
+    if (reduceWd && /How much of this cash-out do you want/.test(replyText)) {
       (ctx.session as any)._reduceWd = undefined;
       await cashoutReduceConfirm(ctx, reduceWd, ctx.message.text.trim());
       return;

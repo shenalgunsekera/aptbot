@@ -744,7 +744,7 @@ export async function updateMethods(ctx: Ctx): Promise<void> {
   await askDepositMethods(ctx);
 }
 
-/** /payout — change how (and where) you get paid when you cash out. */
+/** /payout — change how (and where) you get paid when you cash-out. */
 export async function updatePayout(ctx: Ctx): Promise<void> {
   const p = await currentPlayer(ctx);
   if (!p || !(await isOnboarded(p.id))) return void (await ctx.reply('Finish setup first with /start.'));

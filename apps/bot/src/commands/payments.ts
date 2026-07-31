@@ -6,7 +6,7 @@ import { money, friendlyStatus } from '../words.js';
 /**
  * /payments — the player's own money tracker.
  *
- * The point (from the spec): a $100 cash out paid as 50 + 25 + 25 by three
+ * The point (from the spec): a $100 cash-out paid as 50 + 25 + 25 by three
  * different people is three payments, and the player must be able to see each
  * one and its receipt any time.
  *
@@ -43,7 +43,7 @@ export async function payments(ctx: Ctx): Promise<void> {
   const lines: string[] = [];
 
   if (outOngoing.length) {
-    lines.push('*💸 Cash outs in progress*\n');
+    lines.push('*💸 Cash-outs in progress*\n');
     for (const w of outOngoing) lines.push(renderCashout(w));
   }
   if (depOngoing.length) {

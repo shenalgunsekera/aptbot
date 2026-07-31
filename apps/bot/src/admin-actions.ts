@@ -108,14 +108,14 @@ export async function loaderFail(ctx: Ctx, orderId: string): Promise<void> {
   await editCard(ctx, `❌ *Failed* · by ${ctx.from?.first_name ?? 'admin'}`);
 }
 
-/** Admin taps "I paid it" on a club-mediated cash out → ask for the tx id. */
+/** Admin taps "I paid it" on a club-mediated cash-out → ask for the tx id. */
 export async function withdrawPayPrompt(ctx: Ctx, withdrawId: string): Promise<void> {
   const admin = await adminFor(ctx);
   if (!admin) return void (await ctx.answerCallbackQuery({ text: 'Admins only.', show_alert: true }));
   await ctx.answerCallbackQuery();
   (ctx.session as any)._payWithdraw = withdrawId;
   await ctx.reply(
-    `Reply to THIS message with the transaction ID / reference of the payment you sent for cash out \`${withdrawId.slice(0, 8)}\`.`,
+    `Reply to THIS message with the transaction ID / reference of the payment you sent for cash-out \`${withdrawId.slice(0, 8)}\`.`,
     { parse_mode: 'Markdown', reply_markup: { force_reply: true } },
   );
 }
@@ -204,7 +204,7 @@ export async function p2pStatus(ctx: Ctx): Promise<void> {
     select code, name, club_handle, backstop_handle from payment_methods where code in ('venmo', 'zelle') order by name`;
   const kb = new InlineKeyboard();
   const lines = ['*P2P backstop*\n', 'When *on*, a depositor with no match pays your handle directly.',
-    'When *off*, they\'re told to wait until someone requests a cash out.\n'];
+    'When *off*, they\'re told to wait until someone requests a cash-out.\n'];
   for (const m of methods) {
     const on = !!m.club_handle;
     lines.push(`*${m.name}*: ${on ? 'ON → `' + m.club_handle + '`' : 'OFF (wait mode)'}`);

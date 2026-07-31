@@ -227,7 +227,7 @@ export function renderNotification(n: Notification): Rendered | null {
     case 'fill.released':
       return { text: `✅ *${m(p.credit, p.currency)} is on its way to your table.*` };
     case 'fill.settled':
-      return { text: `✅ *${m(p.amount, p.currency)} — that part of your cash out is done.*` };
+      return { text: `✅ *${m(p.amount, p.currency)} — that part of your cash-out is done.*` };
     case 'fill.confirmed_pending_hold':
       return { text: `✅ Confirmed! Their money releases after a short hold.` };
     case 'fill.lock_expired':
@@ -238,7 +238,7 @@ export function renderNotification(n: Notification): Rendered | null {
           ? `✅ We got *${m(p.amount, p.currency)}* off your table (that's what was there of the ${m(p.requested, p.currency)} you asked for). You're in line to be paid.`
           : `✅ *${m(p.amount, p.currency)}* is ready and you're in line to be paid.`) +
           `\n\nChanged your mind? You can cancel below while it's still waiting.`,
-        keyboard: new InlineKeyboard().text('✖️ Cancel this cash out', `wd:retract:${n.ref_id}`),
+        keyboard: new InlineKeyboard().text('✖️ Cancel this cash-out', `wd:retract:${n.ref_id}`),
       };
     case 'onboarding.resume':
       return {
@@ -246,13 +246,13 @@ export function renderNotification(n: Notification): Rendered | null {
         keyboard: new InlineKeyboard().text('▶️ Continue setup', 'ob:resume'),
       };
     case 'withdraw.completed':
-      return { text: `🎉 *Cash out complete!* ${m(p.amount, p.currency)} — all done.` };
+      return { text: `🎉 *Cash-out complete!* ${m(p.amount, p.currency)} — all done.` };
     case 'withdraw.cancelled':
-      return { text: `Your cash out was cancelled and everything's back where it was.` };
+      return { text: `Your cash-out was cancelled and everything's back where it was.` };
     case 'withdraw.paid':
       return { text: `💸 *You've been paid ${m(p.amount, p.currency)}!*` + (p.payment_ref ? `\nReference: \`${p.payment_ref}\`` : '') };
     case 'withdraw.nothing_available':
-      return { text: `We couldn't find anything on your table to cash out right now. Nothing was taken.` };
+      return { text: `We couldn't find anything on your table to cash-out right now. Nothing was taken.` };
     case 'value.added':
       return { text: `🎰 *${m(p.delta, p.currency)} added to your account!*` };
     case 'value.taken':
@@ -264,7 +264,7 @@ export function renderNotification(n: Notification): Rendered | null {
     case 'dispute.resolved':
       return { text: `⚖️ *Your case is resolved.*\n\n` +
         (p.resolution === 'release_to_depositor' ? 'The payment checked out. It has been released.'
-          : p.resolution === 'refund_to_payee' ? 'We couldn\'t confirm the payment, so your cash out is back in the queue.'
+          : p.resolution === 'refund_to_payee' ? 'We couldn\'t confirm the payment, so your cash-out is back in the queue.'
           : 'We split it between both sides.') + `\n\n/pending for details.` };
 
     // ── Admin group ──
@@ -359,22 +359,22 @@ export function renderNotification(n: Notification): Rendered | null {
           };
     case 'withdraw.retracted':
       return {
-        text: `↩️ *Cash out cancelled by ${p.name ?? 'a player'}*\n\n` +
+        text: `↩️ *Cash-out cancelled by ${p.name ?? 'a player'}*\n\n` +
           `*${m(p.amount, p.currency)}* had already come off their table — *re-load it* to reimburse them.`,
       };
     case 'withdraw.reduced':
       return {
-        text: `➖ *Cash out lowered by ${p.name ?? 'a player'}*\n\n` +
+        text: `➖ *Cash-out lowered by ${p.name ?? 'a player'}*\n\n` +
           `They took *${m(p.amount, p.currency)}* back (now ${m(p.new_total, p.currency)}). ` +
           `*Re-load ${m(p.amount, p.currency)}* to their table.`,
       };
     case 'withdraw.reduced_player':
-      return { text: `➖ *${m(p.back, p.currency)}* is coming back to your table. Your cash out is now *${m(p.new_total, p.currency)}*.` };
+      return { text: `➖ *${m(p.back, p.currency)}* is coming back to your table. Your cash-out is now *${m(p.new_total, p.currency)}*.` };
     case 'withdraw.adjusted': {
       const up = Number(p.delta) > 0;
       return {
-        text: `✏️ *Cash out adjusted for ${p.name ?? 'a player'}*\n\n` +
-          `${up ? 'Added' : 'Removed'} *${m(Math.abs(Number(p.delta)), p.currency)}* ${up ? 'to' : 'from'} their cash out ` +
+        text: `✏️ *Cash-out adjusted for ${p.name ?? 'a player'}*\n\n` +
+          `${up ? 'Added' : 'Removed'} *${m(Math.abs(Number(p.delta)), p.currency)}* ${up ? 'to' : 'from'} their cash-out ` +
           `(now ${m(p.new_total, p.currency)}).${p.reason ? `\n_Reason: ${p.reason}_` : ''}`,
       };
     }
@@ -382,8 +382,8 @@ export function renderNotification(n: Notification): Rendered | null {
       const up = Number(p.delta) > 0;
       return {
         text: up
-          ? `➕ *${m(Number(p.delta), p.currency)}* was added to your cash out — it's now *${m(p.new_total, p.currency)}*.${p.reason ? `\n_${p.reason}_` : ''}`
-          : `➖ *${m(-Number(p.delta), p.currency)}* was taken off your cash out — it's now *${m(p.new_total, p.currency)}*.${p.reason ? `\n_${p.reason}_` : ''}`,
+          ? `➕ *${m(Number(p.delta), p.currency)}* was added to your cash-out — it's now *${m(p.new_total, p.currency)}*.${p.reason ? `\n_${p.reason}_` : ''}`
+          : `➖ *${m(-Number(p.delta), p.currency)}* was taken off your cash-out — it's now *${m(p.new_total, p.currency)}*.${p.reason ? `\n_${p.reason}_` : ''}`,
       };
     }
     case 'sportsbook.create':
@@ -396,12 +396,12 @@ export function renderNotification(n: Notification): Rendered | null {
     case 'withdraw.needs_payout':
       return String(p.method).toLowerCase().includes('paypal')
         ? {
-            text: `💸 *PayPal cash out — approve a request*\n\nFrom: *${p.name}*\nAmount: *${m(p.amount, p.currency)}*\n\n` +
+            text: `💸 *PayPal cash-out — approve a request*\n\nFrom: *${p.name}*\nAmount: *${m(p.amount, p.currency)}*\n\n` +
               `They'll send a PayPal money request to your account for this amount. Approve & pay it, then tap below.`,
             keyboard: new InlineKeyboard().text('✅ I paid it', `wd:pay:${p.withdraw_id}`),
           }
         : {
-            text: `💸 *Cash out to pay* (${p.method})\n\n${p.name ? 'To: *' + p.name + '*\n' : ''}` +
+            text: `💸 *Cash-out to pay* (${p.method})\n\n${p.name ? 'To: *' + p.name + '*\n' : ''}` +
               `Amount: *${m(p.amount, p.currency)}*\nSend to: \`${p.handle}\` _(tap to copy)_\n\n` +
               `Pay it, then tap below and send the transaction ID.`,
             keyboard: new InlineKeyboard().text('✅ I paid it', `wd:pay:${p.withdraw_id}`),

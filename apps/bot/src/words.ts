@@ -2,7 +2,7 @@
  *  same text/icons/commands in the Telegram and Discord bots. */
 export const COMMANDS_LIST =
   '💵 /deposit — add money\n' +
-  '💸 /withdraw — cash out\n' +
+  '💸 /withdraw — cash-out\n' +
   '📄 /payments — your payments & receipts\n' +
   '📋 /pending — your account\n' +
   '➕ /editplatform — add or remove ClubGG / Sportsbook\n' +
@@ -24,7 +24,7 @@ export const COMMANDS_LIST =
  * in one place, so the whole bot stays consistent and nothing technical leaks.
  *
  *   deposit / load   → "add money" / "adding money"
- *   withdraw / unload→ "cash out" / "cashing out"
+ *   withdraw / unload→ "cash-out" / "cashing out"
  *   escrow / queue   → "waiting to be paid"
  *   fill             → "payment"
  *   blocked / frozen → "on hold" (to the player) / "paused" (softer still)
@@ -111,7 +111,7 @@ export function receiptInstruction(code: string): string {
   }
 }
 
-/** The "cash out started" confirmation, worded per method. Some methods we send
+/** The "cash-out started" confirmation, worded per method. Some methods we send
  *  to the player's handle; PayPal/Cash App the player requests from our handle. */
 export function cashoutConfirm(
   code: string, methodName: string, handle: string, amount: string, clubHandle?: string | null,
@@ -120,15 +120,15 @@ export function cashoutConfirm(
   const copy = clubHandle ? ' _(tap to copy)_' : '';
   switch (code) {
     case 'cashapp':
-      return `✅ *Cash out started!*\n\nPlease request *${amount}* from ${club}${copy} on Cash App. Your request will be fulfilled in less than 24 hours.`;
+      return `✅ *Cash-out started!*\n\nPlease request *${amount}* from ${club}${copy} on Cash App. Your request will be fulfilled in less than 24 hours.`;
     case 'paypal':
-      return `✅ *Cash out started!*\n\nPlease request *${amount}* from ${club}${copy} on PayPal. Your request will be fulfilled in less than 24 hours.`;
+      return `✅ *Cash-out started!*\n\nPlease request *${amount}* from ${club}${copy} on PayPal. Your request will be fulfilled in less than 24 hours.`;
     case 'venmo':
-      return `✅ *Cash out started!*\n\nYour Venmo \`${handle}\` has been added to the queue. You'll receive *${amount}* within 24 hours.`;
+      return `✅ *Cash-out started!*\n\nYour Venmo \`${handle}\` has been added to the queue. You'll receive *${amount}* within 24 hours.`;
     case 'zelle':
-      return `✅ *Cash out started!*\n\nYour Zelle \`${handle}\` has been added to the queue. You'll receive *${amount}* within 24 hours.`;
+      return `✅ *Cash-out started!*\n\nYour Zelle \`${handle}\` has been added to the queue. You'll receive *${amount}* within 24 hours.`;
     default:
-      return `✅ *Cash out started!*\n\nYour ${methodName} address \`${handle}\` has been added to the queue. You'll receive *${amount}* within 24 hours.`;
+      return `✅ *Cash-out started!*\n\nYour ${methodName} address \`${handle}\` has been added to the queue. You'll receive *${amount}* within 24 hours.`;
   }
 }
 

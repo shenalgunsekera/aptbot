@@ -4,12 +4,12 @@ import { money, parseAmount } from '../words.js';
 import { addStart } from './add.js';
 
 /**
- * /add · /remove — an admin corrects a player's OPEN cash out, right inside the
+ * /add · /remove — an admin corrects a player's OPEN cash-out, right inside the
  * chat where the issue is being sorted out.
  *
  * There's no ID to type: the bot finds the player by the chat this is run in
  * (players.chat_id — the chat that player talks to us in) and adjusts their most
- * recent in-progress cash out. Every change runs through withdraw_adjust(), so
+ * recent in-progress cash-out. Every change runs through withdraw_adjust(), so
  * it's ledger-posted, audited, and the player is told automatically.
  *
  * /add is ALSO the player-facing deposit alias, so a non-admin who types /add

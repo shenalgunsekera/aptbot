@@ -115,7 +115,7 @@ export async function me(ctx: Ctx): Promise<void> {
     lines.push('');
   }
 
-  // A cash out can be pulled back while it's still waiting (not fully paid). For
+  // A cash-out can be pulled back while it's still waiting (not fully paid). For
   // methods where WE send (Venmo/Zelle/crypto) you can also take PART back;
   // PayPal/Cash App requests can't be lowered, so it's cancel-all only.
   const cancellable = outs.filter((o) => ['pending_unload', 'queued', 'partially_filled'].includes(o.status));

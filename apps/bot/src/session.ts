@@ -34,7 +34,7 @@ export type Step =
   | { name: 'add:amount'; platformId: string; methodId: string }
   | { name: 'add:receipt'; fillId: string }
   | { name: 'add:stripe'; platformId: string }
-  // cash out
+  // cash-out
   | { name: 'out:platform' }
   | { name: 'out:club'; platformId: string }
   | { name: 'out:amount'; platformId: string }
