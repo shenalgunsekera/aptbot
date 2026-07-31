@@ -258,7 +258,7 @@ export function renderNotification(n: Notification): Rendered | null {
     case 'value.taken':
       return { text: `📤 *${m(-Number(p.delta), p.currency)} taken off your table.*` };
     case 'player.linked':
-      return { text: `🎉 *You're all set!*\n\nYour ${p.platform} account (${p.uid}) is confirmed. Use /deposit to add money or /withdraw to cash out.` };
+      return { text: `Your ${p.platform} account (${p.uid}) is confirmed.` };
     case 'player.status_changed':
       return { text: p.status === 'active' ? `✅ Your account is active again.` : `Your account is now *${p.status}*.` + (p.reason ? `\n\n${p.reason}` : '') };
     case 'dispute.resolved':

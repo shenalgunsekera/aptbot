@@ -117,8 +117,7 @@ export async function advance(ctx: Ctx, playerId: string): Promise<void> {
       }
       ctx.session.step = { name: 'ob:sb_user' };
       await ask(ctx,
-        `Let's create your APT Sports account.\n\nWhat *username* would you like? ` +
-          `Max ${SB_MAX} characters. Choose carefully — it can't easily be changed later.`,
+        `Let's create your APT Sports account.\n\nWhat would you like your *username* to be? (Max ${SB_MAX} characters)`,
         { parse_mode: 'Markdown' },
       );
       return;
@@ -131,7 +130,7 @@ export async function advance(ctx: Ctx, playerId: string): Promise<void> {
     if (!r || (!r.platform_uid_claimed && !r.platform_uid)) {
       ctx.session.step = { name: 'ob:clubgg_id' };
       await ask(ctx,
-        `What's your *ClubGG ID*? Copy it exactly — money gets sent using this.\n_(e.g. \`1234-5678\`)_`,
+        `What's your *ClubGG ID*?\n(e.g. 1234-5678)`,
         { parse_mode: 'Markdown' },
       );
       return;
@@ -189,7 +188,7 @@ async function platformKb(ctx: Ctx): Promise<InlineKeyboard> {
 async function askPlatforms(ctx: Ctx): Promise<void> {
   ctx.session.step = { name: 'ob:platforms' };
   await ask(ctx,
-    'Which platform(s) will you be using? Tap to tick — you can pick *both* — then tap Done.',
+    'Which platform(s) will you be using? Tap all that apply, then Done.',
     { parse_mode: 'Markdown', reply_markup: await platformKb(ctx) },
   );
 }
@@ -219,8 +218,7 @@ async function depKb(ctx: Ctx): Promise<{ text: string; kb: InlineKeyboard }> {
   }
   if (sel.length) kb.text('➡️ Done', 'ob:dmdone');
   return {
-    text: 'Which methods do you want to use to *add money*? Tap all that apply, then Done. ' +
-      "We'll only show you these later.",
+    text: 'Which methods do you want to use to deposit? Tap all that apply, then Done.',
     kb,
   };
 }
@@ -255,8 +253,7 @@ async function wdKb(ctx: Ctx): Promise<{ text: string; kb: InlineKeyboard }> {
   }
   if (sel.length) kb.text('➡️ Done', 'ob:wmdone');
   return {
-    text: 'How do you want to *get paid* when you cash out? Tap all that apply, then Done — ' +
-      "we'll save where to send each so you never re-type it.",
+    text: 'Which methods do you want to use to withdraw? Tap all that apply, then Done.',
     kb,
   };
 }
@@ -316,8 +313,7 @@ export async function obSbUser(ctx: Ctx, text: string): Promise<void> {
   }
   ctx.session.step = { name: 'ob:sb_pass', username: u };
   await ask(ctx,
-    `Got it — *${u}*.\n\nNow pick a *password*. Max ${SB_MAX} characters. ` +
-      `Type it carefully.`,
+    `Got it — *${u}*.\n\nWhat would you like your *password* to be? (Max ${SB_MAX} characters)`,
     { parse_mode: 'Markdown' },
   );
 }
@@ -400,7 +396,7 @@ async function ensureClubs(ctx: Ctx, playerId: string, platformId: string): Prom
   ctx.session.ob.clubSel = [];
   ctx.session.step = { name: 'ob:clubs', platformId };
   await ask(ctx,
-    `Which *${pf?.name}* club(s) do you play in? Tap all that apply, then *Done*.`,
+    `Which *${pf?.name}* club(s) will you be using? Tap all that apply, then Done.`,
     { parse_mode: 'Markdown', reply_markup: clubKb(clubs, []) },
   );
   return true;
@@ -465,7 +461,7 @@ async function openClubEditor(ctx: Ctx, playerId: string, platformId: string): P
   ctx.session.ob.clubSel = [...mine];   // pre-tick the clubs they're already in
   ctx.session.step = { name: 'clubs:edit', platformId };
   await ask(ctx,
-    `Which *${pf?.name}* club(s) are you in? Tick to add, untick to leave, then *Done*.`,
+    `Which *${pf?.name}* club(s) will you be using? Tap all that apply, then Done.`,
     { parse_mode: 'Markdown', reply_markup: clubKb(clubs, [...mine], 'clubs:c:', 'clubs:done') },
   );
 }
@@ -526,8 +522,7 @@ export async function obWdHandle(ctx: Ctx, methodId: string, text: string): Prom
   if (m?.code === 'zelle') {
     ctx.session.step = { name: 'ob:wd_name', methodId, handle: text.trim() };
     await ctx.reply(
-      `✅ Saved your *Zelle* — \`${text.trim()}\`.\n\nZelle also needs the *name on the account*. ` +
-        `What's the *first & last name* on your Zelle?`,
+      `✅ Saved your *Zelle* — \`${text.trim()}\`.\n\nWhat is the first and last name associated with that Zelle account?`,
       { parse_mode: 'Markdown' },
     );
     return;
@@ -772,12 +767,10 @@ async function finish(ctx: Ctx, playerId: string): Promise<void> {
   await clearQuestion(ctx);   // tidy the last prompt; the completion message stays
   await ctx.reply(
     `🎉 *Thank you for joining! Your account setup is now complete.*\n\n` +
-      `Some of your accounts may still need a quick confirmation from our team — ` +
-      `you'll get a message here the moment they're live.\n\n` +
       `Join our official Telegram channel to stay updated with promotions, announcements, and news:\n` +
       `${CHANNEL_URL}\n\n` +
       `We look forward to having you as part of the community!\n\n` +
-      `When you're ready:\n💵 /deposit — add money\n💸 /withdraw — cash out\n❓ /help — what each command does`,
+      `When you're ready:\n💵 /deposit — Add Money\n💸 /withdraw — Cash Out\n❓ /help — List all commands`,
     { parse_mode: 'Markdown', link_preview_options: { is_disabled: true } },
   );
 }

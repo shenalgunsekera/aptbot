@@ -65,23 +65,18 @@ export function amountProblem(
  * The "where do we pay you?" question, worded per method so it's obvious what to
  * send — their OWN tag/address, never the club's.
  */
-export function withdrawHandlePrompt(code: string, name: string, clubHandle?: string | null): string {
-  const c = clubHandle ? '`' + clubHandle + '`' : 'our PayPal';
+export function withdrawHandlePrompt(code: string, name: string, _clubHandle?: string | null): string {
   switch (code) {
     case 'paypal':
-      return `What's *your* PayPal email or tag? Send it here — that's who we pay when you cash out.\n` +
-        `_(e.g. \`you@email.com\` or \`@yourtag\`)_\n\n` +
-        `_When you request a cash out, send a PayPal money request to ${c} for the amount, and we'll pay it._`;
+      return `What's your *Paypal* address?\n(e.g. @bob123)`;
     case 'cashapp':
-      return `What's *your* Cash App $cashtag? Send it here — that's where your cash-outs go.\n_(e.g. \`$yourtag\`)_`;
+      return `What's your *Cashapp* address?\n(e.g. $bob123)`;
     case 'venmo':
-      return `What's *your* Venmo username? Send it here — that's where your cash-outs go.\n_(e.g. \`@your-name\`)_`;
+      return `What's your *Venmo* address?\n(e.g. @bob123)`;
     case 'zelle':
-      return `What's *your* Zelle? Send the *email or phone number* linked to your Zelle — that's where your cash-outs go.\n` +
-        `_(e.g. \`you@email.com\` or \`555-123-4567\`)_`;
+      return `What's your *Zelle* address? (Email or Phone Number)\n(e.g. you@gmail.com or 555-123-4567)`;
     default:
-      return `What's *your* ${name} address? Send it here — that's where your cash-outs go.\n\n` +
-        `⚠️ Double-check it — crypto sent to the wrong address can't come back.`;
+      return `What's your *${name}* address?\n\n⚠️ Double-check it — crypto sent to the wrong address can't come back.`;
   }
 }
 
