@@ -7,7 +7,7 @@ import { dmOnly, playerOnly, isAdminGroup } from './guards.js';
 import { Notifier } from './notifier.js';
 import { start, me } from './commands/start.js';
 import {
-  advance, obName, obSbUser, obSbPass, obSbUsername, obClubggId, obWdHandle, obWdName,
+  advance, obName, obSbUser, obSbPass, obSbUsername, obClubggId, obClubggUser, obWdHandle, obWdName,
   obTogglePlatform, obPlatformsDone, obSbHasAccount, obToggleDepMethod, obDepView, obDepMethodsDone,
   obToggleWdMethod, obWdView, obWdMethodsDone, obResume, updateMethods, updatePayout, addPlatform,
   obToggleClub, obClubsDone, editClubs, clubsPickPlatform, clubsEditToggle, clubsEditDone,
@@ -20,7 +20,7 @@ import {
 import { adminAdd, adminRemove } from './commands/adjust.js';
 import {
   cashoutStart, cashoutPickPlatform, cashoutPickClub, cashoutAmount, cashoutPickMethod,
-  cashoutSavedHandle, cashoutSavedMethod, cashoutHandle, cashoutRetract,
+  cashoutSavedHandle, cashoutSavedMethod, cashoutHandle, cashoutRetract, cashoutCancel,
   cashoutReducePrompt, cashoutReduceConfirm,
 } from './commands/cashout.js';
 import { disputeReason } from './commands/confirm.js';
@@ -45,6 +45,7 @@ export const PLAYER_COMMANDS = [
   { command: 'deposit', description: 'Add money' },
   { command: 'canceldeposit', description: 'Cancel your latest unpaid deposit' },
   { command: 'withdraw', description: 'Cash out' },
+  { command: 'cancelwithdraw', description: 'Cancel a cash-out that has not been paid' },
   { command: 'pending', description: 'Your pending cash-outs' },
   { command: 'payments', description: 'Completed payments & receipts' },
   { command: 'editplatform', description: 'Add or remove ClubGG / Sportsbook' },
@@ -53,7 +54,6 @@ export const PLAYER_COMMANDS = [
   { command: 'editwithdraw', description: 'Change how you get paid' },
   { command: 'support', description: 'Message our team' },
   { command: 'guide', description: 'What each command does' },
-  { command: 'help', description: 'What I can do' },
 ];
 export const GROUP_COMMANDS = [
   ...PLAYER_COMMANDS,
@@ -126,28 +126,20 @@ export function buildBot(token: string): Bot<Ctx> {
     if (ctx.session.step.name === 'add:receipt') return void (await addDone(ctx, ctx.session.step.fillId));
     await ctx.reply('Nothing to finish right now.');
   });
-  bot.command('help', (ctx) =>
-    ctx.reply(
-      `💵 /deposit — add money\n💸 /withdraw — cash out\n⏳ /pending — your pending cash-outs\n` +
-        `📄 /payments — your completed payments & receipts\n` +
-        `✖️ /canceldeposit — cancel your latest unpaid deposit\n` +
-        `➕ /editplatform · 🏆 /editclubs · 💳 /editdeposit · 🏦 /editwithdraw — update your setup\n` +
-        `💬 /support — message our team\n📖 /guide — what each command does\n/cancel — stop what you're doing`,
-    ),
-  );
   bot.command('guide', (ctx) =>
     ctx.reply(
       `📖 *What each command does*\n\n` +
         `💵 */deposit* — add money to your account. Pick where it goes, how you're paying, and the amount.\n` +
         `✖️ */canceldeposit* — cancel your most recent deposit if you haven't paid yet.\n` +
         `💸 */withdraw* — cash out. We take it off your table and pay you the way you've set up.\n` +
+        `✖️ */cancelwithdraw* — cancel a cash-out that hasn't been paid yet.\n` +
         `⏳ */pending* — see deposits and cash-outs still in progress, and cancel a cash-out if you need to.\n` +
         `📄 */payments* — your history of completed payments and receipts.\n\n` +
         `*Change your setup anytime:*\n` +
         `➕ */editplatform* — add or remove ClubGG / Sportsbook.\n` +
         `🏆 */editclubs* — change which clubs you play in.\n` +
         `💳 */editdeposit* — change which payment methods you deposit with.\n` +
-        `🏦 */editwithdraw* — change how you get paid when you cash out.\n\n` +
+        `🏦 */editwithdraw* — change which payment methods you cashout with.\n\n` +
         `💬 */support* — message our team directly.\n` +
         `🛑 */cancel* — stop whatever you're in the middle of.`,
       { parse_mode: 'Markdown' },
@@ -163,6 +155,7 @@ export function buildBot(token: string): Bot<Ctx> {
   bot.command('remove', adminRemove);
   bot.command('canceldeposit', dmOnly(cancelDeposit));
   bot.command(['withdraw', 'cashout'], dmOnly(cashoutStart));
+  bot.command(['cancelwithdraw', 'cancelcashout'], dmOnly(cashoutCancel));
   bot.command(['pending', 'me'], dmOnly(me));
   bot.command(['payments', 'history', 'receipts'], dmOnly(payments));
   bot.command(['support', 'help_me', 'contact'], dmOnly(supportStart));
@@ -426,6 +419,7 @@ export function buildBot(token: string): Bot<Ctx> {
       case 'ob:sb_pass': return void (await obSbPass(ctx, step.username, text));
       case 'ob:sb_username': return void (await obSbUsername(ctx, text));
       case 'ob:clubgg_id': return void (await obClubggId(ctx, text));
+      case 'ob:clubgg_user': return void (await obClubggUser(ctx, step.uid, text));
       case 'ob:wd_handle': return void (await obWdHandle(ctx, step.methodId, text));
       case 'ob:wd_name': return void (await obWdName(ctx, step.methodId, step.handle, text));
       case 'ob:sb_wait':

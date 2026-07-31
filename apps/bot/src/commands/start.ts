@@ -2,7 +2,7 @@ import { InlineKeyboard } from 'grammy';
 import { db } from '@union/core';
 import type { Ctx } from '../session.js';
 import { currentPlayer } from '../player.js';
-import { money, friendlyStatus } from '../words.js';
+import { money, friendlyStatus, COMMANDS_LIST } from '../words.js';
 import { startOnboarding, advance, isOnboarded } from './onboarding.js';
 
 /**
@@ -39,12 +39,7 @@ export async function start(ctx: Ctx): Promise<void> {
       : '';
     await ctx.reply(
       `You're all set${p.display_name ? ', ' + p.display_name : ''} — you already have an account.${acctLines}\n\n` +
-        `💵 /deposit — add money\n` +
-        `💸 /withdraw — cash out\n` +
-        `📄 /payments — your payments & receipts\n` +
-        `📋 /pending — your account\n` +
-        `➕ /editplatform · 🏆 /editclubs · 💳 /editdeposit · 🏦 /editwithdraw — update your setup\n` +
-        `💬 /support — message our team · 📖 /guide — what each command does`,
+        COMMANDS_LIST,
     );
     return;
   }

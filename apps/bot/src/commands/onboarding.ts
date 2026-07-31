@@ -3,7 +3,7 @@ import { db, isUserError, userMessage, type Platform, type PaymentMethod } from 
 import type { Ctx, OnboardingPlan } from '../session.js';
 import { currentPlayer } from '../player.js';
 import { ask, clearQuestion } from '../ask.js';
-import { withdrawHandlePrompt } from '../words.js';
+import { withdrawHandlePrompt, COMMANDS_LIST } from '../words.js';
 
 /**
  * GUIDED ONBOARDING
@@ -350,11 +350,17 @@ export async function obSbUsername(ctx: Ctx, text: string): Promise<void> {
 }
 
 export async function obClubggId(ctx: Ctx, text: string): Promise<void> {
+  // We take the ID first, then the ClubGG username, and claim with both together.
+  ctx.session.step = { name: 'ob:clubgg_user', uid: text.trim() };
+  await ctx.reply(`What's your *ClubGG username*?`, { parse_mode: 'Markdown' });
+}
+
+export async function obClubggUser(ctx: Ctx, uid: string, text: string): Promise<void> {
   const p = await currentPlayer(ctx);
   const cg = await platformByCode('clubgg');
   if (!p || !cg) return;
   try {
-    await db()`select player_claim_platform(${p.id}::uuid, ${cg.id}::uuid, ${text})`;
+    await db()`select player_claim_platform(${p.id}::uuid, ${cg.id}::uuid, ${uid}, ${text.trim()})`;
   } catch (err) {
     if (isUserError(err)) return void (await ctx.reply(userMessage(err)));
     throw err;
@@ -770,7 +776,7 @@ async function finish(ctx: Ctx, playerId: string): Promise<void> {
       `Join our official Telegram channel to stay updated with promotions, announcements, and news:\n` +
       `${CHANNEL_URL}\n\n` +
       `We look forward to having you as part of the community!\n\n` +
-      `When you're ready:\n💵 /deposit — Add Money\n💸 /withdraw — Cash Out\n❓ /help — List all commands`,
+      `When you're ready:\n${COMMANDS_LIST}`,
     { parse_mode: 'Markdown', link_preview_options: { is_disabled: true } },
   );
 }

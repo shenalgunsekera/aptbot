@@ -1,3 +1,17 @@
+/** The command menu shown at the end of setup and on /start — one per line, the
+ *  same text/icons/commands in the Telegram and Discord bots. */
+export const COMMANDS_LIST =
+  '💵 /deposit — add money\n' +
+  '💸 /withdraw — cash out\n' +
+  '📄 /payments — your payments & receipts\n' +
+  '📋 /pending — your account\n' +
+  '➕ /editplatform — add or remove ClubGG / Sportsbook\n' +
+  '🏆 /editclubs — change which clubs you play in\n' +
+  '💳 /editdeposit — change how you deposit\n' +
+  '🏦 /editwithdraw — change how you get paid\n' +
+  '💬 /support — message our team\n' +
+  '📖 /guide — what each command does';
+
 /**
  * PLAIN LANGUAGE
  * ══════════════

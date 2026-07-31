@@ -299,7 +299,8 @@ export function renderNotification(n: Notification): Rendered | null {
       return { text: `👤 *New player* — ${p.name ?? (p.username ? '@'+p.username : p.telegram_id)}\nWaiting to add their account.` };
     case 'player.claim':
       return {
-        text: `👤 *${p.name}* wants to link ${p.platform}: \`${p.uid_claimed}\`\n\n` +
+        text: `👤 *${p.name}* wants to link ${p.platform}: \`${p.uid_claimed}\`` +
+          (p.username ? `\nUsername: \`${p.username}\`` : '') + `\n\n` +
           `Check the ID against the roster, then approve.`,
         keyboard: p.pp_id
           ? new InlineKeyboard().text('✅ Approve', `pl:approve:${p.pp_id}`)

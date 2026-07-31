@@ -320,6 +320,38 @@ export async function cashoutReduceConfirm(ctx: Ctx, withdrawId: string, text: s
  * comes straight back; any part already being paid stays in flight and finishes.
  * If it's already fully claimed or paid, it can't be pulled back.
  */
+/** /cancelwithdraw — cancel a cash-out that hasn't been paid. One → cancel it;
+ *  several → show a pick list (reuses the wd:retract buttons). */
+export async function cashoutCancel(ctx: Ctx): Promise<void> {
+  const p = await requireActive(ctx);
+  if (!p) return;
+  const sql = db();
+  const outs = await sql<{ id: string; amount: number | null; requested_amount: number; currency: string; status: string }[]>`
+    select id, amount, requested_amount, currency, status from withdraw_requests
+     where player_id = ${p.id} and status in ('pending_unload','queued','partially_filled')
+     order by created_at desc`;
+  if (!outs.length) {
+    return void (await ctx.reply("You don't have a cash-out to cancel. (Ones already paid can't be cancelled — use /support if you need help.)"));
+  }
+  if (outs.length === 1) {
+    const o = outs[0]!;
+    try {
+      await sql`select withdraw_cancel(${o.id}::uuid, null, 'cancelled by player')`;
+    } catch (err) {
+      if (isUserError(err)) return void (await ctx.reply(`❌ ${userMessage(err)}`));
+      throw err;
+    }
+    if (o.status !== 'pending_unload') {
+      await sql`select notify_admins('withdraw.retracted', 'withdraw_request', ${o.id}::uuid, ${sql.json({
+        name: p.display_name, amount: o.amount ?? o.requested_amount, currency: o.currency }) as any}::jsonb)`;
+    }
+    return void (await ctx.reply('✅ Your cash-out was cancelled. Anything not yet paid is back on your table.'));
+  }
+  const kb = new InlineKeyboard();
+  for (const o of outs) kb.text(`✖️ Cancel ${money(o.amount ?? o.requested_amount, o.currency)}`, `wd:retract:${o.id}`).row();
+  await ctx.reply('Which cash-out do you want to cancel?', { reply_markup: kb });
+}
+
 export async function cashoutRetract(ctx: Ctx, withdrawId: string): Promise<void> {
   const p = await requireActive(ctx);
   if (!p) return;
