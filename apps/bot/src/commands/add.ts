@@ -282,7 +282,6 @@ async function runMatch(ctx: Ctx, platformId: string, amount: number, methodId: 
     }
     lines.push(`Address: \`${f.payout_handle}\`  _(tap to copy)_`);
     if (f.payout_name) lines.push(`Name on ${m!.name}: *${f.payout_name}*`);
-    if (f.withdraw_id !== null) lines.push(`_This is another player's ${m!.name}._`);
     lines.push('');
   }
   if (m?.code === 'paypal') lines.push('⚠️ *Make sure to send as Friends & Family* (not Goods & Services).\n');
