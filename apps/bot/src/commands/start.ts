@@ -1,4 +1,3 @@
-import { InlineKeyboard } from 'grammy';
 import { db } from '@union/core';
 import type { Ctx } from '../session.js';
 import { currentPlayer } from '../player.js';
@@ -115,22 +114,7 @@ export async function me(ctx: Ctx): Promise<void> {
     lines.push('');
   }
 
-  // A cash-out can be pulled back while it's still waiting (not fully paid). For
-  // methods where WE send (Venmo/Zelle/crypto) you can also take PART back;
-  // PayPal/Cash App requests can't be lowered, so it's cancel-all only.
-  const cancellable = outs.filter((o) => ['pending_unload', 'queued', 'partially_filled'].includes(o.status));
-  const reducible = (code: string) => code !== 'paypal' && code !== 'cashapp';
-  const kb = new InlineKeyboard();
-  for (const o of cancellable) {
-    kb.text(`✖️ Cancel ${money(o.amount ?? o.requested_amount, o.currency)}`, `wd:retract:${o.id}`);
-    if (reducible(o.method_code) && ['queued', 'partially_filled'].includes(o.status)) {
-      kb.text('➖ Take some back', `wd:reduce:${o.id}`);
-    }
-    kb.row();
-  }
-
-  await ctx.reply(lines.join('\n'), {
-    parse_mode: 'Markdown',
-    reply_markup: cancellable.length ? kb : undefined,
-  });
+  // We don't push cancellation here — /pending just shows status. A player who
+  // genuinely wants to cancel uses /cancelwithdraw.
+  await ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' });
 }

@@ -274,8 +274,7 @@ export async function cashoutHandle(
   await clearQuestion(ctx);
 
   const amt = money(w.requested_amount, w.currency);
-  const body = cashoutConfirm(m?.code ?? '', m?.name ?? 'payment', w.payout_handle, amt, m?.club_handle) +
-    `\n\nChanged your mind? You can cancel it from /pending while it's still waiting.`;
+  const body = cashoutConfirm(m?.code ?? '', m?.name ?? 'payment', w.payout_handle, amt, m?.club_handle);
   await ctx.reply(
     body,
     { parse_mode: 'Markdown' },

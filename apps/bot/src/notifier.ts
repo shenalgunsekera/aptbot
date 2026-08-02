@@ -259,11 +259,9 @@ export function renderNotification(n: Notification): Rendered | null {
       return { text: `⏱ *Your payment timed out.*\n\nThe ${m(p.amount, p.currency)} went back in the queue — no proof arrived in time. If you already sent it, message us now.` };
     case 'withdraw.queued':
       return {
-        text: (p.short
+        text: p.short
           ? `✅ We got *${m(p.amount, p.currency)}* off your table (that's what was there of the ${m(p.requested, p.currency)} you asked for). You're in line to be paid.`
-          : `✅ *${m(p.amount, p.currency)}* is ready and you're in line to be paid.`) +
-          `\n\nChanged your mind? You can cancel below while it's still waiting.`,
-        keyboard: new InlineKeyboard().text('✖️ Cancel this cash-out', `wd:retract:${n.ref_id}`),
+          : `✅ *${m(p.amount, p.currency)}* is ready and you're in line to be paid.`,
       };
     case 'onboarding.resume':
       return {
