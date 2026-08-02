@@ -362,11 +362,11 @@ export function buildBot(token: string): Bot<Ctx> {
       return;
     }
 
-    // Admin giving the tx id for a club-mediated cash-out they paid.
+    // Admin gave a text ref (no screenshot) for a cash-out they paid.
     const payId = (ctx.session as any)._payWithdraw as string | undefined;
-    if (payId && /Reply to THIS message with the transaction ID/.test(replyText)) {
+    if (payId && /screenshot of the payment you sent for cash-out/.test(replyText)) {
       (ctx.session as any)._payWithdraw = undefined;
-      await withdrawPayConfirm(ctx, payId, ctx.message.text.trim());
+      await withdrawPayConfirm(ctx, payId, ctx.message.text.trim(), false);
       return;
     }
 
@@ -443,6 +443,17 @@ export function buildBot(token: string): Bot<Ctx> {
   
   // ─── Photos / documents (receipts) ───────────────────────────────────────────
   bot.on(['message:photo', 'message:document'], async (ctx) => {
+    // Admin uploading a receipt screenshot for a cash-out they paid (this happens
+    // IN the admin group, so it must run before the admin-group guard below).
+    const payId = (ctx.session as any)._payWithdraw as string | undefined;
+    if (payId && /screenshot of the payment you sent for cash-out/.test(ctx.message.reply_to_message?.text ?? '')) {
+      (ctx.session as any)._payWithdraw = undefined;
+      const receiptId = ctx.message.photo?.at(-1)?.file_id ?? ctx.message.document?.file_id;
+      if (!receiptId) return void (await ctx.reply("I couldn't read that image — try sending it again."));
+      await withdrawPayConfirm(ctx, payId, receiptId, true);
+      return;
+    }
+
     if (await isAdminGroup(ctx)) return;
     const step = ctx.session.step;
   

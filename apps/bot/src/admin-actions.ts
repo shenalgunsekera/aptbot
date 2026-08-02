@@ -108,30 +108,40 @@ export async function loaderFail(ctx: Ctx, orderId: string): Promise<void> {
   await editCard(ctx, `❌ *Failed* · by ${ctx.from?.first_name ?? 'admin'}`);
 }
 
-/** Admin taps "I paid it" on a club-mediated cash-out → ask for the tx id. */
+/** Admin taps "I paid it" on a cash-out → ask for a screenshot of the receipt. */
 export async function withdrawPayPrompt(ctx: Ctx, withdrawId: string): Promise<void> {
   const admin = await adminFor(ctx);
   if (!admin) return void (await ctx.answerCallbackQuery({ text: 'Admins only.', show_alert: true }));
   await ctx.answerCallbackQuery();
   (ctx.session as any)._payWithdraw = withdrawId;
   await ctx.reply(
-    `Reply to THIS message with the transaction ID / reference of the payment you sent for cash-out \`${withdrawId.slice(0, 8)}\`.`,
+    `Reply to THIS message with a *screenshot* of the payment you sent for cash-out \`${withdrawId.slice(0, 8)}\` — the player gets it as their receipt.\n\n_No screenshot? You can reply with the transaction ID instead._`,
     { parse_mode: 'Markdown', reply_markup: { force_reply: true } },
   );
 }
 
-/** The admin's reply with the tx id → record the payout from float. */
-export async function withdrawPayConfirm(ctx: Ctx, withdrawId: string, ref: string): Promise<void> {
+/** The admin's reply → record the payout from float. `image` is a photo file_id
+ *  (preferred, forwarded to the player as their receipt); otherwise a text ref. */
+export async function withdrawPayConfirm(
+  ctx: Ctx, withdrawId: string, value: string, image: boolean,
+): Promise<void> {
   const admin = await adminFor(ctx);
   if (!admin) return;
   const sql = db();
   try {
-    await sql`select withdraw_club_payout(${withdrawId}::uuid, ${admin.id}::uuid, null, ${ref.trim()}, 'paid via telegram')`;
+    await sql`select withdraw_club_payout(${withdrawId}::uuid, ${admin.id}::uuid, null,
+                                          ${image ? null : value.trim()}, 'paid via telegram',
+                                          ${image ? value : null})`;
   } catch (err) {
     if (isUserError(err)) return void (await ctx.reply(`❌ ${userMessage(err)}`));
     throw err;
   }
-  await ctx.reply(`✅ Recorded as paid (ref \`${ref.trim()}\`). The player has been told.`, { parse_mode: 'Markdown' });
+  await ctx.reply(
+    image
+      ? '✅ Recorded as paid — the receipt was sent to the player.'
+      : `✅ Recorded as paid (ref \`${value.trim()}\`). The player has been told.`,
+    { parse_mode: 'Markdown' },
+  );
 }
 
 /** Admin taps "Account created" on a Sportsbook creation request → activate the

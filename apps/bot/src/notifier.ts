@@ -274,8 +274,10 @@ export function renderNotification(n: Notification): Rendered | null {
       return { text: `Your cash-out was cancelled and everything's back where it was.` };
     case 'withdraw.cancel_confirmed':
       return { text: `✅ *Cancellation confirmed.* ${m(p.amount, p.currency)} has been put back on your table.` };
-    case 'withdraw.paid':
-      return { text: `💸 *You've been paid ${m(p.amount, p.currency)}!*` + (p.payment_ref ? `\nReference: \`${p.payment_ref}\`` : '') };
+    case 'withdraw.paid': {
+      const caption = `💸 *You've been paid ${m(p.amount, p.currency)}!*` + (p.payment_ref ? `\nReference: \`${p.payment_ref}\`` : '');
+      return p.receipt ? { photo: p.receipt, text: caption } : { text: caption };
+    }
     case 'withdraw.nothing_available':
       return { text: `We couldn't find anything on your table to cash-out right now. Nothing was taken.` };
     case 'value.added':
