@@ -21,6 +21,7 @@ import { adminAdd, adminRemove } from './commands/adjust.js';
 import {
   cashoutStart, cashoutPickPlatform, cashoutPickClub, cashoutAmount, cashoutPickMethod,
   cashoutSavedHandle, cashoutSavedMethod, cashoutHandle, cashoutRetract, cashoutCancel,
+  cashoutCancelPick, cashoutCancelFull, cashoutCancelPartPrompt, cashoutCancelAmount,
   cashoutReducePrompt, cashoutReduceConfirm,
 } from './commands/cashout.js';
 import { disputeReason } from './commands/confirm.js';
@@ -316,6 +317,9 @@ export function buildBot(token: string): Bot<Ctx> {
     await cashoutSavedMethod(ctx, ctx.match![1]!, s.platformId, s.amount);
   });
   bot.callbackQuery(/^wd:retract:(.+)$/, (ctx) => cashoutRetract(ctx, ctx.match![1]!));
+  bot.callbackQuery(/^wc:pick:(.+)$/, (ctx) => cashoutCancelPick(ctx, ctx.match![1]!));
+  bot.callbackQuery(/^wc:full:(.+)$/, (ctx) => cashoutCancelFull(ctx, ctx.match![1]!));
+  bot.callbackQuery(/^wc:part:(.+)$/, (ctx) => cashoutCancelPartPrompt(ctx, ctx.match![1]!));
   bot.callbackQuery(/^wd:reduce:(.+)$/, (ctx) => cashoutReducePrompt(ctx, ctx.match![1]!));
   bot.callbackQuery(/^out:h:(.+)$/, async (ctx) => {
     const s = ctx.session.step;
@@ -428,6 +432,7 @@ export function buildBot(token: string): Bot<Ctx> {
       case 'add:amount': return void (await addAmount(ctx, step.platformId, step.methodId, text));
       case 'out:amount': return void (await cashoutAmount(ctx, step.platformId, text));
       case 'out:handle': return void (await cashoutHandle(ctx, step.platformId, step.amount, step.methodId, text));
+      case 'out:cancel_amount': return void (await cashoutCancelAmount(ctx, step.withdrawId, text));
       case 'dispute:reason': return void (await disputeReason(ctx, step.fillId, text));
       default:
         // Stray text when not in a flow: do NOT auto-relay every message (that

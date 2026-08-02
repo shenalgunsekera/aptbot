@@ -8,6 +8,7 @@ import { requireActive } from '../player.js';
 import { money, whole, parseAmount, amountProblem, shortHandle, withdrawHandlePrompt, cashoutConfirm } from '../words.js';
 import { resolvePlatform, resolveMethod, platformKeyboard, methodKeyboard } from '../prefs.js';
 import { ask, clearQuestion } from '../ask.js';
+import { editCardFor } from '../notifier.js';
 
 /**
  * /withdraw — cash-out. (withdraw)
@@ -322,34 +323,114 @@ export async function cashoutReduceConfirm(ctx: Ctx, withdrawId: string, text: s
  */
 /** /cancelwithdraw — cancel a cash-out that hasn't been paid. One → cancel it;
  *  several → show a pick list (reuses the wd:retract buttons). */
+/** How much of a cash-out can still be pulled back: the whole request before any
+ *  chips come off, else only the un-matched remaining part. */
+function cancellableOf(w: { status: string; requested_amount: number; amount_remaining: number }): number {
+  return w.status === 'pending_unload' ? w.requested_amount : w.amount_remaining;
+}
+
+/** /cancelwithdraw — one → offer Full/Partial; several → pick which first. */
 export async function cashoutCancel(ctx: Ctx): Promise<void> {
   const p = await requireActive(ctx);
   if (!p) return;
-  const sql = db();
-  const outs = await sql<{ id: string; amount: number | null; requested_amount: number; currency: string; status: string }[]>`
-    select id, amount, requested_amount, currency, status from withdraw_requests
+  const outs = await db()<{ id: string; requested_amount: number; amount_remaining: number; currency: string; status: string }[]>`
+    select id, requested_amount, amount_remaining, currency, status from withdraw_requests
      where player_id = ${p.id} and status in ('pending_unload','queued','partially_filled')
      order by created_at desc`;
-  if (!outs.length) {
-    return void (await ctx.reply("You don't have a cash-out to cancel. (Ones already paid can't be cancelled — use /support if you need help.)"));
+  const live = outs.filter((o) => cancellableOf(o) > 0);
+  if (!live.length) {
+    return void (await ctx.reply("You don't have a cash-out to cancel. (Anything already being paid can't be cancelled — use /support if you need help.)"));
   }
-  if (outs.length === 1) {
-    const o = outs[0]!;
-    try {
-      await sql`select withdraw_cancel(${o.id}::uuid, null, 'cancelled by player')`;
-    } catch (err) {
-      if (isUserError(err)) return void (await ctx.reply(`❌ ${userMessage(err)}`));
-      throw err;
-    }
-    if (o.status !== 'pending_unload') {
-      await sql`select notify_admins('withdraw.retracted', 'withdraw_request', ${o.id}::uuid, ${sql.json({
-        name: p.display_name, amount: o.amount ?? o.requested_amount, currency: o.currency }) as any}::jsonb)`;
-    }
-    return void (await ctx.reply('✅ Your cash-out was cancelled. Anything not yet paid is back on your table.'));
-  }
+  if (live.length === 1) return void (await offerCancelOptions(ctx, live[0]!.id));
   const kb = new InlineKeyboard();
-  for (const o of outs) kb.text(`✖️ Cancel ${money(o.amount ?? o.requested_amount, o.currency)}`, `wd:retract:${o.id}`).row();
+  for (const o of live) kb.text(`${money(cancellableOf(o), o.currency)} — ${o.status === 'pending_unload' ? 'not started' : 'in queue'}`, `wc:pick:${o.id}`).row();
   await ctx.reply('Which cash-out do you want to cancel?', { reply_markup: kb });
+}
+
+async function offerCancelOptions(ctx: Ctx, withdrawId: string): Promise<void> {
+  const p = await requireActive(ctx);
+  if (!p) return;
+  const [w] = await db()<{ requested_amount: number; amount_remaining: number; currency: string; status: string }[]>`
+    select requested_amount, amount_remaining, currency, status from withdraw_requests where id = ${withdrawId} and player_id = ${p.id}`;
+  if (!w) return void (await ctx.reply("Can't find that cash-out."));
+  const c = cancellableOf(w);
+  if (c <= 0) return void (await ctx.reply('That cash-out is already being paid — nothing left to cancel.'));
+  await ctx.reply(
+    `Cancel this cash-out? *${money(c, w.currency)}* can be cancelled.` +
+      (w.status !== 'pending_unload' ? '\n_An admin will re-load whatever you cancel back onto your table._' : ''),
+    {
+      parse_mode: 'Markdown',
+      reply_markup: new InlineKeyboard()
+        .text(`✖️ Cancel it all (${money(c, w.currency)})`, `wc:full:${withdrawId}`).row()
+        .text('➖ Cancel part of it', `wc:part:${withdrawId}`),
+    },
+  );
+}
+
+/** wc:pick — chose which cash-out (multi case). */
+export async function cashoutCancelPick(ctx: Ctx, withdrawId: string): Promise<void> {
+  await ctx.answerCallbackQuery();
+  try { await ctx.editMessageReplyMarkup(); } catch { /* gone */ }
+  await offerCancelOptions(ctx, withdrawId);
+}
+
+/** wc:full — cancel the whole cancellable amount. */
+export async function cashoutCancelFull(ctx: Ctx, withdrawId: string): Promise<void> {
+  await ctx.answerCallbackQuery();
+  try { await ctx.editMessageReplyMarkup(); } catch { /* gone */ }
+  await doCancel(ctx, withdrawId, Number.MAX_SAFE_INTEGER);
+}
+
+/** wc:part — ask how much to cancel. */
+export async function cashoutCancelPartPrompt(ctx: Ctx, withdrawId: string): Promise<void> {
+  ctx.session.step = { name: 'out:cancel_amount', withdrawId };
+  await ctx.answerCallbackQuery();
+  try { await ctx.editMessageReplyMarkup(); } catch { /* gone */ }
+  await ctx.reply('How much do you want to cancel? Send the number, e.g. `20`.', { parse_mode: 'Markdown' });
+}
+
+export async function cashoutCancelAmount(ctx: Ctx, withdrawId: string, text: string): Promise<void> {
+  const amount = parseAmount(text);
+  if (amount === null || amount <= 0) return void (await ctx.reply('Send just the number, e.g. `20`.', { parse_mode: 'Markdown' }));
+  ctx.session.step = { name: 'idle' };
+  await doCancel(ctx, withdrawId, amount);
+}
+
+/** The heart: run the DB cancel, then update the admin card in place and tell the
+ *  player what happens next (no new admin spam for the pending case). */
+async function doCancel(ctx: Ctx, withdrawId: string, amount: number): Promise<void> {
+  const p = await requireActive(ctx);
+  if (!p) return;
+  const sql = db();
+  let j: { scenario: string; order_id: string; full: boolean; cancelled: number; new_amount?: number };
+  try {
+    [{ j }] = await sql<{ j: typeof j }[]>`select withdraw_player_cancel(${withdrawId}::uuid, ${amount}::bigint, null) as j`;
+  } catch (err) {
+    if (isUserError(err)) return void (await ctx.reply(`❌ ${userMessage(err)}`));
+    throw err;
+  }
+
+  if (j.scenario === 'pending_full') {
+    await editCardFor(ctx.api, 'loader_order', j.order_id, '↩️ *Cash-out cancelled by the player* — nothing to take off.');
+    return void (await ctx.reply('✅ Your cash-out was cancelled. Nothing was taken off your table.'));
+  }
+  if (j.scenario === 'pending_partial') {
+    const [o] = await sql<{ delta: number; currency: string; player_name: string; platform_uid: string }[]>`
+      select delta, currency, player_name, platform_uid from loader_orders where id = ${j.order_id}`;
+    if (o) {
+      await editCardFor(ctx.api, 'loader_order', j.order_id,
+        `🎰 *TAKE OFF ${money(Math.abs(Number(o.delta)), o.currency)}* _(reduced by the player)_\n` +
+          `Player: *${o.player_name}*\nID: \`${o.platform_uid}\``,
+        new InlineKeyboard().text('✋ Claim', `lo:claim:${j.order_id}`));
+    }
+    return void (await ctx.reply(`✅ Reduced — we'll take off *${money(Number(j.new_amount ?? 0))}* instead. Your line stays.`, { parse_mode: 'Markdown' }));
+  }
+  // reload: the admin re-load card was raised automatically; player is confirmed once it's re-loaded.
+  await ctx.reply(
+    `✅ Cancellation requested. An admin will re-load *${money(Number(j.cancelled))}* back onto your table — ` +
+      `you'll get a confirmation here the moment it's back.` + (j.full ? '' : '\n_The rest stays in your queue._'),
+    { parse_mode: 'Markdown' },
+  );
 }
 
 export async function cashoutRetract(ctx: Ctx, withdrawId: string): Promise<void> {

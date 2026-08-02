@@ -118,8 +118,10 @@ export class Notifier {
   private async deliver(n: Notification, chatId: number, msg: Rendered): Promise<void> {
     const sql = db();
     try {
-      await sendRendered(this.bot, chatId, msg);
-      await sql`update notifications set status='sent', sent_at=now() where id=${n.id}`;
+      const mid = await sendRendered(this.bot, chatId, msg);
+      await sql`update notifications set status='sent', sent_at=now(),
+                sent_chat_id=${String(chatId)}, sent_message_id=${mid != null ? String(mid) : null}
+                where id=${n.id}`;
     } catch (err) {
       const description = String((err as { description?: string })?.description ?? err);
       const blocked = /blocked|deactivated|chat not found|kicked/i.test(description);
@@ -147,13 +149,14 @@ interface Rendered { text: string; keyboard?: InlineKeyboard; photo?: string; ph
  * URL (Firebase Storage). Telegram caption max is 1024 chars, so the text is
  * clipped for the caption case.
  */
-export async function sendRendered(bot: Bot<Ctx>, chatId: number, msg: Rendered): Promise<void> {
+export async function sendRendered(bot: Bot<Ctx>, chatId: number, msg: Rendered): Promise<number | undefined> {
   const kb = msg.keyboard ? { reply_markup: msg.keyboard } : {};
   const md = { parse_mode: 'Markdown' as const, ...kb };   // with Markdown
   const cap = msg.text.slice(0, 1024);
   // Never let a stray Markdown character in a name/handle, or a receipt that's a
   // PDF, silently drop an admin message: on a parse error resend as plain text;
-  // on a "not a photo" error resend as a document.
+  // on a "not a photo" error resend as a document. Returns the message id of the
+  // message that carries the action button, so a card can be edited later.
   const desc = (e: unknown) => String((e as { description?: string })?.description ?? e);
   const isEntity = (e: unknown) => /can't parse entities/i.test(desc(e));
   const isDocAsPhoto = (e: unknown) => /type Document as Photo|as Photo|wrong type of the web page content/i.test(desc(e));
@@ -174,24 +177,46 @@ export async function sendRendered(bot: Bot<Ctx>, chatId: number, msg: Rendered)
         }
       } else throw e;
     }
-    if (msg.keyboard) await bot.api.sendMessage(chatId, '👆 Receipts above — verify when you\'ve checked them.', { reply_markup: msg.keyboard });
-    return;
+    if (msg.keyboard) { const m = await bot.api.sendMessage(chatId, '👆 Receipts above — verify when you\'ve checked them.', { reply_markup: msg.keyboard }); return m.message_id; }
+    return undefined;
   }
 
   const single = msg.photo ?? msg.photos?.[0];
   if (single) {
-    try { await bot.api.sendPhoto(chatId, single, { caption: cap, ...md }); }
+    try { const m = await bot.api.sendPhoto(chatId, single, { caption: cap, ...md }); return m.message_id; }
     catch (e) {
       if (isDocAsPhoto(e)) {
-        try { await bot.api.sendDocument(chatId, single, { caption: cap, ...md }); }
-        catch (e2) { if (isEntity(e2)) await bot.api.sendDocument(chatId, single, { caption: cap, ...kb }); else throw e2; }
+        try { const m = await bot.api.sendDocument(chatId, single, { caption: cap, ...md }); return m.message_id; }
+        catch (e2) { if (isEntity(e2)) { const m = await bot.api.sendDocument(chatId, single, { caption: cap, ...kb }); return m.message_id; } throw e2; }
       } else if (isEntity(e)) {
-        await bot.api.sendPhoto(chatId, single, { caption: cap, ...kb });
+        const m = await bot.api.sendPhoto(chatId, single, { caption: cap, ...kb }); return m.message_id;
       } else throw e;
     }
   } else {
-    try { await bot.api.sendMessage(chatId, msg.text, md); }
-    catch (e) { if (isEntity(e)) await bot.api.sendMessage(chatId, msg.text, kb); else throw e; }
+    try { const m = await bot.api.sendMessage(chatId, msg.text, md); return m.message_id; }
+    catch (e) { if (isEntity(e)) { const m = await bot.api.sendMessage(chatId, msg.text, kb); return m.message_id; } throw e; }
+  }
+}
+
+/** Edit an already-delivered admin card in place (so a cancellation updates the
+ *  Claim card instead of flooding the group). Looks up the message we recorded
+ *  for this notification ref, and edits its text/caption + keyboard. Best-effort.
+ *  Takes an Api so both the notifier (bot.api) and handlers (ctx.api) can use it. */
+export async function editCardFor(
+  api: Bot<Ctx>['api'], refType: string, refId: string, text: string, keyboard?: InlineKeyboard,
+): Promise<boolean> {
+  const [n] = await db()<{ sent_chat_id: string | null; sent_message_id: string | null }[]>`
+    select sent_chat_id, sent_message_id from notifications
+     where ref_type = ${refType} and ref_id = ${refId}::uuid and platform = 'telegram'
+       and status = 'sent' and sent_message_id is not null
+     order by id desc limit 1`;
+  if (!n?.sent_chat_id || !n.sent_message_id) return false;
+  const chatId = Number(n.sent_chat_id); const messageId = Number(n.sent_message_id);
+  const opts = { parse_mode: 'Markdown' as const, ...(keyboard ? { reply_markup: keyboard } : { reply_markup: undefined }) };
+  try { await api.editMessageCaption(chatId, messageId, { caption: text, ...opts }); return true; }
+  catch {
+    try { await api.editMessageText(chatId, messageId, text, opts); return true; }
+    catch { return false; }
   }
 }
 
@@ -249,6 +274,8 @@ export function renderNotification(n: Notification): Rendered | null {
       return { text: `🎉 *Cash-out complete!* ${m(p.amount, p.currency)} — all done.` };
     case 'withdraw.cancelled':
       return { text: `Your cash-out was cancelled and everything's back where it was.` };
+    case 'withdraw.cancel_confirmed':
+      return { text: `✅ *Cancellation confirmed.* ${m(p.amount, p.currency)} has been put back on your table.` };
     case 'withdraw.paid':
       return { text: `💸 *You've been paid ${m(p.amount, p.currency)}!*` + (p.payment_ref ? `\nReference: \`${p.payment_ref}\`` : '') };
     case 'withdraw.nothing_available':
@@ -270,9 +297,13 @@ export function renderNotification(n: Notification): Rendered | null {
     // ── Admin group ──
     case 'loader.work': {
       const load = Number(p.delta) > 0;
+      const reload = p.reason === 'withdraw.cancel_reload';
       return {
-        text: `🎰 *${load ? 'ADD' : 'TAKE OFF'} ${m(Math.abs(Number(p.delta)), p.currency)}*\n` +
-          `Player: *${p.player_name}*\nID: \`${p.platform_uid}\`\nClub: ${p.club}\nReason: ${p.reason}`,
+        text: reload
+          ? `↩️ *Player cancelled a cash-out — re-load ${m(Math.abs(Number(p.delta)), p.currency)}*\n` +
+            `Player: *${p.player_name}*\nID: \`${p.platform_uid}\`\nClub: ${p.club}\n\nPut it back on their table, then mark done.`
+          : `🎰 *${load ? 'ADD' : 'TAKE OFF'} ${m(Math.abs(Number(p.delta)), p.currency)}*\n` +
+            `Player: *${p.player_name}*\nID: \`${p.platform_uid}\`\nClub: ${p.club}\nReason: ${p.reason}`,
         keyboard: new InlineKeyboard().text('✋ Claim', `lo:claim:${n.ref_id}`),
       };
     }

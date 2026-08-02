@@ -109,8 +109,10 @@ export async function drainNotifications(bot: BotT, limit = 25): Promise<number>
     try {
       // sendRendered sends a PHOTO when the notification carries a receipt image,
       // else text — so receipts show inline in Telegram from the cron path too.
-      await sendRendered(bot, chatId, msg);
-      await sql`update notifications set status='sent', sent_at=now() where id=${n.id}`;
+      const mid = await sendRendered(bot, chatId, msg);
+      await sql`update notifications set status='sent', sent_at=now(),
+                sent_chat_id=${String(chatId)}, sent_message_id=${mid != null ? String(mid) : null}
+                where id=${n.id}`;
       sent++;
     } catch (err) {
       const desc = String((err as any)?.description ?? err);
