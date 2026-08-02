@@ -430,7 +430,10 @@ export function renderNotification(n: Notification): Rendered | null {
             keyboard: new InlineKeyboard().text('✅ I paid it', `wd:pay:${p.withdraw_id}`),
           }
         : {
-            text: `💸 *Cash-out to pay* (${p.method})\n\n${p.name ? 'To: *' + p.name + '*\n' : ''}` +
+            text: (p.small
+              ? `🔹 *Small cash-out — pay it directly.*\nUnder the ${m(p.min, p.currency)} minimum, so no depositor will match it.\n\n`
+              : '') +
+              `💸 *Cash-out to pay* (${p.method})\n\n${p.name ? 'To: *' + p.name + '*\n' : ''}` +
               `Amount: *${m(p.amount, p.currency)}*\nSend to: \`${p.handle}\` _(tap to copy)_\n\n` +
               `Pay it, then tap below and send the transaction ID.`,
             keyboard: new InlineKeyboard().text('✅ I paid it', `wd:pay:${p.withdraw_id}`),
