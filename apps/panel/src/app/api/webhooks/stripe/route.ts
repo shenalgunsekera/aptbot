@@ -58,7 +58,10 @@ export async function POST(req: Request): Promise<Response> {
     const amount = Number(s.amount_total ?? 0);
     if (s.payment_status === 'paid' && amount > 0) {
       const fillId = s.metadata?.fill_id;
-      const payerName = s.customer_details?.name ?? null;   // Stripe billing name
+      const email = s.customer_details?.email ?? null;
+      // Apple Pay often carries no billing name — fall back to the payer's email
+      // so the admin card still shows WHO paid instead of a nameless alert.
+      const payerName = s.customer_details?.name ?? email ?? null;
       await recordDetection({
         source: 'stripe',
         externalId: `pay:${s.payment_intent ?? s.id}`,
@@ -66,7 +69,7 @@ export async function POST(req: Request): Promise<Response> {
         amount,
         currency: String(s.currency ?? 'usd').toUpperCase(),
         ...(fillId ? { fillId } : {}),
-        raw: { session: s.id, name: payerName, email: s.customer_details?.email ?? null },
+        raw: { session: s.id, name: payerName, email },
       });
     }
   }

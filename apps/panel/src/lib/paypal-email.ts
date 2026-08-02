@@ -84,7 +84,7 @@ async function scan(
     const msg = await client.fetchOne(String(uid), { source: true }, { uid: true });
     if (!msg || !msg.source) continue;
     const mail = await simpleParser(msg.source);
-    const parsed = parse(mail.subject ?? '', mail.text ?? '');
+    const parsed = parse(mail.subject ?? '', bodyText(mail.text, mail.html));
     if (!parsed) continue;
     const date = mail.date ?? null;
     if (date && (!seen.max || date > seen.max)) seen.max = date;
@@ -117,10 +117,12 @@ const NON_NAME_WORDS = new Set([
   'request', 'requests', 'requested', 'requesting', 'payment', 'payments', 'money', 'sent',
   'receipt', 'activity', 'please', 'click', 'here', 'view', 'with', 'and', 'for', 'has', 'have',
   'will', 'account', 'balance', 'transaction', 'notification', 'summary', 'details',
+  // Subject/boilerplate words that can lead a body name match ("Payment received\nJohn …").
+  'received', 'receive', 'canceled', 'cancelled', 'declined', 'via', 'new', 'pay', 'paid', 'completed',
 ]);
 
 function cleanName(raw: string): string {
-  return raw.trim()
+  return raw.replace(/\s+/g, ' ').trim()   // collapse newlines/runs so no "\n" lands in a name
     .replace(/[,;:.]+$/, '')
     .replace(/^(paypal|cash\s?app|venmo|zelle|square)\s+/i, '')   // "PayPal Brady Peters" → "Brady Peters"
     .trim();
@@ -136,27 +138,57 @@ function isPlausibleName(name: string): boolean {
   return !words.some((w) => NON_NAME_WORDS.has(w.toLowerCase()));
 }
 
+/** Prefer the plain-text part, but fall back to the HTML body (stripped to text)
+ *  when it's missing or empty. Cash App moved to HTML-only notification emails —
+ *  no text/plain part — so `mail.text` is empty and the amount, which lives in
+ *  the body, was never seen. PayPal still sends a text part, so this only kicks
+ *  in where it's needed. */
+function bodyText(text: string | undefined, html: string | false | undefined): string {
+  const t = (text ?? '').trim();
+  if (t) return t;
+  if (typeof html === 'string' && html) return htmlToText(html);
+  return '';
+}
+
+/** Minimal HTML→text: drop script/style, turn tags into spaces, decode the few
+ *  entities that show up in money emails ($, &, spaces), and collapse runs. Good
+ *  enough to surface "$50", "sent you", "requested", "canceled a request". */
+function htmlToText(html: string): string {
+  return html
+    .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&#0*36;|&dollar;/gi, '$')
+    .replace(/&#x?0*[0-9a-f]+;/gi, ' ')   // any other numeric entity → space
+    .replace(/&[a-z]+;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function senderName(subject: string, text: string): string | null {
-  const hay = `${subject}\n${text}`;
-  // A name is 1–3 word-tokens, ANY case (PayPal shows names as the user typed
-  // them, e.g. "jennifer Setton"). Try each spot IN ORDER and take the first that
-  // actually looks like a name — a match that yields boilerplate is skipped, not
-  // returned, so we never surface "will always" instead of the real requester.
+  // Search the subject and the body SEPARATELY — never a `subject + "\n" + body`
+  // join. A joined haystack lets a name match run across the boundary and swallow
+  // the subject's trailing word (e.g. body "chris Boyett …" under subject "Payment
+  // received" was captured as "received chris Boyett"). A name always sits within
+  // one line, so matching per-side is both correct and safer.
+  const body = text;
   const candidates: Array<string | undefined> = [
     // "jennifer Setton sent you …" / "… is requesting" — name leads the subject.
     subject.match(/^(.{2,40}?)\s+(?:sent you|is requesting|wants\b)/i)?.[1],
     // "Michael Luvish requested $30" / "… canceled a request" — name leads the subject.
     subject.match(/^([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,2})\s+(?:requested\b|cancel(?:l)?ed|declined)/i)?.[1],
     // Same phrasing but anywhere in the BODY (Isaac's request had no name in the subject).
-    hay.match(/([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,2})\s+(?:sent you|is requesting|requested\b|has\s+cancel(?:l)?ed)/i)?.[1],
+    body.match(/([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,2})\s+(?:sent you|is requesting|requested\b|has\s+cancel(?:l)?ed)/i)?.[1],
     // Cash App payment body: "You were sent $100 by cake." / "… by John Doe. Receipt".
-    hay.match(/sent\s+\$[\d,.]+\s+by\s+([A-Za-z][A-Za-z'. -]*?)(?:[.\n]|$)/i)?.[1],
+    body.match(/sent\s+\$[\d,.]+\s+by\s+([A-Za-z][A-Za-z'. -]*?)(?:[.\n]|$)/i)?.[1],
     // "the $60 request from Ali Salem for …".
-    hay.match(/\brequest\s+from\s+([A-Za-z][A-Za-z'. -]*?)(?:\s+for\b|[.\n]|$)/i)?.[1],
+    body.match(/\brequest\s+from\s+([A-Za-z][A-Za-z'. -]*?)(?:\s+for\b|[.\n]|$)/i)?.[1],
     // "requested $30 from jennifer" / "requesting … from NAME".
-    hay.match(/request(?:ed|ing)?\b[^.\n]*?\bfrom\s+([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,2})/i)?.[1],
-    // Last resort: "from Name".
-    hay.match(/\bfrom\s+([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,2})/i)?.[1],
+    body.match(/request(?:ed|ing)?\b[^.\n]*?\bfrom\s+([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,2})/i)?.[1],
+    // Last resort: "from Name" (body first, then subject).
+    body.match(/\bfrom\s+([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,2})/i)?.[1]
+      ?? subject.match(/\bfrom\s+([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,2})/i)?.[1],
   ];
 
   for (const raw of candidates) {
