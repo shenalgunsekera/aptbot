@@ -26,7 +26,7 @@ export async function GET(req: Request): Promise<Response> {
   });
 
   const bySender: Record<string, number> = {};
-  const recent: Array<{ date: string | null; from: string; subject: string; hasText: boolean; hasHtml: boolean }> = [];
+  const recent: Array<{ date: string | null; from: string; subject: string; hasText: boolean; hasHtml: boolean; textSample: string }> = [];
   const since = new Date(Date.now() - days * 24 * 3600 * 1000);
 
   await client.connect();
@@ -35,7 +35,8 @@ export async function GET(req: Request): Promise<Response> {
     try {
       // Envelope-only broad sweep: find anything cash/square in from or subject.
       const uids = await client.search({ since }, { uid: true });
-      for (const uid of (uids || []).slice(-250)) {
+      // Newest first, so `recent` captures the LATEST matches (higher uid = newer).
+      for (const uid of (uids || []).slice(-250).reverse()) {
         const msg = await client.fetchOne(String(uid), { envelope: true }, { uid: true });
         if (!msg || !msg.envelope) continue;
         const from = (msg.envelope.from || []).map((a: { address?: string }) => a.address || '').join(',').toLowerCase();
@@ -47,11 +48,13 @@ export async function GET(req: Request): Promise<Response> {
           // Pull the body only for the newest few, to see text-vs-HTML.
           const full = await client.fetchOne(String(uid), { source: true }, { uid: true });
           const mail = full && full.source ? await simpleParser(full.source) : null;
+          const rawText = (mail?.text ?? '').replace(/\s+/g, ' ').trim();
           recent.push({
             date: msg.envelope.date ? new Date(msg.envelope.date).toISOString() : null,
             from, subject,
             hasText: Boolean(mail?.text && mail.text.trim()),
             hasHtml: Boolean(mail?.html),
+            textSample: rawText.slice(0, 500),
           });
         }
       }
