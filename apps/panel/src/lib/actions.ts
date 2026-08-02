@@ -106,6 +106,30 @@ export async function deletePlayer(playerId: string): Promise<Result> {
   }, ['/players', '/']);
 }
 
+/** Manually edit a player's details from the panel: display name, and/or one
+ *  platform account's ID + username (e.g. fix a mistyped ClubGG ID). */
+export async function editPlayer(
+  playerId: string,
+  name: string | null,
+  platformId: string | null,
+  accountId: string | null,
+  username: string | null,
+): Promise<Result> {
+  return run(async () => {
+    const s = await requireAdmin();
+    const changed: string[] = [];
+    if (name && name.trim()) {
+      await db()`select player_set_name(${playerId}::uuid, ${name.trim()}, ${s.admin.id}::uuid)`;
+      changed.push('name');
+    }
+    if (platformId && ((accountId && accountId.trim()) || (username && username.trim()))) {
+      await db()`select admin_set_platform_uid(${playerId}::uuid, ${platformId}::uuid, ${accountId ?? null}, ${username ?? null}, ${s.admin.id}::uuid)`;
+      changed.push('account');
+    }
+    return changed.length ? `Updated ${changed.join(' and ')}.` : 'No changes made.';
+  }, ['/players', '/']);
+}
+
 // ─── Payments (fills) ────────────────────────────────────────────────────────
 
 export async function verifyPayment(fillId: string, note: string): Promise<Result> {

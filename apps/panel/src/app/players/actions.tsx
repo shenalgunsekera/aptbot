@@ -1,7 +1,7 @@
 'use client';
 
 import { ActionButton, PromptAction } from '../../components/ui';
-import { confirmPlayer, setPlayerStatus, adjustPlayer, approveSportsbook, deletePlayer } from '../../lib/actions';
+import { confirmPlayer, setPlayerStatus, adjustPlayer, approveSportsbook, deletePlayer, editPlayer } from '../../lib/actions';
 
 /** A Sportsbook account the club must CREATE. Shows the desired credentials; the
  *  button marks it created (on APT Sports) and auto-resumes the player. */
@@ -81,6 +81,31 @@ export function PlayerActions({
           action={(v) => setPlayerStatus(player.id, 'active', v.reason ?? '')}
         />
       ) : null}
+
+      <PromptAction
+        label="Edit details"
+        title={`Edit ${player.name}`}
+        variant="primary"
+        fields={[
+          { name: 'name', label: 'Display name (blank = keep it)', placeholder: player.name },
+          { name: 'platform', label: `Fix which account? (${platforms.map((p) => p.name).join(' / ')}) — optional`, placeholder: platforms[0]?.name },
+          { name: 'account_id', label: 'New account ID (optional)' },
+          { name: 'username', label: 'ClubGG username (optional)' },
+        ]}
+        action={async (v) => {
+          let platformId: string | null = null;
+          const pfName = v.platform?.trim();
+          if (pfName) {
+            const pf = platforms.find((p) => p.name.toLowerCase() === pfName.toLowerCase());
+            if (!pf) return { ok: false as const, error: `Unknown platform. Use: ${platforms.map((p) => p.name).join(', ')}` };
+            platformId = pf.id;
+          }
+          const hasName = !!v.name?.trim();
+          const hasAccount = !!platformId && (!!v.account_id?.trim() || !!v.username?.trim());
+          if (!hasName && !hasAccount) return { ok: false as const, error: 'Fill in a name, or a platform + new ID/username.' };
+          return editPlayer(player.id, v.name?.trim() ?? null, platformId, v.account_id?.trim() ?? null, v.username?.trim() ?? null);
+        }}
+      />
 
       {isOwner && platforms.length > 0 && (
         <PromptAction
