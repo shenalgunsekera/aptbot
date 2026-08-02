@@ -17,10 +17,20 @@ import { recordDetection } from './detect';
  *   PAYPAL_IMAP_FROM   (default paypal.com)
  *   CASHAPP_IMAP_FROM  (default square.com — Cash App sends from cash@square.com)
  */
-export async function detectPaypalEmails(): Promise<number> {
+/** Per-sender { found in inbox, parsed as money } — surfaced by the cron so we
+ *  can tell "Cash App emails aren't arriving" apart from "arriving but not
+ *  parsed". `found` counts messages the sender search returned; `parsed` counts
+ *  those recognised as a payment/request/cancel. */
+export interface EmailScanResult {
+  total: number;
+  breakdown: Record<string, { found: number; parsed: number }>;
+}
+
+export async function detectPaypalEmails(): Promise<EmailScanResult> {
+  const empty: EmailScanResult = { total: 0, breakdown: {} };
   const user = process.env.PAYPAL_IMAP_USER;
   const pass = process.env.PAYPAL_IMAP_PASSWORD;
-  if (!user || !pass) return 0;
+  if (!user || !pass) return empty;
 
   const client = new ImapFlow({
     host: process.env.PAYPAL_IMAP_HOST ?? 'imap.gmail.com',
@@ -36,17 +46,23 @@ export async function detectPaypalEmails(): Promise<number> {
   const watermark = cfg?.email_watermark ? new Date(cfg.email_watermark) : null;
   const seen = { max: watermark };   // newest email date we've come across this run
 
+  const breakdown: EmailScanResult['breakdown'] = {};
   let count = 0;
+  const run = async (from: string, parse: typeof parsePaypal, source: 'paypal' | 'cashapp', method: string) => {
+    const r = await scan(client, since, from, parse, source, method, watermark, seen);
+    breakdown[from] = r;
+    count += r.parsed;
+  };
+  const since = new Date(Date.now() - 2 * 24 * 3600 * 1000);   // last 2 days
   await client.connect();
   try {
     const lock = await client.getMailboxLock('INBOX');
     try {
-      const since = new Date(Date.now() - 2 * 24 * 3600 * 1000);   // last 2 days
       // PayPal, then Cash App — same inbox, one login. Message-ID dedupe means a
       // provider we scan twice (Cash App uses more than one sender domain) is safe.
-      count += await scan(client, since, process.env.PAYPAL_IMAP_FROM ?? 'paypal.com', parsePaypal, 'paypal', 'paypal', watermark, seen);
-      count += await scan(client, since, process.env.CASHAPP_IMAP_FROM ?? 'square.com', parseCashapp, 'cashapp', 'cashapp', watermark, seen);
-      count += await scan(client, since, 'cash.app', parseCashapp, 'cashapp', 'cashapp', watermark, seen);
+      await run(process.env.PAYPAL_IMAP_FROM ?? 'paypal.com', parsePaypal, 'paypal', 'paypal');
+      await run(process.env.CASHAPP_IMAP_FROM ?? 'square.com', parseCashapp, 'cashapp', 'cashapp');
+      await run('cash.app', parseCashapp, 'cashapp', 'cashapp');
     } finally {
       lock.release();
     }
@@ -59,7 +75,7 @@ export async function detectPaypalEmails(): Promise<number> {
   if (seen.max && (!watermark || seen.max > watermark)) {
     await sql`update config set email_watermark = ${seen.max} where id`;
   }
-  return count;
+  return { total: count, breakdown };
 }
 
 type Parsed = { amount: number; currency: string; name: string | null; kind: 'payment' | 'request' | 'cancel' };
@@ -76,9 +92,9 @@ async function scan(
   methodCode: string,
   watermark: Date | null,
   seen: { max: Date | null },
-): Promise<number> {
+): Promise<{ found: number; parsed: number }> {
   const uids = await client.search({ since, from }, { uid: true });
-  if (!uids || uids.length === 0) return 0;
+  if (!uids || uids.length === 0) return { found: 0, parsed: 0 };
   let count = 0;
   for (const uid of uids.slice(-30)) {
     const msg = await client.fetchOne(String(uid), { source: true }, { uid: true });
@@ -101,7 +117,7 @@ async function scan(
     });
     count++;
   }
-  return count;
+  return { found: uids.length, parsed: count };
 }
 
 /** Pull the sender/requester name out of a payment email — it lives in different

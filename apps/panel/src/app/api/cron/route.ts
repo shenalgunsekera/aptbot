@@ -39,11 +39,14 @@ export async function GET(req: Request): Promise<Response> {
     // Read the PayPal inbox for "you got money" emails (personal account, no
     // webhook). No-op unless the IMAP env is set.
     let paypalSeen = 0;
+    let emailBreakdown: Record<string, { found: number; parsed: number }> = {};
     let emailError: string | null = null;
     const emailConfigured = Boolean(process.env.PAYPAL_IMAP_USER && process.env.PAYPAL_IMAP_PASSWORD);
     try {
       const { detectPaypalEmails } = await import('../../../lib/paypal-email');
-      paypalSeen = await detectPaypalEmails();
+      const res = await detectPaypalEmails();
+      paypalSeen = res.total;
+      emailBreakdown = res.breakdown;   // per-sender { found, parsed } — arrival vs parse
     } catch (err) { emailError = String((err as Error)?.message ?? err); console.error('[cron] paypal email poll failed:', err); }
 
     const bot = await getBot();
@@ -56,7 +59,7 @@ export async function GET(req: Request): Promise<Response> {
     // one cron cycle.
     const webhookFixed = await ensureWebhook(bot, req);
 
-    return Response.json({ ok: true, ...swept, delivered, cryptoPolled, paypalSeen, emailConfigured, emailError, webhookFixed });
+    return Response.json({ ok: true, ...swept, delivered, cryptoPolled, paypalSeen, emailBreakdown, emailConfigured, emailError, webhookFixed });
   } catch (err) {
     console.error('[cron] failed:', err);
     return Response.json({ ok: false, error: String(err) }, { status: 500 });
