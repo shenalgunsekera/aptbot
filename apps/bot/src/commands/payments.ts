@@ -74,10 +74,16 @@ export async function payments(ctx: Ctx): Promise<void> {
     await ctx.reply(chunk, { parse_mode: 'Markdown', link_preview_options: { is_disabled: true } });
   }
 
-  // Then send the actual receipt IMAGES, so the player sees them — not just
-  // links. One photo per payment that has a receipt, with a short caption.
+  // Then send the actual receipt IMAGES — but only for what a player is actively
+  // watching: everything in progress, plus the SINGLE most recent finished one.
+  // Older finished payments keep their receipt LINK in the text above; we don't
+  // re-post every image or the chat floods.
   const seen = new Set<string>();
-  const showable = outs.filter((w) => ONGOING_WD.has(w.status) || w.status === 'completed');
+  const mostRecentDone = outs.find((w) => w.status === 'completed');
+  const showable = [
+    ...outs.filter((w) => ONGOING_WD.has(w.status)),
+    ...(mostRecentDone ? [mostRecentDone] : []),
+  ];
   for (const w of showable) {
     for (const pay of (w.payments ?? []) as any[]) {
       if (!pay.receipt || seen.has(pay.receipt)) continue;

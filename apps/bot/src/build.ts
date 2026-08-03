@@ -29,7 +29,7 @@ import { payments } from './commands/payments.js';
 import { supportStart, relayInquiryToAdmins, maybeRelayAdminReply } from './commands/support.js';
 import { setAdmin, approvePlayer } from './admin-mgmt.js';
 import {
-  loaderClaim, loaderDone, loaderShort, loaderFail, fillVerify, fillDiscard, withdrawPayPrompt, withdrawPayConfirm,
+  loaderClaim, loaderDone, loaderShort, loaderFail, loaderFailConfirm, fillVerify, fillDiscard, withdrawPayPrompt, withdrawPayConfirm,
   stripeCreditPrompt, stripeCreditConfirm, stripeCreditOk,
   p2pStatus, p2pWait, p2pOn, p2pSetPrompt, p2pSetConfirm,
 } from './admin-actions.js';
@@ -359,6 +359,14 @@ export function buildBot(token: string): Bot<Ctx> {
       if (!Number.isFinite(n) || n < 0) { await ctx.reply('Send just the number, e.g. 30'); return; }
       (ctx.session as any)._loaderShortOrder = undefined;
       await loaderDone(ctx, orderId, -Math.round(n * 100));
+      return;
+    }
+
+    // Loader giving the reason a job failed.
+    const failOrder = (ctx.session as any)._loaderFailOrder as string | undefined;
+    if (failOrder && /Reply to THIS message with the reason job/.test(replyText)) {
+      (ctx.session as any)._loaderFailOrder = undefined;
+      await loaderFailConfirm(ctx, failOrder, ctx.message.text.trim());
       return;
     }
 

@@ -260,8 +260,8 @@ export function renderNotification(n: Notification): Rendered | null {
     case 'withdraw.queued':
       return {
         text: p.short
-          ? `✅ We got *${m(p.amount, p.currency)}* off your table (that's what was there of the ${m(p.requested, p.currency)} you asked for). You're in line to be paid.`
-          : `✅ *${m(p.amount, p.currency)}* is ready and you're in line to be paid.`,
+          ? `🎰 *${m(p.amount, p.currency)} in chips have been claimed* — that's what was on your table of the ${m(p.requested, p.currency)} you asked for.`
+          : `🎰 *${m(p.amount, p.currency)} in chips have been claimed.*`,
       };
     case 'onboarding.resume':
       return {
@@ -442,6 +442,12 @@ export function renderNotification(n: Notification): Rendered | null {
           };
     case 'loader.delivery_failed':
       return { text: `⚠️ *Couldn't add value* to ${p.player_name} (\`${p.platform_uid}\`)\n${m(p.delta, p.currency)}\n_${p.reason}_\n\nNeeds a human.` };
+    case 'loader.failed_player':
+      return {
+        text: Number(p.delta) > 0
+          ? `⚠️ *We couldn't put ${m(Math.abs(Number(p.delta)), p.currency)} back on your table.*\n_${p.reason}_\n\nYour money is safe in your balance — an admin is sorting it out.`
+          : `⚠️ *We couldn't complete your cash-out.*\n_${p.reason}_\n\nNothing was taken off your table. Please try again or message us.`,
+      };
     default:
       return null;
   }

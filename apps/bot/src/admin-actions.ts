@@ -2,6 +2,7 @@ import { InlineKeyboard } from 'grammy';
 import { db, isUserError, userMessage } from '@union/core';
 import type { Ctx } from './session.js';
 import { money } from './words.js';
+import { editCardFor } from './notifier.js';
 
 /**
  * ADMIN GROUP ACTIONS
@@ -94,18 +95,32 @@ export async function loaderShort(ctx: Ctx, orderId: string): Promise<void> {
   (ctx.session as any)._loaderShortOrder = orderId;
 }
 
+/** Loader taps "Failed" → ask WHY, so the player can be told the reason. */
 export async function loaderFail(ctx: Ctx, orderId: string): Promise<void> {
   const admin = await adminFor(ctx);
   if (!admin) return void (await ctx.answerCallbackQuery({ text: 'Admins only.', show_alert: true }));
+  await ctx.answerCallbackQuery();
+  (ctx.session as any)._loaderFailOrder = orderId;
+  await ctx.reply(
+    `Reply to THIS message with the reason job \`${orderId.slice(0, 8)}\` failed — the player is told what you write.`,
+    { parse_mode: 'Markdown', reply_markup: { force_reply: true } },
+  );
+}
+
+/** The admin's typed reason → mark it failed and tell the player. */
+export async function loaderFailConfirm(ctx: Ctx, orderId: string, reason: string): Promise<void> {
+  const admin = await adminFor(ctx);
+  if (!admin) return;
   const sql = db();
   try {
-    await sql`select loader_order_fail(${orderId}::uuid, ${admin.id}::uuid, 'marked failed via telegram')`;
+    await sql`select loader_order_fail(${orderId}::uuid, ${admin.id}::uuid, ${reason.trim()})`;
   } catch (err) {
-    if (isUserError(err)) return void (await ctx.answerCallbackQuery({ text: userMessage(err), show_alert: true }));
+    if (isUserError(err)) return void (await ctx.reply(`❌ ${userMessage(err)}`));
     throw err;
   }
-  await ctx.answerCallbackQuery({ text: 'Marked failed.' });
-  await editCard(ctx, `❌ *Failed* · by ${ctx.from?.first_name ?? 'admin'}`);
+  await editCardFor(ctx.api, 'loader_order', orderId,
+    `❌ *Failed* · by ${ctx.from?.first_name ?? 'admin'}\n_${reason.trim()}_`);
+  await ctx.reply('❌ Marked failed — the player was told the reason.');
 }
 
 /** Admin taps "I paid it" on a cash-out → ask for a screenshot of the receipt. */
