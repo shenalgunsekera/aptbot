@@ -130,9 +130,12 @@ export async function addAmount(ctx: Ctx, platformId: string, methodId: string, 
 }
 
 // Crypto coins are the irreversible, club-settled methods (BTC, ETH, USDT, …).
-// This correctly excludes Zelle (irreversible but P2P) and PayPal (club but
-// reversible). Coins are quoted in USD, so currency can't be the signal.
-const isCrypto = (m: PaymentMethod) => m.reversibility === 'irreversible' && m.settlement === 'club';
+// Venmo & Zelle are company-settled too (0062) but are fiat P2P, not coins, so
+// they're excluded by name. PayPal (club but reversible) is excluded by
+// reversibility. Coins are quoted in USD, so currency can't be the signal.
+const FIAT_CLUB = new Set(['venmo', 'zelle']);
+const isCrypto = (m: PaymentMethod) =>
+  m.reversibility === 'irreversible' && m.settlement === 'club' && !FIAT_CLUB.has(m.code);
 
 /** The player's chosen deposit methods (from onboarding); all enabled if they
  *  never narrowed it. */

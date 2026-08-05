@@ -1,0 +1,19 @@
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 0062 — Venmo & Zelle become COMPANY-settled (no player-to-player splits)
+-- ═══════════════════════════════════════════════════════════════════════════
+--
+-- Previously Venmo/Zelle were p2p: a depositor's money walked the cash-out queue
+-- and paid real players (splitting across several, with the company as fallback).
+-- That surfaced awkward splits to depositors — "$10 to Even, $20 to the company"
+-- — including tiny amounts that admins pay directly anyway.
+--
+-- New model (owner's call): every Venmo/Zelle deposit goes WHOLE to the company
+-- handle (club_handle), exactly like crypto/PayPal. No splits, ever. Every cash-out
+-- is then paid by an admin from the float — withdraw_escrow already raises the
+-- "pay it" card for club-settled methods (0016), and any already-queued cash-out
+-- stays visible + payable in the panel's Withdrawal queue, so nothing is stranded.
+--
+-- (There are zero in-flight Venmo/Zelle cash-outs at migration time; club payouts
+-- also make the sub-$20 "small cash-out" special case moot — every cash-out now
+-- gets an admin pay card.)
+update payment_methods set settlement = 'club' where code in ('venmo', 'zelle');

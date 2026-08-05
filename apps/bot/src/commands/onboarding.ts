@@ -193,7 +193,10 @@ async function askPlatforms(ctx: Ctx): Promise<void> {
   );
 }
 
-const isCoin = (m: PaymentMethod) => m.reversibility === 'irreversible' && m.settlement === 'club';
+// Venmo/Zelle are company-settled (0062) but fiat, not coins — exclude by name.
+const FIAT_CLUB = new Set(['venmo', 'zelle']);
+const isCoin = (m: PaymentMethod) =>
+  m.reversibility === 'irreversible' && m.settlement === 'club' && !FIAT_CLUB.has(m.code);
 
 /** Build the deposit-method picker for whichever screen is showing. Crypto coins
  *  live behind one "Crypto" button that opens a second screen of coin checkboxes,
