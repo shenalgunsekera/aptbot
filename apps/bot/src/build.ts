@@ -228,7 +228,7 @@ export function buildBot(token: string): Bot<Ctx> {
       } catch { /* already gone */ }
       return;
     }
-    await ctx.reply('👋 Added. An admin can run /setadmingroup here to make this the admin group.');
+    await ctx.reply('👋 Added. Please do /start to set up your account.');
   });
   
   // ─── Callbacks ───────────────────────────────────────────────────────────────
