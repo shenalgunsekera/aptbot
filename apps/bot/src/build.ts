@@ -482,9 +482,9 @@ export function buildBot(token: string): Bot<Ctx> {
     if (d) {
       await sql`select dispute_add_evidence(${d.id}::uuid, 'receipt', ${fileId}, ${p.id}::uuid, null)`;
       await ctx.reply('📎 Added to your case, thanks.');
-    } else {
-      await ctx.reply("I'm not expecting a photo right now.");
     }
+    // Otherwise stay silent — the bot doesn't talk unless it's mid-flow or a
+    // command was used. An unexpected photo is just ignored.
   });
   
   // ─── Errors ──────────────────────────────────────────────────────────────────
