@@ -106,27 +106,32 @@ export async function deletePlayer(playerId: string): Promise<Result> {
   }, ['/players', '/']);
 }
 
-/** Manually edit a player's details from the panel: display name, and/or one
- *  platform account's ID + username (e.g. fix a mistyped ClubGG ID). */
-export async function editPlayer(
+/** Manually edit a player's details from the panel: the display name, and each
+ *  platform account's fields — ClubGG ID + username, Sportsbook username +
+ *  password, etc. Every value is passed through; blank keeps the current one. */
+export async function editPlayerFull(
   playerId: string,
   name: string | null,
-  platformId: string | null,
-  accountId: string | null,
-  username: string | null,
+  accounts: Array<{ platformId: string; uid?: string | null; username?: string | null; secret?: string | null }>,
 ): Promise<Result> {
   return run(async () => {
     const s = await requireAdmin();
-    const changed: string[] = [];
+    const sql = db();
+    let changed = false;
     if (name && name.trim()) {
-      await db()`select player_set_name(${playerId}::uuid, ${name.trim()}, ${s.admin.id}::uuid)`;
-      changed.push('name');
+      await sql`select player_set_name(${playerId}::uuid, ${name.trim()}, ${s.admin.id}::uuid)`;
+      changed = true;
     }
-    if (platformId && ((accountId && accountId.trim()) || (username && username.trim()))) {
-      await db()`select admin_set_platform_uid(${playerId}::uuid, ${platformId}::uuid, ${accountId ?? null}, ${username ?? null}, ${s.admin.id}::uuid)`;
-      changed.push('account');
+    for (const a of accounts) {
+      const uid = a.uid?.trim() || null;
+      const username = a.username?.trim() || null;
+      const secret = a.secret?.trim() || null;
+      if (uid || username || secret) {
+        await sql`select admin_set_platform_uid(${playerId}::uuid, ${a.platformId}::uuid, ${uid}, ${username}, ${s.admin.id}::uuid, ${secret})`;
+        changed = true;
+      }
     }
-    return changed.length ? `Updated ${changed.join(' and ')}.` : 'No changes made.';
+    return changed ? 'Saved.' : 'No changes made.';
   }, ['/players', '/']);
 }
 

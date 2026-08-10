@@ -1,7 +1,27 @@
 'use client';
 
 import { ActionButton, PromptAction } from '../../components/ui';
-import { confirmPlayer, setPlayerStatus, adjustPlayer, approveSportsbook, deletePlayer, editPlayer } from '../../lib/actions';
+import { confirmPlayer, setPlayerStatus, adjustPlayer, approveSportsbook, deletePlayer, editPlayerFull } from '../../lib/actions';
+
+type EditAccount = { platformId: string; code: string; name: string; uid: string | null; username: string | null; secret: string | null };
+
+/** Build the pre-filled, clearly-labelled fields for one platform account. */
+function accountFields(a: EditAccount): Array<{ name: string; label: string; defaultValue?: string }> {
+  const uidField = { name: `pf:${a.platformId}:uid`, defaultValue: a.uid ?? '' };
+  if (a.code === 'clubgg') {
+    return [
+      { ...uidField, label: 'ClubGG ID' },
+      { name: `pf:${a.platformId}:username`, label: 'ClubGG username', defaultValue: a.username ?? '' },
+    ];
+  }
+  if (a.code === 'sportsbook') {
+    return [
+      { ...uidField, label: 'Sportsbook username' },
+      { name: `pf:${a.platformId}:secret`, label: 'Sportsbook password', defaultValue: a.secret ?? '' },
+    ];
+  }
+  return [{ ...uidField, label: `${a.name} ID` }];
+}
 
 /** A Sportsbook account the club must CREATE. Shows the desired credentials; the
  *  button marks it created (on APT Sports) and auto-resumes the player. */
@@ -55,11 +75,12 @@ export function ConfirmAction({
 }
 
 export function PlayerActions({
-  player, isOwner, platforms,
+  player, isOwner, platforms, editAccounts,
 }: {
   player: { id: string; status: string; name: string; currency: string };
   isOwner: boolean;
   platforms: Array<{ id: string; name: string }>;
+  editAccounts: EditAccount[];
 }) {
   return (
     <div className="btn-row">
@@ -87,23 +108,17 @@ export function PlayerActions({
         title={`Edit ${player.name}`}
         variant="primary"
         fields={[
-          { name: 'name', label: 'Display name (blank = keep it)', placeholder: player.name },
-          { name: 'platform', label: `Fix which account? (${platforms.map((p) => p.name).join(' / ')}) — optional`, placeholder: platforms[0]?.name },
-          { name: 'account_id', label: 'New account ID (optional)' },
-          { name: 'username', label: 'ClubGG username (optional)' },
+          { name: 'name', label: 'Display name', defaultValue: player.name },
+          ...editAccounts.flatMap(accountFields),
         ]}
         action={async (v) => {
-          let platformId: string | null = null;
-          const pfName = v.platform?.trim();
-          if (pfName) {
-            const pf = platforms.find((p) => p.name.toLowerCase() === pfName.toLowerCase());
-            if (!pf) return { ok: false as const, error: `Unknown platform. Use: ${platforms.map((p) => p.name).join(', ')}` };
-            platformId = pf.id;
-          }
-          const hasName = !!v.name?.trim();
-          const hasAccount = !!platformId && (!!v.account_id?.trim() || !!v.username?.trim());
-          if (!hasName && !hasAccount) return { ok: false as const, error: 'Fill in a name, or a platform + new ID/username.' };
-          return editPlayer(player.id, v.name?.trim() ?? null, platformId, v.account_id?.trim() ?? null, v.username?.trim() ?? null);
+          const accounts = editAccounts.map((a) => ({
+            platformId: a.platformId,
+            uid: v[`pf:${a.platformId}:uid`] ?? null,
+            username: v[`pf:${a.platformId}:username`] ?? null,
+            secret: v[`pf:${a.platformId}:secret`] ?? null,
+          }));
+          return editPlayerFull(player.id, v.name?.trim() ?? null, accounts);
         }}
       />
 

@@ -38,7 +38,12 @@ export default async function PlayersPage({
            jsonb_array_length(p.risk_flags) as flag_count,
            coalesce((select jsonb_agg(jsonb_build_object('platform', pf.name, 'uid', pp.platform_uid, 'has_club', pp.club_id is not null))
                        from player_platforms pp join platforms pf on pf.id = pp.platform_id
-                      where pp.player_id = p.id and pp.platform_uid is not null), '[]') as accounts
+                      where pp.player_id = p.id and pp.platform_uid is not null), '[]') as accounts,
+           coalesce((select jsonb_agg(jsonb_build_object(
+                        'platformId', pf.id, 'code', pf.code, 'name', pf.name,
+                        'uid', pp.platform_uid, 'username', pp.platform_username, 'secret', pp.secret) order by pf.sort_order)
+                       from player_platforms pp join platforms pf on pf.id = pp.platform_id
+                      where pp.player_id = p.id and pp.platform_uid is not null), '[]') as edit_accounts
       from players p
      where p.status <> 'pending' ${search}
      order by p.created_at desc limit 100`;
@@ -130,6 +135,7 @@ export default async function PlayersPage({
                       player={{ id: p.id, status: p.status, name: p.display_name ?? 'player', currency }}
                       isOwner={session?.admin.role === 'owner'}
                       platforms={platforms}
+                      editAccounts={p.edit_accounts as any[]}
                     />
                   </td>
                 </tr>

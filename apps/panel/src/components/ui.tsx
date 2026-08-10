@@ -64,7 +64,7 @@ export function PromptAction({
 }: {
   label: string;
   title: string;
-  fields: Array<{ name: string; label: string; type?: string; placeholder?: string; required?: boolean }>;
+  fields: Array<{ name: string; label: string; type?: string; placeholder?: string; required?: boolean; defaultValue?: string }>;
   action: (values: Record<string, string>) => Promise<Result>;
   variant?: '' | 'primary' | 'ok' | 'danger';
   confirm?: string;
@@ -99,10 +99,10 @@ export function PromptAction({
           <div className="field" key={f.name}>
             <label htmlFor={f.name}>{f.label}</label>
             {f.type === 'textarea' ? (
-              <textarea id={f.name} name={f.name} placeholder={f.placeholder} required={f.required} />
+              <textarea id={f.name} name={f.name} placeholder={f.placeholder} required={f.required} defaultValue={f.defaultValue} />
             ) : (
               <input id={f.name} name={f.name} type={f.type ?? 'text'}
-                     placeholder={f.placeholder} required={f.required} />
+                     placeholder={f.placeholder} required={f.required} defaultValue={f.defaultValue} />
             )}
           </div>
         ))}
