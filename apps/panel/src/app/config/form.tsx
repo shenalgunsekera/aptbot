@@ -88,6 +88,12 @@ export function ConfigForm({ cfg }: { cfg: any }) {
         </div>
 
         <div className="card">
+          <h2 style={{ marginTop: 0 }}>Launch status</h2>
+          <Check name="dev_notice_enabled" label="Show the “still in development” notice after setup" def={cfg.dev_notice_enabled}
+                 hint="ON: players who finish setup are told not to deposit/cash-out yet, the bot is still in development. Turn OFF the moment you go live." />
+        </div>
+
+        <div className="card">
           <h2 style={{ marginTop: 0 }}>ClubGG balance check</h2>
           <Check name="require_live_chip_check" label="Require a live ClubGG balance before a withdrawal" def={cfg.require_live_chip_check}
                  hint="Needs a chip adapter that can read balances. Without one, leave OFF — there is nothing to read, and every withdrawal would be refused." />
@@ -135,4 +141,4 @@ const NUMERIC = new Set([
   'max_open_withdraws_per_player', 'handle_reveals_per_hour', 'owner_approval_threshold',
   'live_chip_check_max_age_seconds',
 ]);
-const BOOL = new Set(['allow_reversible', 'auto_release_on_expiry', 'require_live_chip_check']);
+const BOOL = new Set(['allow_reversible', 'auto_release_on_expiry', 'require_live_chip_check', 'dev_notice_enabled']);

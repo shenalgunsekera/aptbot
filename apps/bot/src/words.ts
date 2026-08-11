@@ -12,6 +12,12 @@ export const COMMANDS_LIST =
   '💬 /support — message our team\n' +
   '📖 /guide — what each command does';
 
+/** Pre-launch notice, shown at the end of setup while config.dev_notice_enabled
+ *  is on. Same text in both bots. */
+export const DEV_NOTICE =
+  '⚠️ *Please do not use the bot for deposits and cash-outs yet.* ' +
+  "The bot is still in development and we'll let you know once you can officially begin using it.";
+
 /**
  * PLAIN LANGUAGE
  * ══════════════

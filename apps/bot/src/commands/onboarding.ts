@@ -3,7 +3,7 @@ import { db, isUserError, userMessage, type Platform, type PaymentMethod } from 
 import type { Ctx, OnboardingPlan } from '../session.js';
 import { currentPlayer } from '../player.js';
 import { ask, clearQuestion } from '../ask.js';
-import { withdrawHandlePrompt, COMMANDS_LIST } from '../words.js';
+import { withdrawHandlePrompt, COMMANDS_LIST, DEV_NOTICE } from '../words.js';
 
 /**
  * GUIDED ONBOARDING
@@ -771,12 +771,14 @@ async function finish(ctx: Ctx, playerId: string): Promise<void> {
   ctx.session.step = { name: 'idle' };
   ctx.session.ob = undefined;
   await clearQuestion(ctx);   // tidy the last prompt; the completion message stays
+  const [cfg] = await db()<{ dev_notice_enabled: boolean }[]>`select dev_notice_enabled from config where id`;
   await ctx.reply(
     `🎉 *Thank you for joining! Your account setup is now complete.*\n\n` +
       `Join our official Telegram channel to stay updated with promotions, announcements, and news:\n` +
       `${CHANNEL_URL}\n\n` +
       `We look forward to having you as part of the community!\n\n` +
-      `When you're ready:\n${COMMANDS_LIST}`,
+      `When you're ready:\n${COMMANDS_LIST}` +
+      (cfg?.dev_notice_enabled ? `\n\n${DEV_NOTICE}` : ''),
     { parse_mode: 'Markdown', link_preview_options: { is_disabled: true } },
   );
 }

@@ -237,6 +237,7 @@ export async function updateConfig(patch: Record<string, unknown>): Promise<Resu
       'fee_bearer', 'min_amount', 'max_amount', 'daily_cap_per_player',
       'max_open_deposits_per_player', 'max_open_withdraws_per_player',
       'handle_reveals_per_hour', 'owner_approval_threshold', 'confirm_escalation_seconds',
+      'dev_notice_enabled',
     ]);
     const clean: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(patch)) if (allowed.has(k)) clean[k] = v;
