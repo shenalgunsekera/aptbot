@@ -17,6 +17,13 @@ import { getBot, drainNotifications } from '../../../lib/bot';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
+/** Resolve with `fallback` if `p` doesn't settle within `ms`. A slow detector
+ *  (a hung chain API, a slow inbox) must never push the whole cron past Vercel's
+ *  function limit — that's what was returning 504 and piling up. */
+function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([p, new Promise<T>((r) => setTimeout(() => r(fallback), ms))]);
+}
+
 export async function GET(req: Request): Promise<Response> {
   const secret = process.env.CRON_SECRET;
   const auth = req.headers.get('authorization');
@@ -33,7 +40,7 @@ export async function GET(req: Request): Promise<Response> {
     let cryptoPolled = 0;
     try {
       const { detectCryptoPayments } = await import('../../../lib/crypto-watch');
-      cryptoPolled = await detectCryptoPayments();
+      cryptoPolled = await withTimeout(detectCryptoPayments(), 20000, 0);
     } catch (err) { console.error('[cron] crypto poll failed:', err); }
 
     // Read the PayPal inbox for "you got money" emails (personal account, no
@@ -44,7 +51,7 @@ export async function GET(req: Request): Promise<Response> {
     const emailConfigured = Boolean(process.env.PAYPAL_IMAP_USER && process.env.PAYPAL_IMAP_PASSWORD);
     try {
       const { detectPaypalEmails } = await import('../../../lib/paypal-email');
-      const res = await detectPaypalEmails();
+      const res = await withTimeout(detectPaypalEmails(), 20000, { total: 0, breakdown: {} });
       paypalSeen = res.total;
       emailBreakdown = res.breakdown;   // per-sender { found, parsed } — arrival vs parse
     } catch (err) { emailError = String((err as Error)?.message ?? err); console.error('[cron] paypal email poll failed:', err); }

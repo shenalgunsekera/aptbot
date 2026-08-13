@@ -6,16 +6,30 @@ import { recordDetection } from './detect';
  *
  *   Stablecoins (USDT/USDC): 1 token ≈ $1, so we match the dollar amount EXACTLY.
  *   Volatile coins (BTC/ETH/LTC/SOL/XRP): we pull a live USD price, convert the
- *     on-chain amount, and match WITHIN A TOLERANCE (default ±3%, CRYPTO_TOLERANCE_BPS)
- *     to the nearest pending request. Never releases — an admin still verifies.
+ *     on-chain amount, and match WITHIN A TOLERANCE to the nearest pending request.
+ *     Never releases — an admin still verifies.
  *
  * No chain has a push webhook, so this polls each club address every cron cycle.
  * payment_detect dedupes on the tx hash, so re-seeing a transfer is a no-op.
- * Everything is env-gated; with nothing configured it does nothing.
+ *
+ * SPEED: every network call is bounded by a timeout, and all coins are polled in
+ * PARALLEL — one slow/hanging chain API can't stall the whole cron (which was
+ * timing the endpoint out at 60s → 504).
  */
 
 const TOL = Number(process.env.CRYPTO_TOLERANCE_BPS ?? 500);   // ±5%
 const cents = (coinAmount: number, priceUsd: number) => Math.round(coinAmount * priceUsd * 100);
+
+// A fetch that ALWAYS gives up after `ms` — a hung chain API aborts instead of
+// blocking the serverless function until Vercel kills it. (Capital-F name so it
+// never collides with the global `fetch`.)
+const nativeFetch = globalThis.fetch;
+async function tfetch(url: string, init?: RequestInit, ms = 7000): Promise<Response> {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), ms);
+  try { return await nativeFetch(url, { ...init, signal: ac.signal }); }
+  finally { clearTimeout(timer); }
+}
 
 // ─── Stablecoins — exact match (no price needed) ─────────────────────────────
 
@@ -24,7 +38,7 @@ async function tronUsdt(address: string): Promise<void> {
   const url = `https://api.trongrid.io/v1/accounts/${address}/transactions/trc20?only_to=true&limit=20&contract_address=${contract}`;
   const headers: Record<string, string> = {};
   if (process.env.TRONGRID_API_KEY) headers['TRON-PRO-API-KEY'] = process.env.TRONGRID_API_KEY;
-  const res = await fetch(url, { headers }).then((r) => r.json());
+  const res = await tfetch(url, { headers }).then((r) => r.json());
   for (const t of res?.data ?? []) {
     if ((t.to ?? '').toLowerCase() !== address.toLowerCase()) continue;
     const usd = Math.round(Number(t.value ?? 0) / 10 ** Number(t.token_info?.decimals ?? 6) * 100);
@@ -36,7 +50,7 @@ async function evmToken(chainId: number, contract: string, code: string, address
   const key = process.env.ETHERSCAN_API_KEY;
   if (!key) return;
   const url = `https://api.etherscan.io/v2/api?chainid=${chainId}&module=account&action=tokentx&contractaddress=${contract}&address=${address}&page=1&offset=20&sort=desc&apikey=${key}`;
-  const res = await fetch(url).then((r) => r.json());
+  const res = await tfetch(url).then((r) => r.json());
   if (!Array.isArray(res?.result)) return;
   for (const t of res.result) {
     if ((t.to ?? '').toLowerCase() !== address.toLowerCase()) continue;
@@ -48,7 +62,7 @@ async function evmToken(chainId: number, contract: string, code: string, address
 // ─── Volatile coins — live price + tolerance ─────────────────────────────────
 
 async function btc(address: string, price: number): Promise<void> {
-  const txs = await fetch(`https://blockstream.info/api/address/${address}/txs`).then((r) => r.json());
+  const txs = await tfetch(`https://blockstream.info/api/address/${address}/txs`).then((r) => r.json());
   for (const t of Array.isArray(txs) ? txs : []) {
     const sats = (t.vout ?? []).filter((o: any) => o.scriptpubkey_address === address).reduce((s: number, o: any) => s + Number(o.value ?? 0), 0);
     if (sats <= 0) continue;
@@ -60,7 +74,7 @@ async function ethNative(address: string, price: number): Promise<void> {
   const key = process.env.ETHERSCAN_API_KEY;
   if (!key) return;
   const url = `https://api.etherscan.io/v2/api?chainid=1&module=account&action=txlist&address=${address}&page=1&offset=20&sort=desc&apikey=${key}`;
-  const res = await fetch(url).then((r) => r.json());
+  const res = await tfetch(url).then((r) => r.json());
   for (const t of Array.isArray(res?.result) ? res.result : []) {
     if ((t.to ?? '').toLowerCase() !== address.toLowerCase() || t.isError !== '0' || Number(t.value) <= 0) continue;
     await recordDetection({ source: 'crypto', externalId: `eth:${t.hash}`, methodCode: 'eth', amount: cents(Number(t.value) / 1e18, price), currency: 'USD', toleranceBps: TOL, raw: { hash: t.hash } });
@@ -68,7 +82,7 @@ async function ethNative(address: string, price: number): Promise<void> {
 }
 
 async function ltc(address: string, price: number): Promise<void> {
-  const res = await fetch(`https://api.blockcypher.com/v1/ltc/main/addrs/${address}?limit=25`).then((r) => r.json());
+  const res = await tfetch(`https://api.blockcypher.com/v1/ltc/main/addrs/${address}?limit=25`).then((r) => r.json());
   for (const ref of res?.txrefs ?? []) {
     if (ref.tx_input_n !== -1 || Number(ref.value) <= 0) continue;   // -1 => a received output
     await recordDetection({ source: 'crypto', externalId: `ltc:${ref.tx_hash}:${ref.tx_output_n}`, methodCode: 'ltc', amount: cents(Number(ref.value) / 1e8, price), currency: 'USD', toleranceBps: TOL, raw: { hash: ref.tx_hash } });
@@ -78,7 +92,7 @@ async function ltc(address: string, price: number): Promise<void> {
 async function sol(address: string, price: number): Promise<void> {
   const rpc = process.env.SOLANA_RPC_URL ?? 'https://api.mainnet-beta.solana.com';
   const call = (method: string, params: unknown[]) =>
-    fetch(rpc, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) }).then((r) => r.json());
+    tfetch(rpc, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) }).then((r) => r.json());
   const sigs = await call('getSignaturesForAddress', [address, { limit: 8 }]);
   for (const s of sigs?.result ?? []) {
     const tx = await call('getTransaction', [s.signature, { maxSupportedTransactionVersion: 0 }]);
@@ -92,7 +106,7 @@ async function sol(address: string, price: number): Promise<void> {
 }
 
 async function xrp(address: string, price: number): Promise<void> {
-  const list = await fetch(`https://api.xrpscan.com/api/v1/account/${address}/transactions`).then((r) => r.json());
+  const list = await tfetch(`https://api.xrpscan.com/api/v1/account/${address}/transactions`).then((r) => r.json());
   for (const t of Array.isArray(list) ? list : []) {
     if (t.TransactionType !== 'Payment' || t.Destination !== address || typeof t.Amount !== 'string') continue;   // string Amount = drops of XRP
     await recordDetection({ source: 'crypto', externalId: `xrp:${t.hash}`, methodCode: 'xrp', amount: cents(Number(t.Amount) / 1e6, price), currency: 'USD', toleranceBps: TOL, raw: { hash: t.hash } });
@@ -111,7 +125,7 @@ const PRICED: Record<string, { cg: string; run: (addr: string, price: number) =>
 async function getPrices(ids: string[]): Promise<Record<string, number>> {
   if (ids.length === 0) return {};
   const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids.join(',')}&vs_currencies=usd`;
-  const res = await fetch(url).then((r) => r.json());
+  const res = await tfetch(url).then((r) => r.json());
   const out: Record<string, number> = {};
   for (const id of ids) if (res?.[id]?.usd) out[id] = Number(res[id].usd);
   return out;
@@ -123,9 +137,10 @@ export async function detectCryptoPayments(): Promise<number> {
     select code, club_handle from payment_methods where enabled and settlement = 'club'`;
   const addr = new Map(methods.map((m) => [m.code, m.club_handle]));
 
-  let polled = 0;
+  // Build every poll first, then run them all AT ONCE (allSettled) so one slow
+  // chain can't hold up the others — the whole sweep finishes in ~one call's time.
+  const jobs: Promise<unknown>[] = [];
 
-  // Stablecoins — exact match, no price.
   const stable: [string, (a: string) => Promise<void>][] = [
     ['usdt_trc20', tronUsdt],
     ['usdt_erc20', (a) => evmToken(1, '0xdAC17F958D2ee523a2206206994597C13D831ec7', 'usdt_erc20', a)],
@@ -133,11 +148,9 @@ export async function detectCryptoPayments(): Promise<number> {
   ];
   for (const [code, run] of stable) {
     const a = addr.get(code);
-    if (!a) continue;
-    try { await run(a); polled++; } catch (err) { console.error(`[crypto] ${code} poll failed:`, err); }
+    if (a) jobs.push(run(a).catch((err) => console.error(`[crypto] ${code} poll failed:`, err)));
   }
 
-  // Volatile coins — need a live price first.
   const active = Object.keys(PRICED).filter((code) => addr.get(code));
   if (active.length) {
     let prices: Record<string, number> = {};
@@ -147,8 +160,10 @@ export async function detectCryptoPayments(): Promise<number> {
       const a = addr.get(code)!;
       const price = prices[PRICED[code]!.cg];
       if (!price) continue;   // no price → skip this cycle rather than mis-match
-      try { await PRICED[code]!.run(a, price); polled++; } catch (err) { console.error(`[crypto] ${code} poll failed:`, err); }
+      jobs.push(PRICED[code]!.run(a, price).catch((err) => console.error(`[crypto] ${code} poll failed:`, err)));
     }
   }
-  return polled;
+
+  await Promise.allSettled(jobs);
+  return jobs.length;
 }
