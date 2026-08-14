@@ -1,4 +1,3 @@
-import { recordDetection } from '../../../../lib/detect';
 import { parsePaypal, parseCashapp } from '../../../../lib/paypal-email';
 
 /**
@@ -40,15 +39,10 @@ export async function POST(req: Request): Promise<Response> {
   const parsed = isPaypal ? parsePaypal(subject, text) : parseCashapp(subject, text);
   if (!parsed) return Response.json({ ok: true, detected: false, reason: 'not a money-received email' });
 
-  await recordDetection({
-    source: isPaypal ? 'paypal' : 'cashapp',
-    externalId: messageId,
-    methodCode: isPaypal ? 'paypal' : 'cashapp',
-    amount: parsed.amount,
-    currency: parsed.currency,
-    // A push is always a fresh arrival — never mark it stale, always announce.
-    raw: { subject, name: parsed.name, stale: false, kind: parsed.kind },
-  });
-
-  return Response.json({ ok: true, detected: true, kind: parsed.kind, amount: parsed.amount, name: parsed.name });
+  // DO NOT record here anymore. The IMAP scan (detectPaypalEmails) now runs every
+  // ~60s and is the single source of truth — it dedupes on the RFC Message-ID.
+  // This push path uses Gmail's internal id instead, so recording here produced
+  // TWO events per email (one push, one IMAP) → duplicate admin alerts. We keep
+  // the endpoint 200 so the Apps Script doesn't retry, but detection is IMAP-only.
+  return Response.json({ ok: true, detected: false, reason: 'handled by imap poll (no double)', kind: parsed.kind });
 }

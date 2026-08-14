@@ -62,6 +62,11 @@ export async function POST(req: Request): Promise<Response> {
       // Apple Pay often carries no billing name — fall back to the payer's email
       // so the admin card still shows WHO paid instead of a nameless alert.
       const payerName = s.customer_details?.name ?? email ?? null;
+      // What the payer actually used — Apple Pay / Cash App Pay / Link / Card + brand
+      // — so the alert says the real source, not a generic "Stripe".
+      const sourceDetail = apiKey && s.payment_intent
+        ? await stripeSourceLabel(String(s.payment_intent), apiKey)
+        : null;
       await recordDetection({
         source: 'stripe',
         externalId: `pay:${s.payment_intent ?? s.id}`,
@@ -69,11 +74,39 @@ export async function POST(req: Request): Promise<Response> {
         amount,
         currency: String(s.currency ?? 'usd').toUpperCase(),
         ...(fillId ? { fillId } : {}),
-        raw: { session: s.id, name: payerName, email },
+        raw: { session: s.id, name: payerName, email, source_detail: sourceDetail },
       });
     }
   }
   return Response.json({ received: true });
+}
+
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** Fetch the PaymentIntent's charge and name the actual method used:
+ *  "Apple Pay (Visa, Debit)", "Cash App Pay", "Link", "Card (Mastercard, Credit)". */
+async function stripeSourceLabel(paymentIntent: string, apiKey: string): Promise<string | null> {
+  try {
+    const res = await fetch(`https://api.stripe.com/v1/payment_intents/${paymentIntent}?expand[]=latest_charge`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!res.ok) return null;
+    const pi = (await res.json()) as any;
+    const d = pi?.latest_charge?.payment_method_details;
+    if (!d?.type) return null;
+    if (d.type === 'cashapp') return 'Cash App Pay';
+    if (d.type === 'link') return 'Link';
+    if (d.type === 'card') {
+      const c = d.card ?? {};
+      const wallet = c.wallet?.type as string | undefined;   // apple_pay | google_pay | link | …
+      const base = wallet === 'apple_pay' ? 'Apple Pay'
+        : wallet === 'google_pay' ? 'Google Pay'
+        : wallet === 'link' ? 'Link' : 'Card';
+      const parts = [c.brand ? cap(String(c.brand)) : null, c.funding && c.funding !== 'unknown' ? cap(String(c.funding)) : null].filter(Boolean);
+      return parts.length ? `${base} (${parts.join(', ')})` : base;
+    }
+    return cap(String(d.type).replace(/_/g, ' '));
+  } catch { return null; }
 }
 
 /** Verify Stripe's `t=…,v1=…` signature header with an HMAC (no SDK needed). */

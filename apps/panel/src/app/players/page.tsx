@@ -36,7 +36,7 @@ export default async function PlayersPage({
   const players = await sql<any[]>`
     select p.id, p.display_name, p.telegram_id, p.telegram_username, p.status,
            jsonb_array_length(p.risk_flags) as flag_count,
-           coalesce((select jsonb_agg(jsonb_build_object('platform', pf.name, 'uid', pp.platform_uid, 'has_club', pp.club_id is not null))
+           coalesce((select jsonb_agg(jsonb_build_object('platform', pf.name, 'uid', pp.platform_uid, 'username', pp.platform_username, 'has_club', pp.club_id is not null))
                        from player_platforms pp join platforms pf on pf.id = pp.platform_id
                       where pp.player_id = p.id and pp.platform_uid is not null), '[]') as accounts,
            coalesce((select jsonb_agg(jsonb_build_object(
@@ -125,7 +125,7 @@ export default async function PlayersPage({
                   </td>
                   <td className="mono" style={{ fontSize: 12 }}>
                     {(p.accounts as any[]).map((a, i) => (
-                      <div key={i}>{a.platform}: {a.uid}{!a.has_club && <span className="badge warn" style={{ marginLeft: 4 }}>no club</span>}</div>
+                      <div key={i}>{a.platform}: {a.uid}{a.username ? <span style={{ color: 'var(--text-faint)' }}> ({a.username})</span> : null}{!a.has_club && <span className="badge warn" style={{ marginLeft: 4 }}>no club</span>}</div>
                     ))}
                   </td>
                   <td><span className={`badge ${p.status === 'active' ? 'ok' : p.status === 'frozen' ? 'warn' : 'red'}`}>{p.status === 'frozen' ? 'on hold' : p.status}</span></td>

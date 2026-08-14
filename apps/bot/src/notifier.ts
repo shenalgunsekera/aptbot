@@ -340,39 +340,28 @@ export function renderNotification(n: Notification): Rendered | null {
     case 'player.needs_club':
       return { text: `📍 *${p.name}* (${p.platform} ${p.uid}) is approved but not assigned to a club yet.` };
     case 'payment.detected': {
-      // Icon per source: PayPal 💚, Cash App 💵, Stripe (card/Apple Pay) 💳, crypto 🪙.
-      const icon = p.source === 'paypal' ? '💚'
-        : p.source === 'cashapp' ? '💵'
-        : p.source === 'stripe' ? '💳' : '🪙';
-      // Not money received: a REQUEST to be paid, or a CANCELLED request. Same
-      // source icon + a unique emoji so each is distinguishable at a glance.
+      // A clean source label. Stripe carries the exact method it detected
+      // (Apple Pay / Cash App Pay / Link / Card …) in `method`.
+      const src = p.source === 'paypal' ? 'PayPal'
+        : p.source === 'cashapp' ? 'Cash App'
+        : (p.method || (p.source === 'stripe' ? 'Card' : 'crypto'));
+      const who = p.name || 'someone';
+      const amt = m(p.amount, p.currency);
       if (p.kind === 'request' || p.request) {
-        return {
-          text: `${icon}🧾 *Payment request* — ${m(p.amount, p.currency)} via ${p.method}` +
-            (p.name ? `\nFrom: *${p.name}*` : '') +
-            `\n\n_Someone is requesting this amount — pay it if it matches a cash-out._`,
-        };
+        return { text: `📨 *${who}* requested ${amt} via ${src}\n\n_Someone's requesting money — pay it only if it matches a cash-out._` };
       }
       if (p.kind === 'cancel') {
-        return {
-          text: `${icon}🚫 *Request cancelled* — ${m(p.amount, p.currency)} via ${p.method}` +
-            (p.name ? `\nFrom: *${p.name}*` : '') +
-            `\n\n_A money request was cancelled — no action needed._`,
-        };
+        return { text: `🚫 *${who}* canceled their ${amt} ${src} request\n\n_No action needed._` };
       }
+      const approx = p.approx ? '≈ ' : '';
       return p.matched
         ? {
-            text: `${icon} *Payment received — ${p.approx ? '≈ ' : ''}${m(p.amount, p.currency)} via ${p.method}*` +
-              (p.name ? `\nFrom: *${p.name}*` : '') +
+            text: `💸 *Payment of ${approx}${amt} received from ${who} via ${src}*` +
               (p.ref ? `\nRef: \`${p.ref}\`` : '') +
               (p.approx ? `\n_(matched by live price — confirm the exact amount)_` : '') +
-              `\n\n_Auto-detected. Check the receipt card above, then Verify & release._`,
+              `\n\n_Auto-matched — check the receipt above, then Verify & release._`,
           }
-        : {
-            text: `${icon} *Payment received* — ${m(p.amount, p.currency)} via ${p.method}` +
-              (p.name ? `\nFrom: *${p.name}*` : '') +
-              `\n\n_Match it to the player's receipt, then credit them._`,
-          };
+        : { text: `💸 *Payment of ${amt} received from ${who} via ${src}*\n\n_Match it to the player's receipt, then credit them._` };
     }
     case 'stripe.claim':
       return p.amount
