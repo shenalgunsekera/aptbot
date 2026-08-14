@@ -348,20 +348,16 @@ export function renderNotification(n: Notification): Rendered | null {
       const who = p.name || 'someone';
       const amt = m(p.amount, p.currency);
       if (p.kind === 'request' || p.request) {
-        return { text: `📨 *${who}* requested ${amt} via ${src}\n\n_Someone's requesting money — pay it only if it matches a cash-out._` };
+        return { text: `📨 *${who}* requested ${amt} via ${src}` };
       }
       if (p.kind === 'cancel') {
-        return { text: `🚫 *${who}* canceled their ${amt} ${src} request\n\n_No action needed._` };
+        return { text: `🚫 *${who}* canceled their ${amt} ${src} request` };
       }
       const approx = p.approx ? '≈ ' : '';
-      return p.matched
-        ? {
-            text: `💸 *Payment of ${approx}${amt} received from ${who} via ${src}*` +
-              (p.ref ? `\nRef: \`${p.ref}\`` : '') +
-              (p.approx ? `\n_(matched by live price — confirm the exact amount)_` : '') +
-              `\n\n_Auto-matched — check the receipt above, then Verify & release._`,
-          }
-        : { text: `💸 *Payment of ${amt} received from ${who} via ${src}*\n\n_Match it to the player's receipt, then credit them._` };
+      return {
+        text: `💸 *Payment of ${approx}${amt} received from ${who} via ${src}*` +
+          (p.ref ? `\nRef: \`${p.ref}\`` : ''),
+      };
     }
     case 'stripe.claim':
       return p.amount
