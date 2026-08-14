@@ -354,10 +354,7 @@ export function renderNotification(n: Notification): Rendered | null {
         return { text: `🚫 *${who}* canceled their ${amt} ${src} request` };
       }
       const approx = p.approx ? '≈ ' : '';
-      return {
-        text: `💸 *Payment of ${approx}${amt} received from ${who} via ${src}*` +
-          (p.ref ? `\nRef: \`${p.ref}\`` : ''),
-      };
+      return { text: `💸 *Payment of ${approx}${amt} sent by ${who} via ${src}*` };
     }
     case 'stripe.claim':
       return p.amount
