@@ -15,7 +15,9 @@ export async function GET(req: Request): Promise<Response> {
 
   try {
     const { detectPaypalEmails } = await import('../../../../lib/paypal-email');
-    const res = await detectPaypalEmails();   // no timeout — let it finish
+    // Short window + small per-sender limit so it finishes well within 60s (the
+    // full 2-day/30-email scan is what was timing out). Covers the missed window.
+    const res = await detectPaypalEmails(30 * 3600 * 1000, 12);
     const bot = await getBot();
     const delivered = await drainNotifications(bot, 60);
     return Response.json({ ok: true, recorded: res.total, breakdown: res.breakdown, delivered });

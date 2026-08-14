@@ -26,7 +26,7 @@ export interface EmailScanResult {
   breakdown: Record<string, { found: number; parsed: number }>;
 }
 
-export async function detectPaypalEmails(): Promise<EmailScanResult> {
+export async function detectPaypalEmails(sinceMs = 2 * 24 * 3600 * 1000, perSenderLimit = 30): Promise<EmailScanResult> {
   const empty: EmailScanResult = { total: 0, breakdown: {} };
   const user = process.env.PAYPAL_IMAP_USER;
   const pass = process.env.PAYPAL_IMAP_PASSWORD;
@@ -49,11 +49,11 @@ export async function detectPaypalEmails(): Promise<EmailScanResult> {
   const breakdown: EmailScanResult['breakdown'] = {};
   let count = 0;
   const run = async (from: string, parse: typeof parsePaypal, source: 'paypal' | 'cashapp', method: string) => {
-    const r = await scan(client, since, from, parse, source, method, watermark, seen);
+    const r = await scan(client, since, from, parse, source, method, watermark, seen, perSenderLimit);
     breakdown[from] = r;
     count += r.parsed;
   };
-  const since = new Date(Date.now() - 2 * 24 * 3600 * 1000);   // last 2 days
+  const since = new Date(Date.now() - sinceMs);
   await client.connect();
   try {
     const lock = await client.getMailboxLock('INBOX');
@@ -92,11 +92,12 @@ async function scan(
   methodCode: string,
   watermark: Date | null,
   seen: { max: Date | null },
+  limit = 30,
 ): Promise<{ found: number; parsed: number }> {
   const uids = await client.search({ since, from }, { uid: true });
   if (!uids || uids.length === 0) return { found: 0, parsed: 0 };
   let count = 0;
-  for (const uid of uids.slice(-30)) {
+  for (const uid of uids.slice(-limit)) {
     const msg = await client.fetchOne(String(uid), { source: true }, { uid: true });
     if (!msg || !msg.source) continue;
     const mail = await simpleParser(msg.source);
