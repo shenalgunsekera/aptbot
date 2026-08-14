@@ -1,17 +1,14 @@
+import { recordDetection } from '../../../../lib/detect';
 import { parsePaypal, parseCashapp } from '../../../../lib/paypal-email';
 
 /**
- * Instant inbound-email webhook.
+ * Instant inbound-email webhook — the SINGLE detection path for PayPal / Cash App.
  *
- * Polling an inbox (IMAP on a cron) can never be "the second it arrives". This
- * endpoint is the push side: a Google Apps Script bound to the Gmail inbox fires
- * every new PayPal / Cash App email at it within seconds, and we record + alert
- * the admins right then — no waiting for a cron.
- *
- * The Apps Script sends JSON:
- *   { secret, from, subject, text, messageId, date }
- * Auth is a shared secret in EMAIL_WEBHOOK_SECRET (Vercel env). Idempotent: we
- * dedupe on messageId, so the same email pushed twice is a no-op.
+ * A Google Apps Script bound to the Gmail inbox fires every new payment email at
+ * this endpoint within seconds; we parse + record + alert right then. This is the
+ * ONE source of truth: the IMAP cron poll used to also record the same emails
+ * (under a different id → duplicate alerts) and its slow connect timed the cron
+ * out, so it's been retired. Idempotent: we dedupe on messageId.
  */
 export const dynamic = 'force-dynamic';
 
@@ -39,10 +36,15 @@ export async function POST(req: Request): Promise<Response> {
   const parsed = isPaypal ? parsePaypal(subject, text) : parseCashapp(subject, text);
   if (!parsed) return Response.json({ ok: true, detected: false, reason: 'not a money-received email' });
 
-  // DO NOT record here anymore. The IMAP scan (detectPaypalEmails) now runs every
-  // ~60s and is the single source of truth — it dedupes on the RFC Message-ID.
-  // This push path uses Gmail's internal id instead, so recording here produced
-  // TWO events per email (one push, one IMAP) → duplicate admin alerts. We keep
-  // the endpoint 200 so the Apps Script doesn't retry, but detection is IMAP-only.
-  return Response.json({ ok: true, detected: false, reason: 'handled by imap poll (no double)', kind: parsed.kind });
+  await recordDetection({
+    source: isPaypal ? 'paypal' : 'cashapp',
+    externalId: messageId,
+    methodCode: isPaypal ? 'paypal' : 'cashapp',
+    amount: parsed.amount,
+    currency: parsed.currency,
+    // A push is always a fresh arrival — never mark it stale, always announce.
+    raw: { subject, name: parsed.name, stale: false, kind: parsed.kind },
+  });
+
+  return Response.json({ ok: true, detected: true, kind: parsed.kind, amount: parsed.amount, name: parsed.name });
 }

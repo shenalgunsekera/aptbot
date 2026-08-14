@@ -43,18 +43,14 @@ export async function GET(req: Request): Promise<Response> {
       cryptoPolled = await withTimeout(detectCryptoPayments(), 20000, 0);
     } catch (err) { console.error('[cron] crypto poll failed:', err); }
 
-    // Read the PayPal inbox for "you got money" emails (personal account, no
-    // webhook). No-op unless the IMAP env is set.
-    let paypalSeen = 0;
-    let emailBreakdown: Record<string, { found: number; parsed: number }> = {};
-    let emailError: string | null = null;
-    const emailConfigured = Boolean(process.env.PAYPAL_IMAP_USER && process.env.PAYPAL_IMAP_PASSWORD);
-    try {
-      const { detectPaypalEmails } = await import('../../../lib/paypal-email');
-      const res = await withTimeout(detectPaypalEmails(), 20000, { total: 0, breakdown: {} });
-      paypalSeen = res.total;
-      emailBreakdown = res.breakdown;   // per-sender { found, parsed } — arrival vs parse
-    } catch (err) { emailError = String((err as Error)?.message ?? err); console.error('[cron] paypal email poll failed:', err); }
+    // NOTE: PayPal / Cash App email detection is handled by the INSTANT push
+    // webhook (/api/webhooks/email) — the single source of truth. The old IMAP
+    // poll here double-recorded the same emails (duplicate alerts) and its slow
+    // Gmail connect kept timing this cron out (→ 504), so it's retired.
+    const paypalSeen = 0;
+    const emailBreakdown: Record<string, { found: number; parsed: number }> = {};
+    const emailError: string | null = null;
+    const emailConfigured = false;
 
     const bot = await getBot();
     const delivered = await drainNotifications(bot, 40);
