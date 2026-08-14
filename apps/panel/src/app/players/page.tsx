@@ -125,7 +125,7 @@ export default async function PlayersPage({
                   </td>
                   <td className="mono" style={{ fontSize: 12 }}>
                     {(p.accounts as any[]).map((a, i) => (
-                      <div key={i}>{a.platform}: {a.uid}{a.username ? <span style={{ color: 'var(--text-faint)' }}> ({a.username})</span> : null}{!a.has_club && <span className="badge warn" style={{ marginLeft: 4 }}>no club</span>}</div>
+                      <div key={i}>{a.platform}: {a.username ? <>{a.username}<span style={{ color: 'var(--text-faint)' }}> ({a.uid})</span></> : a.uid}{!a.has_club && <span className="badge warn" style={{ marginLeft: 4 }}>no club</span>}</div>
                     ))}
                   </td>
                   <td><span className={`badge ${p.status === 'active' ? 'ok' : p.status === 'frozen' ? 'warn' : 'red'}`}>{p.status === 'frozen' ? 'on hold' : p.status}</span></td>
