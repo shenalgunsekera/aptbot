@@ -348,13 +348,13 @@ export function renderNotification(n: Notification): Rendered | null {
       const who = p.name || 'someone';
       const amt = m(p.amount, p.currency);
       if (p.kind === 'request' || p.request) {
-        return { text: `📨 *${who}* requested ${amt} via ${src}` };
+        return { text: `📨 *${who}* requested *${amt}* via *${src}*` };
       }
       if (p.kind === 'cancel') {
-        return { text: `🚫 *${who}* canceled their ${amt} ${src} request` };
+        return { text: `🚫 *${who}* canceled their *${amt}* *${src}* request` };
       }
       const approx = p.approx ? '≈ ' : '';
-      return { text: `💸 *Payment of ${approx}${amt} sent by ${who} via ${src}*` };
+      return { text: `💸 Payment of ${approx}*${amt}* sent by *${who}* via *${src}*` };
     }
     case 'stripe.claim':
       return p.amount
