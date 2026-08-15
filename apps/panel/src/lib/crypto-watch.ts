@@ -46,7 +46,7 @@ async function tronUsdt(address: string): Promise<void> {
   }
 }
 
-async function evmToken(chainId: number, contract: string, code: string, address: string): Promise<void> {
+async function evmToken(chainId: number, contract: string, code: string, address: string, label?: string): Promise<void> {
   const key = process.env.ETHERSCAN_API_KEY;
   if (!key) return;
   const url = `https://api.etherscan.io/v2/api?chainid=${chainId}&module=account&action=tokentx&contractaddress=${contract}&address=${address}&page=1&offset=20&sort=desc&apikey=${key}`;
@@ -55,7 +55,7 @@ async function evmToken(chainId: number, contract: string, code: string, address
   for (const t of res.result) {
     if ((t.to ?? '').toLowerCase() !== address.toLowerCase()) continue;
     const usd = Math.round(Number(t.value ?? 0) / 10 ** Number(t.tokenDecimal ?? 6) * 100);
-    await recordDetection({ source: 'crypto', externalId: `${code}:${t.hash}`, methodCode: code, amount: usd, currency: 'USD', raw: { hash: t.hash } });
+    await recordDetection({ source: 'crypto', externalId: `${code}:${t.hash}`, methodCode: code, amount: usd, currency: 'USD', raw: { hash: t.hash, ...(label ? { source_detail: label } : {}) } });
   }
 }
 
@@ -149,6 +149,16 @@ export async function detectCryptoPayments(): Promise<number> {
   for (const [code, run] of stable) {
     const a = addr.get(code);
     if (a) jobs.push(run(a).catch((err) => console.error(`[crypto] ${code} poll failed:`, err)));
+  }
+
+  // USDC on ETHEREUM mainnet (ERC-20). It isn't a configured method, but players
+  // do send USDC over Ethereum to the club's EVM addresses — and we were watching
+  // USDC only on Base, so those went undetected. Poll EVERY EVM address we hold
+  // (Base-USDC / ERC-20-USDT / ETH) for USDC-on-Ethereum; dedup is on the tx hash.
+  const USDC_ETH = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
+  const evmAddrs = [...new Set(['usdc_base', 'usdt_erc20', 'eth'].map((c) => addr.get(c)).filter(Boolean) as string[])];
+  for (const a of evmAddrs) {
+    jobs.push(evmToken(1, USDC_ETH, 'usdc_erc20', a, 'USDC (ERC-20)').catch((err) => console.error('[crypto] usdc_erc20 poll failed:', err)));
   }
 
   const active = Object.keys(PRICED).filter((code) => addr.get(code));
