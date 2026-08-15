@@ -265,14 +265,35 @@ export async function upsertMethod(patch: Record<string, unknown>): Promise<Resu
     for (const [k, v] of Object.entries(patch)) if (allowed.has(k)) clean[k] = v;
 
     const id = patch.id as string | undefined;
+    let methodId: string | null = id ?? null;
     if (id) {
       delete clean.code;
       await sql`update payment_methods set ${sql(clean)} where id = ${id}`;
     } else {
-      await sql`insert into payment_methods ${sql(clean)}`;
+      const [row] = await sql<{ id: string }[]>`insert into payment_methods ${sql(clean)} returning id`;
+      methodId = row?.id ?? null;
     }
+
+    // Amount-based deposit handles (jsonb). Set explicitly so it stores as jsonb,
+    // not a Postgres array. Format: [{ up_to: <cents|null>, handle }].
+    if (patch.handle_tiers !== undefined && methodId) {
+      const raw = patch.handle_tiers;
+      let parsed: unknown = [];
+      if (Array.isArray(raw)) parsed = raw;
+      else if (typeof raw === 'string' && raw.trim()) {
+        try { parsed = JSON.parse(raw); } catch { throw new Error('Handle tiers are not valid.'); }
+      }
+      const tiers = (Array.isArray(parsed) ? parsed : [])
+        .filter((t) => t && String((t as any).handle ?? '').trim())
+        .map((t) => ({
+          up_to: (t as any).up_to === '' || (t as any).up_to == null ? null : Number((t as any).up_to),
+          handle: String((t as any).handle).trim(),
+        }));
+      await sql`update payment_methods set handle_tiers = ${tiers.length ? sql.json(tiers) : null} where id = ${methodId}`;
+    }
+
     await sql`select audit(${s.admin.id}::uuid, ${id ? 'method.update' : 'method.create'},
-                           'payment_method', ${id ?? null}::uuid, ${sql.json(clean as any)}::jsonb)`;
+                           'payment_method', ${methodId}::uuid, ${sql.json(clean as any)}::jsonb)`;
     return 'Payment method saved.';
   }, ['/config']);
 }

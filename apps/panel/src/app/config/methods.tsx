@@ -194,6 +194,8 @@ function MethodForm({ method }: { method: any | null }) {
         </div>
       </div>
 
+      <TiersEditor initial={method?.handle_tiers ?? null} />
+
       <div className="field-row">
         <div className="field">
           <label htmlFor="handle_hint">Handle hint (shown to withdrawers)</label>
@@ -223,6 +225,45 @@ function MethodForm({ method }: { method: any | null }) {
         {pending ? 'Saving…' : 'Save method'}
       </button>
     </form>
+  );
+}
+
+/** Amount-based deposit handles. Each row: "up to $X → handle". A deposit uses the
+ *  first row whose ceiling is >= the amount; blank ceiling = "everything above".
+ *  Serializes to a hidden input (cents) that the form submits as handle_tiers. */
+function TiersEditor({ initial }: { initial: Array<{ up_to: number | null; handle: string }> | null }) {
+  const [tiers, setTiers] = useState<{ up_to: string; handle: string }[]>(
+    (initial ?? []).map((t) => ({ up_to: t.up_to == null ? '' : String(t.up_to / 100), handle: t.handle ?? '' })),
+  );
+  const set = (i: number, k: 'up_to' | 'handle', v: string) =>
+    setTiers((ts) => ts.map((x, j) => (j === i ? { ...x, [k]: v } : x)));
+  const serialized = JSON.stringify(
+    tiers
+      .filter((t) => t.handle.trim())
+      .map((t) => ({ up_to: t.up_to.trim() === '' ? null : Math.round(parseFloat(t.up_to) * 100), handle: t.handle.trim() })),
+  );
+  return (
+    <div className="field">
+      <label>Amount-based deposit handles (optional)</label>
+      <div className="field-hint">
+        Route the deposit handle by amount — e.g. <em>Up to $300 → @dvbdvb77</em>, then a row with a
+        blank amount → your business tag for everything above. A deposit uses the first row whose
+        limit is ≥ the amount. Leave empty to always use the single club account above.
+      </div>
+      {tiers.map((t, i) => (
+        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+          <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>Up to $</span>
+          <input value={t.up_to} onChange={(e) => set(i, 'up_to', e.target.value)} placeholder="no limit" style={{ width: 90 }} />
+          <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>→</span>
+          <input value={t.handle} onChange={(e) => set(i, 'handle', e.target.value)} placeholder="@handle / address" style={{ flex: 1 }} />
+          <button type="button" className="sm ghost danger" onClick={() => setTiers((ts) => ts.filter((_, j) => j !== i))}>✕</button>
+        </div>
+      ))}
+      <button type="button" className="sm" style={{ marginTop: 6 }} onClick={() => setTiers((ts) => [...ts, { up_to: '', handle: '' }])}>
+        + Add tier
+      </button>
+      <input type="hidden" name="handle_tiers" value={serialized} />
+    </div>
   );
 }
 
