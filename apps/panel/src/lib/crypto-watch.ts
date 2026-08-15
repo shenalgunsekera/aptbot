@@ -151,14 +151,14 @@ export async function detectCryptoPayments(): Promise<number> {
     if (a) jobs.push(run(a).catch((err) => console.error(`[crypto] ${code} poll failed:`, err)));
   }
 
-  // USDC on ETHEREUM mainnet (ERC-20). It isn't a configured method, but players
-  // do send USDC over Ethereum to the club's EVM addresses — and we were watching
-  // USDC only on Base, so those went undetected. Poll EVERY EVM address we hold
-  // (Base-USDC / ERC-20-USDT / ETH) for USDC-on-Ethereum; dedup is on the tx hash.
+  // USDC on ETHEREUM mainnet (ERC-20). We were only watching USDC on Base, so a
+  // player who sent USDC over Ethereum to the club's USDC address went undetected.
+  // Watch ONLY the USDC address — polling the general ETH address here would pick
+  // up unrelated USDC treasury movements and spam the feed. Dedup is on the tx hash.
   const USDC_ETH = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
-  const evmAddrs = [...new Set(['usdc_base', 'usdt_erc20', 'eth'].map((c) => addr.get(c)).filter(Boolean) as string[])];
-  for (const a of evmAddrs) {
-    jobs.push(evmToken(1, USDC_ETH, 'usdc_erc20', a, 'USDC (ERC-20)').catch((err) => console.error('[crypto] usdc_erc20 poll failed:', err)));
+  const usdcAddr = addr.get('usdc_base');
+  if (usdcAddr) {
+    jobs.push(evmToken(1, USDC_ETH, 'usdc_erc20', usdcAddr, 'USDC (ERC-20)').catch((err) => console.error('[crypto] usdc_erc20 poll failed:', err)));
   }
 
   const active = Object.keys(PRICED).filter((code) => addr.get(code));
