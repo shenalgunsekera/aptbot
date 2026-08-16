@@ -130,7 +130,7 @@ export async function advance(ctx: Ctx, playerId: string): Promise<void> {
     if (!r || (!r.platform_uid_claimed && !r.platform_uid)) {
       ctx.session.step = { name: 'ob:clubgg_id' };
       await ask(ctx,
-        `What's your *ClubGG ID*?\n(e.g. 1234-5678)`,
+        `What's your *ClubGG ID*?\n_The 8-digit player ID (e.g. 1234-5678) — NOT the 6-digit club code._`,
         { parse_mode: 'Markdown' },
       );
       return;
@@ -350,9 +350,28 @@ export async function obSbUsername(ctx: Ctx, text: string): Promise<void> {
 }
 
 export async function obClubggId(ctx: Ctx, text: string): Promise<void> {
+  const uid = validClubggId(text);
+  if (!uid) {
+    // Step stays on ob:clubgg_id, so their next message re-runs this.
+    await ctx.reply(clubggIdError(text), { parse_mode: 'Markdown' });
+    return;
+  }
   // We take the ID first, then the ClubGG username, and claim with both together.
-  ctx.session.step = { name: 'ob:clubgg_user', uid: text.trim() };
+  ctx.session.step = { name: 'ob:clubgg_user', uid };
   await ctx.reply(`What's your *ClubGG username*?`, { parse_mode: 'Markdown' });
+}
+
+/** A ClubGG player ID is 8 digits (players keep entering the 6-digit CLUB code).
+ *  Returns the normalized `1234-5678` form, or null if it isn't 8 digits. */
+export function validClubggId(text: string): string | null {
+  const d = text.replace(/\D/g, '');
+  return d.length === 8 ? `${d.slice(0, 4)}-${d.slice(4)}` : null;
+}
+export function clubggIdError(text: string): string {
+  const d = text.replace(/\D/g, '');
+  return d.length === 6
+    ? `That's the *club code* (6 digits). We need your *ClubGG player ID* — the *8-digit* number on your ClubGG profile, e.g. \`1234-5678\`. Send that one.`
+    : `A ClubGG ID is *8 digits* (e.g. \`1234-5678\`). Please check and send it again.`;
 }
 
 export async function obClubggUser(ctx: Ctx, uid: string, text: string): Promise<void> {
