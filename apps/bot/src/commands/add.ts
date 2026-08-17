@@ -114,12 +114,17 @@ export async function addAmount(ctx: Ctx, platformId: string, methodId: string, 
     return;
   }
 
-  // A Stripe tier (e.g. Cash App up to $250) diverts to the fixed card/Apple Pay
-  // link BEFORE creating a deposit — configured in the panel, no longer hardcoded.
+  // Route by tier (BEFORE creating a deposit for the Stripe path). A 'STRIPE' tier
+  // on any method — or the Stripe method's own default (anything that isn't a
+  // Staff/PeerPay tier) — diverts to the fixed card link. 'STAFF'/'PEERPAY' and
+  // real handles fall through to deposit_create + runMatch.
+  const [mrow] = await sql0<{ code: string }[]>`select code from payment_methods where id = ${methodId}`;
+  const code = mrow?.code ?? '';
   const [tier] = await sql0<{ handle: string | null }[]>`
     select club_handle_for(${methodId}::uuid, ${amount}::bigint) as handle`;
-  if (tier?.handle === 'STRIPE') {
-    await startStripeDeposit(ctx, platformId);
+  const h = tier?.handle;
+  if (h === 'STRIPE' || (code === 'stripe' && h !== 'STAFF' && h !== 'PEERPAY')) {
+    await startStripeDeposit(ctx, platformId, code);
     return;
   }
 
@@ -173,10 +178,14 @@ async function askAddMethod(ctx: Ctx, platformId: string): Promise<void> {
   });
 }
 
-/** After a method is chosen: Stripe → fixed link (player types the amount on
- *  Stripe's page); everything else → ask the amount here. */
+/** After a method is chosen: the Stripe method with NO tiers keeps its fast path
+ *  (player types the amount on Stripe's page). Everything else — including a Stripe
+ *  method that HAS tiers (e.g. > $249 → Staff) — asks the amount here so the tier
+ *  can route it. */
 async function addProceed(ctx: Ctx, platformId: string, method: PaymentMethod): Promise<void> {
-  if (method.code === 'stripe') return void (await startStripeDeposit(ctx, platformId));
+  const tiers = (method as { handle_tiers?: unknown }).handle_tiers;
+  const hasTiers = Array.isArray(tiers) && tiers.length > 0;
+  if (method.code === 'stripe' && !hasTiers) return void (await startStripeDeposit(ctx, platformId, 'stripe'));
   await askAmount(ctx, platformId, method.id);
 }
 
@@ -228,14 +237,21 @@ const STRIPE_LINK = () => process.env.STRIPE_PAYMENT_LINK ?? 'https://buy.stripe
 // global deposit max_amount.
 const STRIPE_MAX_CENTS = 50000;
 
-async function startStripeDeposit(ctx: Ctx, platformId: string): Promise<void> {
+async function startStripeDeposit(ctx: Ctx, platformId: string, methodCode = 'stripe'): Promise<void> {
   const [cfg] = await db()<{ min_amount: number; max_amount: number }[]>`
     select min_amount, max_amount from config where id`;
   ctx.session.step = { name: 'add:stripe', platformId };
   await clearQuestion(ctx);
+  // Same secure link for both, but tailor the wording: a Cash App deposit routed
+  // here pays with Cash App Pay ON the page; a card/Apple Pay deposit doesn't.
+  const isCashapp = methodCode === 'cashapp';
+  const title = isCashapp ? '💵 *Pay with Cash App Pay*' : '💳 *Pay by Card or Apple Pay*';
+  const step1 = isCashapp
+    ? 'Tap below, choose *Cash App Pay* on the page, then *enter the amount you want to add* '
+    : 'Tap below, then on the page *enter the amount you want to add* ';
   await ctx.reply(
-    `💳 *Pay by Card or Apple Pay*\n\n` +
-      `Tap below, then on the page *enter the amount you want to add* ` +
+    `${title}\n\n` +
+      step1 +
       `(between ${whole(cfg.min_amount)} and ${whole(STRIPE_MAX_CENTS)}) and pay.\n\n` +
       `When you're done, come back here and *send a screenshot of the "Thanks for your payment" screen* ` +
       `so we can confirm it and add your money.`,
@@ -433,13 +449,22 @@ export async function handleStaffReply(ctx: Ctx): Promise<boolean> {
         `via *${req.method_name ?? 'the app'}*. Send a screenshot of the confirmation here once you've paid.`,
       { parse_mode: 'Markdown' });
   }
-  await setPlayerSessionStep(String(req.player_chat_id), { name: 'add:receipt', fillId: req.fill_id });
+  // Put the PLAYER into receipt-collection. Sessions are keyed by user id, which is
+  // NOT the chat id when they deposited in a group — so derive their telegram id
+  // from the fill rather than using player_chat_id.
+  const [pl] = await sql<{ telegram_id: string | null }[]>`
+    select p.telegram_id from fills f
+      join deposit_requests d on d.id = f.deposit_id
+      join players p on p.id = d.player_id
+     where f.id = ${req.fill_id}`;
+  if (pl?.telegram_id) await setPlayerSessionStep(String(pl.telegram_id), { name: 'add:receipt', fillId: req.fill_id });
   await ctx.reply("✅ Sent to the player. They'll pay and send a screenshot to verify.");
   return true;
 }
 
-/** Set another user's stored conversation step (session is keyed by user id, which
- *  equals their DM chat id). Read-modify-write so onboarding scratch state survives. */
+/** Set another user's stored conversation step. Session is keyed by telegram USER
+ *  id (see getSessionKey), so pass that, not a chat id. Read-modify-write so any
+ *  onboarding scratch state survives. */
 async function setPlayerSessionStep(key: string, step: Step): Promise<void> {
   const sql = db();
   const [r] = await sql<{ value: SessionData }[]>`select value from bot_sessions where key = ${key}`;
