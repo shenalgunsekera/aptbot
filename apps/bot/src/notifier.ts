@@ -353,6 +353,9 @@ export function renderNotification(n: Notification): Rendered | null {
       if (p.kind === 'cancel') {
         return { text: `🚫 *${who}* canceled their *${amt}* *${src}* request` };
       }
+      if (p.kind === 'sent') {
+        return { text: `📤 You sent *${amt}* to *${who}* via *${src}*` };
+      }
       const approx = p.approx ? '≈ ' : '';
       return { text: `💸 Payment of ${approx}*${amt}* sent by *${who}* via *${src}*` };
     }

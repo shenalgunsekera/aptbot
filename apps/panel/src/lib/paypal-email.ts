@@ -78,7 +78,7 @@ export async function detectPaypalEmails(sinceMs = 2 * 24 * 3600 * 1000, perSend
   return { total: count, breakdown };
 }
 
-type Parsed = { amount: number; currency: string; name: string | null; kind: 'payment' | 'request' | 'cancel' };
+type Parsed = { amount: number; currency: string; name: string | null; kind: 'payment' | 'request' | 'cancel' | 'sent' };
 
 /** Search one sender, parse each match, and record any money-received emails.
  *  An email is ANNOUNCED only when it's newer than the watermark — so a real
@@ -140,6 +140,7 @@ const NON_NAME_WORDS = new Set([
 
 function cleanName(raw: string): string {
   return raw.replace(/\s+/g, ' ').trim()   // collapse newlines/runs so no "\n" lands in a name
+    .replace(/([A-Za-z]{2,})\.\s+[A-Z].*$/, '$1')   // drop a glued sentence: "Peters. It may…" → "Peters" (keeps "J. Smith")
     .replace(/[,;:.]+$/, '')
     .replace(/^(paypal|cash\s?app|venmo|zelle|square)\s+/i, '')   // "PayPal Brady Peters" → "Brady Peters"
     .trim();
@@ -216,18 +217,45 @@ function senderName(subject: string, text: string): string | null {
   return null;
 }
 
-/** Parse a PayPal email into payment received / money REQUEST / CANCELLED request.
- *  Null if it's outgoing, a receipt, or has no amount. */
+/** The person WE paid, pulled from an outgoing PayPal receipt: "You sent $X to
+ *  NAME", "You paid NAME $X", "…payment to NAME". Same name hygiene as senderName. */
+function recipientName(subject: string, text: string): string | null {
+  const body = text;
+  const candidates: Array<string | undefined> = [
+    // "You paid Brady Peters $30"
+    subject.match(/you paid\s+([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,2})\s+\$/i)?.[1],
+    body.match(/you paid\s+([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,2})\s+\$/i)?.[1],
+    // "You sent $30.00 USD to Brady Peters" / "payment to Brady Peters" / "sent to …"
+    // ([^\n] not [^.\n] so the period in "$30.00" doesn't block reaching "to".)
+    subject.match(/(?:sent|payment|paid)\b[^\n]*?\bto\s+([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,2})/i)?.[1],
+    body.match(/(?:you sent|payment sent|payment|paid)\b[^\n]*?\bto\s+([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,2})/i)?.[1],
+    // Last resort: "to NAME" (boilerplate words are filtered out below).
+    body.match(/\bto\s+([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,2})/i)?.[1]
+      ?? subject.match(/\bto\s+([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,2})/i)?.[1],
+  ];
+  for (const raw of candidates) {
+    if (!raw) continue;
+    const name = cleanName(raw);
+    if (isPlausibleName(name)) return name;
+  }
+  return null;
+}
+
+/** Parse a PayPal email into: payment RECEIVED / money REQUEST / CANCELLED request
+ *  / a payment WE SENT (outgoing). Null only when there's no amount. */
 export function parsePaypal(subject: string, text: string): Parsed | null {
   const hay = `${subject}\n${text}`;
-  // Direction is in the SUBJECT — check exclusions there ONLY. A word like
-  // "receipt" in the email body/footer must not drop a real incoming payment.
-  if (/(you sent|payment sent|you'?ve sent|receipt for your payment|you paid|authori[sz]ed a payment)/i.test(subject)) return null;
+  // Direction is in the SUBJECT. Outgoing (a payout we made) is announced too, as
+  // a 'sent' — it never matches a deposit. A footer "receipt" in the body must not
+  // flip an incoming payment, so we only look at the subject for direction.
+  const isSent = /(you sent|payment sent|you'?ve sent|receipt for your payment|you paid|authori[sz]ed a payment)/i.test(subject);
 
   const m = hay.match(/\$\s?([\d,]+\.\d{2})/) ?? hay.match(/([\d,]+\.\d{2})\s?USD/i);
   if (!m) return null;   // no amount → a login/security/marketing email, not money
   const amount = Math.round(parseFloat(m[1]!.replace(/,/g, '')) * 100);
   if (amount <= 0) return null;
+
+  if (isSent) return { amount, currency: 'USD', name: recipientName(subject, text), kind: 'sent' };
 
   const isCancel = /(cancel(l)?ed|declined)/i.test(subject) && /request/i.test(hay);
   const isRequest = /(money request|requested \$|requesting \$|requests \$|is requesting|sent you a request|wants \$)/i.test(hay);
