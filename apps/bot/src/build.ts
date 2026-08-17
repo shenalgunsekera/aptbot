@@ -15,7 +15,7 @@ import {
 import { sbCreated } from './admin-actions.js';
 import {
   addStart, addPickPlatform, addPickClub, addPickCrypto, addMethodBack, addAmount, addPickMethod,
-  addReceipt, addDone, stripeReceipt, cancelDeposit,
+  addReceipt, addDone, stripeReceipt, cancelDeposit, peerpayBackup,
 } from './commands/add.js';
 import { adminAdd, adminRemove } from './commands/adjust.js';
 import {
@@ -267,6 +267,7 @@ export function buildBot(token: string): Bot<Ctx> {
   });
   bot.callbackQuery('add:crypto', (ctx) => addPickCrypto(ctx));
   bot.callbackQuery('add:mback', (ctx) => addMethodBack(ctx));
+  bot.callbackQuery(/^pp:backup:(.+)$/, (ctx) => peerpayBackup(ctx, ctx.match![1]!));
   bot.callbackQuery(/^add:m:(.+)$/, async (ctx) => {
     const s = ctx.session.step;
     if (s.name !== 'add:method') return void (await ctx.answerCallbackQuery({ text: 'That expired — /add again.' }));

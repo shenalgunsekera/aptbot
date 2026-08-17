@@ -285,10 +285,17 @@ export async function upsertMethod(patch: Record<string, unknown>): Promise<Resu
       }
       const tiers = (Array.isArray(parsed) ? parsed : [])
         .filter((t) => t && String((t as any).handle ?? '').trim())
-        .map((t) => ({
-          up_to: (t as any).up_to === '' || (t as any).up_to == null ? null : Number((t as any).up_to),
-          handle: String((t as any).handle).trim(),
-        }));
+        .map((t) => {
+          const handle = String((t as any).handle).trim();
+          const backup = String((t as any).backup ?? '').trim();
+          return {
+            up_to: (t as any).up_to === '' || (t as any).up_to == null ? null : Number((t as any).up_to),
+            handle,
+            // PeerPay tiers (handle 'PEERPAY') carry a direct backup tag for when a
+            // rail is unavailable inside PeerPay; ignored for plain handle tiers.
+            ...(handle === 'PEERPAY' && backup ? { backup } : {}),
+          };
+        });
       await sql`update payment_methods set handle_tiers = ${tiers.length ? sql.json(tiers) : null} where id = ${methodId}`;
     }
 

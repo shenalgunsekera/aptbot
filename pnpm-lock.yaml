@@ -94,6 +94,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@zkp2p/pay-sdk':
+        specifier: ^3.1.0
+        version: 3.1.0
       firebase-admin:
         specifier: ^13.0.2
         version: 13.10.0
@@ -826,6 +829,12 @@ packages:
 
   '@types/tough-cookie@4.0.5':
     resolution: {integrity: sha512-/Ad8+nIOV7Rl++6f1BdKxFSMgmoqEoYbHRpPcx3JEfv8VRsQe9Z4mCXeJBzxs7mbHY/XOZZuXlRNfhpVPbs6ZA==}
+
+  '@zkp2p/pay-sdk@3.1.0':
+    resolution: {integrity: sha512-nqZhOPnZEcCNar2Gj3k6okL0uHwzytUiHOJvs/GDtawPKaGKQnuNkWL+jdLHbi0yy4v2WEdjMe2HBKx4kxurOg==}
+
+  '@zkp2p/pay-shared@3.1.0':
+    resolution: {integrity: sha512-1P9e90KG3R8BScqZP0viEiDrtmyr6f7PQ+sxfJDA3hfIB3BwQBu1+2tErYFLw4jN10eGeokUa+eivmnklb19PA==}
 
   '@zone-eu/mailsplit@5.4.14':
     resolution: {integrity: sha512-rz0FQOhN3Vq1XrSeSSa9+dPcaFbBxmQPjiZm6zS9oxdVHV7rOWIAYX3yP2YAUf0qBncY8CI+NogzPCmMVrMXcw==}
@@ -2328,6 +2337,12 @@ snapshots:
 
   '@types/tough-cookie@4.0.5':
     optional: true
+
+  '@zkp2p/pay-sdk@3.1.0':
+    dependencies:
+      '@zkp2p/pay-shared': 3.1.0
+
+  '@zkp2p/pay-shared@3.1.0': {}
 
   '@zone-eu/mailsplit@5.4.14':
     dependencies:

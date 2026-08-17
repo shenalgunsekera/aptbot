@@ -1,6 +1,6 @@
 import { InlineKeyboard } from 'grammy';
 import {
-  db, isUserError, userMessage, uploadReceipt, storageConfigured,
+  db, isUserError, userMessage, uploadReceipt, storageConfigured, peerpayCheckout,
   type PaymentMethod, type Fill, type Platform,
 } from '@union/core';
 import type { Ctx } from '../session.js';
@@ -267,6 +267,15 @@ async function runMatch(ctx: Ctx, platformId: string, amount: number, methodId: 
   }
 
   const [m] = await sql<PaymentMethod[]>`select * from payment_methods where id = ${methodId}`;
+
+  // PeerPay tier: the club fill's handle is the sentinel 'PEERPAY'. Mint a checkout
+  // link for this amount instead of showing a static handle. p2p never splits, so a
+  // PeerPay deposit is a single club fill.
+  if (fills.length === 1 && fills[0]!.payout_handle === 'PEERPAY') {
+    await sendPeerpayInstruction(ctx, fills[0]!, m!);
+    return;
+  }
+
   // We SAY 5 minutes for urgency, but the real window is generous — the p2p slice
   // holds ~25 min and club/crypto deposits hold 24h — so a slow payer never fails.
   const lines: string[] = [`*💸 Send your payment now — you have 5 minutes*\n`];
@@ -293,6 +302,69 @@ async function runMatch(ctx: Ctx, platformId: string, amount: number, methodId: 
   ctx.session.step = { name: 'add:receipt', fillId: fills[0]!.id };
   await clearQuestion(ctx);
   await ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' });
+}
+
+/** PeerPay deposit: mint a checkout link for this amount and show a Pay button +
+ *  a "rail not available → backup tag" button. The receipt flow is identical to a
+ *  normal deposit — the confirmation screenshot IS the proof. */
+async function sendPeerpayInstruction(ctx: Ctx, f: Fill, m: PaymentMethod): Promise<void> {
+  const url = await peerpayCheckout({ amountCents: f.amount, fillId: f.id, rail: m.code });
+  ctx.session.step = { name: 'add:receipt', fillId: f.id };
+  await clearQuestion(ctx);
+
+  if (!url) {
+    // Minting failed → offer the backup tag straight away if one is set.
+    if (await switchToBackup(ctx, f)) return;
+    await ctx.reply("We couldn't set up the payment link right now. Please /support and we'll sort it out — nothing was charged.");
+    return;
+  }
+
+  const kb = new InlineKeyboard()
+    .url('💳 Pay now', url).row()
+    .text(`⚠️ ${m.name} not available?`, `pp:backup:${f.id}`);
+  await ctx.reply(
+    `*💸 Pay ${money(f.amount, f.currency)} — you have a few minutes*\n\n` +
+      `1. Tap *Pay now*.\n` +
+      `2. Choose *${m.name}* on the page and send the payment.\n` +
+      `3. Come back and *send a screenshot of the confirmation* here so we can add your money.\n\n` +
+      `_${m.name} not showing on the page? Tap the button below for another tag._\n` +
+      `_Changed your mind? /canceldeposit before you pay._`,
+    { parse_mode: 'Markdown', reply_markup: kb },
+  );
+}
+
+/** Switch a still-unpaid PeerPay fill to its direct backup tag (so the admin
+ *  verifies against the real handle). Returns false if no backup is configured. */
+async function switchToBackup(ctx: Ctx, f: Fill): Promise<boolean> {
+  const sql = db();
+  const [b] = await sql<{ backup: string | null }[]>`
+    select club_backup_for(${f.method_id}::uuid, ${f.amount}::bigint) as backup`;
+  const backup = b?.backup?.trim();
+  if (!backup) return false;
+  const [m] = await sql<{ name: string }[]>`select name from payment_methods where id = ${f.method_id}`;
+  // Only repoint while still unpaid; keep collecting the screenshot on this fill.
+  await sql`update fills set payout_handle = ${backup} where id = ${f.id} and status = 'locked'`;
+  ctx.session.step = { name: 'add:receipt', fillId: f.id };
+  await ctx.reply(
+    `No problem — pay *${money(f.amount, f.currency)}* to \`${backup}\` on *${m?.name}* instead ` +
+      `_(tap to copy)_, then send a screenshot of the confirmation here.`,
+    { parse_mode: 'Markdown' },
+  );
+  return true;
+}
+
+/** "Payment method not available?" button on a PeerPay deposit → reveal backup. */
+export async function peerpayBackup(ctx: Ctx, fillId: string): Promise<void> {
+  const sql = db();
+  const [f] = await sql<Fill[]>`select * from fills where id = ${fillId}`;
+  if (!f || f.status !== 'locked') {
+    return void (await ctx.answerCallbackQuery({ text: 'That deposit is no longer waiting — /deposit again.', show_alert: true }));
+  }
+  await ctx.answerCallbackQuery();
+  try { await ctx.editMessageReplyMarkup(); } catch { /* buttons already gone */ }
+  if (!(await switchToBackup(ctx, f))) {
+    await ctx.reply("There's no backup tag set for this one. Please /support and we'll help you pay.");
+  }
 }
 
 /** Player sent a receipt photo. Upload it, submit proof on the first, allow a
