@@ -16,6 +16,7 @@ import { sbCreated } from './admin-actions.js';
 import {
   addStart, addPickPlatform, addPickClub, addPickCrypto, addMethodBack, addAmount, addPickMethod,
   addReceipt, addDone, stripeReceipt, cancelDeposit, peerpayBackup, handleStaffReply,
+  staffProvided, staffWaitReceipt,
 } from './commands/add.js';
 import { adminAdd, adminRemove } from './commands/adjust.js';
 import {
@@ -443,7 +444,9 @@ export function buildBot(token: string): Bot<Ctx> {
         return void (await ctx.reply("We're still setting up your Sportsbook account — you'll get a message here the moment it's ready. 🙏"));
       // Money flows
       case 'add:staffwait':
-        return void (await ctx.reply("⏳ Hang tight — a staff member is getting your payment details. I'll send them here."));
+        return void (await ctx.reply(await staffProvided(step.fillId)
+          ? '✅ Your payment details are in the message above — pay it, then send a screenshot of the confirmation here.'
+          : "⏳ Hang tight — a staff member is getting your payment details. I'll send them here."));
       case 'add:amount': return void (await addAmount(ctx, step.platformId, step.methodId, text));
       case 'out:amount': return void (await cashoutAmount(ctx, step.platformId, text));
       case 'out:handle': return void (await cashoutHandle(ctx, step.platformId, step.amount, step.methodId, text));
@@ -474,7 +477,7 @@ export function buildBot(token: string): Bot<Ctx> {
   
     if (step.name === 'add:receipt') return void (await addReceipt(ctx, step.fillId));
     if (step.name === 'add:stripe') return void (await stripeReceipt(ctx, step.platformId));
-    if (step.name === 'add:staffwait') return void (await ctx.reply("⏳ Hang tight — we're still getting your payment details. I'll send them here, then you can send your screenshot."));
+    if (step.name === 'add:staffwait') return void (await staffWaitReceipt(ctx, step.fillId));
   
     // A screenshot attached to an open dispute.
     const sql = db();

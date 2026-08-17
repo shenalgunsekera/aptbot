@@ -3,7 +3,7 @@ import {
   db, isUserError, userMessage, uploadReceipt, storageConfigured, peerpayCheckout,
   type PaymentMethod, type Fill, type Platform,
 } from '@union/core';
-import type { Ctx, Step, SessionData } from '../session.js';
+import type { Ctx } from '../session.js';
 import { requireActive } from '../player.js';
 import { money, whole, parseAmount, amountProblem, receiptInstruction, receiptCount } from '../words.js';
 import { resolvePlatform, platformKeyboard } from '../prefs.js';
@@ -449,30 +449,33 @@ export async function handleStaffReply(ctx: Ctx): Promise<boolean> {
         `via *${req.method_name ?? 'the app'}*. Send a screenshot of the confirmation here once you've paid.`,
       { parse_mode: 'Markdown' });
   }
-  // Put the PLAYER into receipt-collection. Sessions are keyed by user id, which is
-  // NOT the chat id when they deposited in a group — so derive their telegram id
-  // from the fill rather than using player_chat_id.
-  const [pl] = await sql<{ telegram_id: string | null }[]>`
-    select p.telegram_id from fills f
-      join deposit_requests d on d.id = f.deposit_id
-      join players p on p.id = d.player_id
-     where f.id = ${req.fill_id}`;
-  if (pl?.telegram_id) await setPlayerSessionStep(String(pl.telegram_id), { name: 'add:receipt', fillId: req.fill_id });
+  // NOTE: we deliberately do NOT touch the player's session here. Sessions are
+  // owned by grammY's middleware, which reloads at the start of an update and
+  // rewrites at the end — so an out-of-band write from THIS (the staff's) update
+  // gets clobbered, especially when the staff member is the same user as the
+  // player. Instead the player stays in add:staffwait and that step checks
+  // staffProvided() when they send their screenshot (see build.ts).
   await ctx.reply("✅ Sent to the player. They'll pay and send a screenshot to verify.");
   return true;
 }
 
-/** Set another user's stored conversation step. Session is keyed by telegram USER
- *  id (see getSessionKey), so pass that, not a chat id. Read-modify-write so any
- *  onboarding scratch state survives. */
-async function setPlayerSessionStep(key: string, step: Step): Promise<void> {
-  const sql = db();
-  const [r] = await sql<{ value: SessionData }[]>`select value from bot_sessions where key = ${key}`;
-  const value: SessionData = r?.value ?? { step: { name: 'idle' } };
-  value.step = step;
-  await sql`
-    insert into bot_sessions (key, value) values (${key}, ${sql.json(value as any)})
-    on conflict (key) do update set value = excluded.value, updated_at = now()`;
+/** Has a staff member handed over the handle for this fill yet? The add:staffwait
+ *  step polls this instead of us pushing into the player's session. */
+export async function staffProvided(fillId: string): Promise<boolean> {
+  const [req] = await db()<{ status: string }[]>`
+    select status from staff_handle_req where fill_id = ${fillId} order by created_at desc limit 1`;
+  return req?.status === 'provided';
+}
+
+/** The player sent a screenshot while in add:staffwait. If the handle has been
+ *  provided, treat it as the receipt; otherwise ask them to hold on. */
+export async function staffWaitReceipt(ctx: Ctx, fillId: string): Promise<void> {
+  if (await staffProvided(fillId)) {
+    ctx.session.step = { name: 'add:receipt', fillId };   // our OWN update — safe to set
+    await addReceipt(ctx, fillId);
+    return;
+  }
+  await ctx.reply("⏳ Hang tight — we're still getting your payment details. I'll send them here, then you can send your screenshot.");
 }
 
 /** "Payment method not available?" button on a PeerPay deposit → reveal backup. */
