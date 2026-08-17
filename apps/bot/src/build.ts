@@ -15,7 +15,7 @@ import {
 import { sbCreated } from './admin-actions.js';
 import {
   addStart, addPickPlatform, addPickClub, addPickCrypto, addMethodBack, addAmount, addPickMethod,
-  addReceipt, addDone, stripeReceipt, cancelDeposit, peerpayBackup,
+  addReceipt, addDone, stripeReceipt, cancelDeposit, peerpayBackup, handleStaffReply,
 } from './commands/add.js';
 import { adminAdd, adminRemove } from './commands/adjust.js';
 import {
@@ -403,6 +403,10 @@ export function buildBot(token: string): Bot<Ctx> {
       return;
     }
 
+    // Staff replying in the admin group to a "payment handle needed" request.
+    // Self-gating: only matches a tracked request message, so it's a no-op elsewhere.
+    if (await handleStaffReply(ctx)) return;
+
     return next();
   });
   
@@ -438,6 +442,8 @@ export function buildBot(token: string): Bot<Ctx> {
       case 'ob:sb_wait':
         return void (await ctx.reply("We're still setting up your Sportsbook account — you'll get a message here the moment it's ready. 🙏"));
       // Money flows
+      case 'add:staffwait':
+        return void (await ctx.reply("⏳ Hang tight — a staff member is getting your payment details. I'll send them here."));
       case 'add:amount': return void (await addAmount(ctx, step.platformId, step.methodId, text));
       case 'out:amount': return void (await cashoutAmount(ctx, step.platformId, text));
       case 'out:handle': return void (await cashoutHandle(ctx, step.platformId, step.amount, step.methodId, text));
@@ -468,6 +474,7 @@ export function buildBot(token: string): Bot<Ctx> {
   
     if (step.name === 'add:receipt') return void (await addReceipt(ctx, step.fillId));
     if (step.name === 'add:stripe') return void (await stripeReceipt(ctx, step.platformId));
+    if (step.name === 'add:staffwait') return void (await ctx.reply("⏳ Hang tight — we're still getting your payment details. I'll send them here, then you can send your screenshot."));
   
     // A screenshot attached to an open dispute.
     const sql = db();

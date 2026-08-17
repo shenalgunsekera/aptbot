@@ -3,7 +3,7 @@ import {
   db, isUserError, userMessage, uploadReceipt, storageConfigured, peerpayCheckout,
   type PaymentMethod, type Fill, type Platform,
 } from '@union/core';
-import type { Ctx } from '../session.js';
+import type { Ctx, Step, SessionData } from '../session.js';
 import { requireActive } from '../player.js';
 import { money, whole, parseAmount, amountProblem, receiptInstruction, receiptCount } from '../words.js';
 import { resolvePlatform, platformKeyboard } from '../prefs.js';
@@ -114,14 +114,11 @@ export async function addAmount(ctx: Ctx, platformId: string, methodId: string, 
     return;
   }
 
-  // Cash App: $250+ goes straight to our $cashtag; under $250 must go through the
-  // card link using Cash App Pay.
-  const [mm] = await sql0<PaymentMethod[]>`select * from payment_methods where id = ${methodId}`;
-  if (mm?.code === 'cashapp' && amount < 25000) {
-    await ctx.reply(
-      `💵 For Cash App *under $250*, pay through our secure link and choose *Cash App Pay* on the page.`,
-      { parse_mode: 'Markdown' },
-    );
+  // A Stripe tier (e.g. Cash App up to $250) diverts to the fixed card/Apple Pay
+  // link BEFORE creating a deposit — configured in the panel, no longer hardcoded.
+  const [tier] = await sql0<{ handle: string | null }[]>`
+    select club_handle_for(${methodId}::uuid, ${amount}::bigint) as handle`;
+  if (tier?.handle === 'STRIPE') {
     await startStripeDeposit(ctx, platformId);
     return;
   }
@@ -237,7 +234,7 @@ async function startStripeDeposit(ctx: Ctx, platformId: string): Promise<void> {
   ctx.session.step = { name: 'add:stripe', platformId };
   await clearQuestion(ctx);
   await ctx.reply(
-    `💳 *Pay by Card, Apple Pay, or Cash App Pay*\n\n` +
+    `💳 *Pay by Card or Apple Pay*\n\n` +
       `Tap below, then on the page *enter the amount you want to add* ` +
       `(between ${whole(cfg.min_amount)} and ${whole(STRIPE_MAX_CENTS)}) and pay.\n\n` +
       `When you're done, come back here and *send a screenshot of the "Thanks for your payment" screen* ` +
@@ -273,6 +270,11 @@ async function runMatch(ctx: Ctx, platformId: string, amount: number, methodId: 
   // PeerPay deposit is a single club fill.
   if (fills.length === 1 && fills[0]!.payout_handle === 'PEERPAY') {
     await sendPeerpayInstruction(ctx, fills[0]!, m!);
+    return;
+  }
+  // Staff Provide tier: a human sends the handle. Ask staff in the admin group.
+  if (fills.length === 1 && fills[0]!.payout_handle === 'STAFF') {
+    await sendStaffProvideInstruction(ctx, fills[0]!, m!.name);
     return;
   }
 
@@ -333,8 +335,9 @@ async function sendPeerpayInstruction(ctx: Ctx, f: Fill, m: PaymentMethod): Prom
   );
 }
 
-/** Switch a still-unpaid PeerPay fill to its direct backup tag (so the admin
- *  verifies against the real handle). Returns false if no backup is configured. */
+/** Switch a still-unpaid PeerPay fill to its backup. The backup is either a direct
+ *  tag/link (repoint the fill so the admin verifies the real handle) or the
+ *  sentinel 'STAFF' (hand off to a staff member). Returns false if none is set. */
 async function switchToBackup(ctx: Ctx, f: Fill): Promise<boolean> {
   const sql = db();
   const [b] = await sql<{ backup: string | null }[]>`
@@ -342,6 +345,10 @@ async function switchToBackup(ctx: Ctx, f: Fill): Promise<boolean> {
   const backup = b?.backup?.trim();
   if (!backup) return false;
   const [m] = await sql<{ name: string }[]>`select name from payment_methods where id = ${f.method_id}`;
+  if (backup === 'STAFF') {
+    await sendStaffProvideInstruction(ctx, f, m?.name ?? 'the app');
+    return true;
+  }
   // Only repoint while still unpaid; keep collecting the screenshot on this fill.
   await sql`update fills set payout_handle = ${backup} where id = ${f.id} and status = 'locked'`;
   ctx.session.step = { name: 'add:receipt', fillId: f.id };
@@ -351,6 +358,96 @@ async function switchToBackup(ctx: Ctx, f: Fill): Promise<boolean> {
     { parse_mode: 'Markdown' },
   );
   return true;
+}
+
+/** Staff Provide: tell the player to hold on, post a request in the admin group,
+ *  and record it so a staff member's REPLY there routes the handle back here. */
+async function sendStaffProvideInstruction(ctx: Ctx, f: Fill, methodName: string): Promise<void> {
+  const sql = db();
+  ctx.session.step = { name: 'add:staffwait', fillId: f.id };
+  await clearQuestion(ctx);
+  await ctx.reply(
+    `⏳ *Hold on a moment* — a staff member is getting you a payment handle for ` +
+      `*${money(f.amount, f.currency)}*. You'll get it right here shortly.`,
+    { parse_mode: 'Markdown' },
+  );
+
+  const [cfg] = await sql<{ admin_group_chat_id: string | null }[]>`select admin_group_chat_id from config where id`;
+  const adminChat = cfg?.admin_group_chat_id;
+  if (!adminChat) {
+    await ctx.reply("We couldn't reach a staff member right now. Please /support and we'll help you pay.");
+    return;
+  }
+  const [pl] = await sql<{ name: string | null }[]>`
+    select dp.display_name as name from deposit_requests d join players dp on dp.id = d.player_id where d.id = ${f.deposit_id}`;
+  const playerName = pl?.name ?? 'A player';
+  const sent = await ctx.api.sendMessage(String(adminChat),
+    `🙋 *Payment handle needed*\n\n*${playerName}* wants to deposit *${money(f.amount, f.currency)}* via *${methodName}*.\n\n` +
+      `↩️ *Reply to this message* with the tag or link to send them.`,
+    { parse_mode: 'Markdown' });
+  await sql`
+    insert into staff_handle_req (fill_id, platform, admin_chat_id, admin_message_id, player_chat_id, amount, currency, method_name, player_name)
+    values (${f.id}::uuid, 'telegram', ${String(adminChat)}, ${String(sent.message_id)}, ${String(ctx.chat!.id)},
+            ${f.amount}::bigint, ${f.currency}, ${methodName}, ${playerName})
+    on conflict (platform, admin_chat_id, admin_message_id) do nothing`;
+}
+
+/** A staff member replied in the admin group to a "handle needed" request. Repoint
+ *  the fill, relay the tag/link to the player, and put them in receipt-collection.
+ *  Returns true if this message was a staff reply we handled. */
+export async function handleStaffReply(ctx: Ctx): Promise<boolean> {
+  const replyId = ctx.message?.reply_to_message?.message_id;
+  if (!replyId || !ctx.chat) return false;
+  const sql = db();
+  const [req] = await sql<{
+    id: string; fill_id: string; player_chat_id: string; amount: string; currency: string; method_name: string | null;
+  }[]>`
+    select id, fill_id, player_chat_id, amount, currency, method_name
+      from staff_handle_req
+     where platform = 'telegram' and admin_chat_id = ${String(ctx.chat.id)}
+       and admin_message_id = ${String(replyId)} and status = 'pending'`;
+  if (!req) return false;
+
+  const handle = (ctx.message?.text ?? '').trim();
+  if (!handle) { await ctx.reply('Reply with the tag or link (text) to send the player.'); return true; }
+
+  const [f] = await sql<{ status: string }[]>`select status from fills where id = ${req.fill_id}`;
+  if (!f || f.status !== 'locked') {
+    await sql`update staff_handle_req set status = 'cancelled' where id = ${req.id}`;
+    await ctx.reply('That deposit is no longer waiting (cancelled or already handled).');
+    return true;
+  }
+
+  await sql`update fills set payout_handle = ${handle} where id = ${req.fill_id} and status = 'locked'`;
+  await sql`update staff_handle_req set status = 'provided', provided_handle = ${handle} where id = ${req.id}`;
+
+  const amt = money(Number(req.amount), req.currency);
+  const isLink = /^https?:\/\//i.test(handle);
+  if (isLink) {
+    await ctx.api.sendMessage(req.player_chat_id,
+      `✅ *Here's your payment link for ${amt}*\n\nTap below to pay, then send a screenshot of the confirmation here.`,
+      { parse_mode: 'Markdown', reply_markup: new InlineKeyboard().url('💳 Pay now', handle) });
+  } else {
+    await ctx.api.sendMessage(req.player_chat_id,
+      `✅ *Pay ${amt} to:*\n\`${handle}\`  _(tap to copy)_\n\n` +
+        `via *${req.method_name ?? 'the app'}*. Send a screenshot of the confirmation here once you've paid.`,
+      { parse_mode: 'Markdown' });
+  }
+  await setPlayerSessionStep(String(req.player_chat_id), { name: 'add:receipt', fillId: req.fill_id });
+  await ctx.reply("✅ Sent to the player. They'll pay and send a screenshot to verify.");
+  return true;
+}
+
+/** Set another user's stored conversation step (session is keyed by user id, which
+ *  equals their DM chat id). Read-modify-write so onboarding scratch state survives. */
+async function setPlayerSessionStep(key: string, step: Step): Promise<void> {
+  const sql = db();
+  const [r] = await sql<{ value: SessionData }[]>`select value from bot_sessions where key = ${key}`;
+  const value: SessionData = r?.value ?? { step: { name: 'idle' } };
+  value.step = step;
+  await sql`
+    insert into bot_sessions (key, value) values (${key}, ${sql.json(value as any)})
+    on conflict (key) do update set value = excluded.value, updated_at = now()`;
 }
 
 /** "Payment method not available?" button on a PeerPay deposit → reveal backup. */

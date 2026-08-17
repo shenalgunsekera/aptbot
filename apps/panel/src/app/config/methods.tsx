@@ -231,52 +231,83 @@ function MethodForm({ method }: { method: any | null }) {
 /** Amount-based deposit handles. Each row: "up to $X → handle". A deposit uses the
  *  first row whose ceiling is >= the amount; blank ceiling = "everything above".
  *  Serializes to a hidden input (cents) that the form submits as handle_tiers. */
+type TierTarget = 'handle' | 'peerpay' | 'stripe' | 'staff';
+type TierRow = { up_to: string; target: TierTarget; handle: string; backupKind: 'handle' | 'staff'; backup: string };
+
+function tierFromInitial(t: { up_to: number | null; handle: string; backup?: string }): TierRow {
+  const target: TierTarget =
+    t.handle === 'PEERPAY' ? 'peerpay' : t.handle === 'STRIPE' ? 'stripe' : t.handle === 'STAFF' ? 'staff' : 'handle';
+  return {
+    up_to: t.up_to == null ? '' : String(t.up_to / 100),
+    target,
+    handle: target === 'handle' ? (t.handle ?? '') : '',
+    backupKind: t.backup === 'STAFF' ? 'staff' : 'handle',
+    backup: t.backup && t.backup !== 'STAFF' ? t.backup : '',
+  };
+}
+
 function TiersEditor({ initial }: { initial: Array<{ up_to: number | null; handle: string; backup?: string }> | null }) {
-  const [tiers, setTiers] = useState<{ up_to: string; handle: string; peerpay: boolean; backup: string }[]>(
-    (initial ?? []).map((t) => ({
-      up_to: t.up_to == null ? '' : String(t.up_to / 100),
-      handle: t.handle === 'PEERPAY' ? '' : (t.handle ?? ''),
-      peerpay: t.handle === 'PEERPAY',
-      backup: t.backup ?? '',
-    })),
-  );
-  const set = (i: number, patch: Partial<(typeof tiers)[number]>) =>
+  const [tiers, setTiers] = useState<TierRow[]>((initial ?? []).map(tierFromInitial));
+
+  const set = (i: number, patch: Partial<TierRow>) =>
     setTiers((ts) => ts.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+
   const serialized = JSON.stringify(
     tiers
-      .filter((t) => (t.peerpay ? true : t.handle.trim()))
-      .map((t) => ({
-        up_to: t.up_to.trim() === '' ? null : Math.round(parseFloat(t.up_to) * 100),
-        handle: t.peerpay ? 'PEERPAY' : t.handle.trim(),
-        ...(t.peerpay && t.backup.trim() ? { backup: t.backup.trim() } : {}),
-      })),
+      .filter((t) => (t.target === 'handle' ? t.handle.trim() : true))
+      .map((t) => {
+        const up_to = t.up_to.trim() === '' ? null : Math.round(parseFloat(t.up_to) * 100);
+        if (t.target === 'peerpay') {
+          const backup = t.backupKind === 'staff' ? 'STAFF' : t.backup.trim();
+          return { up_to, handle: 'PEERPAY', ...(backup ? { backup } : {}) };
+        }
+        if (t.target === 'stripe') return { up_to, handle: 'STRIPE' };
+        if (t.target === 'staff') return { up_to, handle: 'STAFF' };
+        return { up_to, handle: t.handle.trim() };
+      }),
   );
+
   return (
     <div className="field">
       <label>Amount-based deposit handles (optional)</label>
       <div className="field-hint">
-        Route the deposit handle by amount — e.g. <em>Up to $300 → @dvbdvb77</em>, then a row with a
-        blank amount → your business tag (or <em>PeerPay</em>) for everything above. A deposit uses the
-        first row whose limit is ≥ the amount. Leave empty to always use the single club account above.
+        Route the deposit by amount — e.g. <em>Up to $300 → @dvbdvb77</em>, then a blank-amount row for
+        everything above. A deposit uses the first row whose limit is ≥ the amount. Targets:
+        <em> Handle</em> (a tag/address), <em>PeerPay</em>, <em>Stripe</em> (card / Apple Pay link), or
+        <em> Staff Provide</em> (a staff member sends the player a handle from the admin group). Leave
+        empty to always use the single club account above.
       </div>
       {tiers.map((t, i) => (
         <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>Up to $</span>
-          <input value={t.up_to} onChange={(e) => set(i, { up_to: e.target.value })} placeholder="no limit" style={{ width: 80 }} />
+          <input value={t.up_to} onChange={(e) => set(i, { up_to: e.target.value })} placeholder="no limit" style={{ width: 78 }} />
           <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>→</span>
-          <select value={t.peerpay ? 'peerpay' : 'handle'} onChange={(e) => set(i, { peerpay: e.target.value === 'peerpay' })} style={{ width: 100 }}>
+          <select value={t.target} onChange={(e) => set(i, { target: e.target.value as TierTarget })} style={{ width: 118 }}>
             <option value="handle">Handle</option>
             <option value="peerpay">PeerPay</option>
+            <option value="stripe">Stripe</option>
+            <option value="staff">Staff Provide</option>
           </select>
-          {t.peerpay ? (
-            <input value={t.backup} onChange={(e) => set(i, { backup: e.target.value })} placeholder="backup tag (if a rail is down)" style={{ flex: 1, minWidth: 160 }} />
-          ) : (
-            <input value={t.handle} onChange={(e) => set(i, { handle: e.target.value })} placeholder="@handle / address" style={{ flex: 1, minWidth: 160 }} />
+          {t.target === 'handle' && (
+            <input value={t.handle} onChange={(e) => set(i, { handle: e.target.value })} placeholder="@handle / address" style={{ flex: 1, minWidth: 150 }} />
+          )}
+          {t.target === 'peerpay' && (
+            <>
+              <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>backup:</span>
+              <select value={t.backupKind} onChange={(e) => set(i, { backupKind: e.target.value as 'handle' | 'staff' })} style={{ width: 110 }}>
+                <option value="handle">Handle/Link</option>
+                <option value="staff">Staff Provide</option>
+              </select>
+              {t.backupKind === 'handle' && (
+                <input value={t.backup} onChange={(e) => set(i, { backup: e.target.value })} placeholder="backup tag / link" style={{ flex: 1, minWidth: 120 }} />
+              )}
+            </>
           )}
           <button type="button" className="sm ghost danger" onClick={() => setTiers((ts) => ts.filter((_, j) => j !== i))}>✕</button>
         </div>
       ))}
-      <button type="button" className="sm" style={{ marginTop: 6 }} onClick={() => setTiers((ts) => [...ts, { up_to: '', handle: '', peerpay: false, backup: '' }])}>
+      <button type="button" className="sm" style={{ marginTop: 6 }}
+              onClick={() => setTiers((ts) => [...ts, { up_to: '', target: 'handle', handle: '', backupKind: 'handle', backup: '' }])}>
         + Add tier
       </button>
       <input type="hidden" name="handle_tiers" value={serialized} />
