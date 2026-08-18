@@ -19,6 +19,15 @@ import { editCardFor } from './notifier.js';
  * path" for money — just a second doorway to the one path.
  */
 
+/** Neutralise legacy-Markdown control chars (_ * ` [ ]) in an interpolated name or
+ *  free-text value. Without this, a Telegram name like "APT_Support2" (underscore)
+ *  breaks the message's Markdown parse, so editMessageText/Caption is rejected and
+ *  the card silently fails to advance — looking "stuck" for that admin only. */
+function md(s: string | null | undefined, fallback = 'admin'): string {
+  const cleaned = (s ?? '').replace(/[_*`[\]]/g, ' ').replace(/\s+/g, ' ').trim();
+  return cleaned || fallback;
+}
+
 async function adminFor(ctx: Ctx): Promise<{ id: string; role: string } | null> {
   const tg = ctx.from?.id;
   if (!tg) return null;
@@ -58,10 +67,10 @@ async function showLoaderStep(ctx: Ctx, orderId: string): Promise<void> {
   if (o.status === 'done') return void (await editCard(ctx, `✅ *Done* — ${money(Math.abs(o.delta), o.currency)} ${load ? 'added' : 'taken off'}.`));
   if (o.status === 'cancelled' || o.status === 'failed') return void (await editCard(ctx, `⚠️ *${o.status[0]!.toUpperCase() + o.status.slice(1)}* — ${money(Math.abs(o.delta), o.currency)} ${load ? 'add' : 'take-off'}.`));
 
-  const by = o.claimer ? `_Claimed by ${o.claimer}._ ` : '';
+  const by = o.claimer ? `_Claimed by ${md(o.claimer)}._ ` : '';
   await editCard(ctx,
     `🎰 *${load ? 'ADD' : 'TAKE OFF'} ${money(Math.abs(o.delta), o.currency)}*\n` +
-      `Player: *${o.player_name}*\nID: \`${o.platform_uid}\`\n\n${by}When done, tap the amount you actually ${load ? 'added' : 'took off'}:`,
+      `Player: *${md(o.player_name)}*\nID: \`${o.platform_uid}\`\n\n${by}When done, tap the amount you actually ${load ? 'added' : 'took off'}:`,
     load
       ? new InlineKeyboard().text(`✅ Done — added ${money(o.delta, o.currency)}`, `lo:done:${orderId}:${o.delta}`)
                             .text('❌ Failed', `lo:fail:${orderId}`)
@@ -84,7 +93,7 @@ export async function loaderDone(ctx: Ctx, orderId: string, actualDelta: number)
     throw err;
   }
   await ctx.answerCallbackQuery({ text: 'Done — saved.' });
-  await editCard(ctx, `✅ *Transaction completed by ${ctx.from?.first_name ?? 'admin'}*` +
+  await editCard(ctx, `✅ *Transaction completed by ${md(ctx.from?.first_name)}*` +
     (actualDelta === 0 ? ' — nothing was available' : ` — ${money(Math.abs(actualDelta))}`));
 }
 
@@ -127,7 +136,7 @@ export async function loaderFailConfirm(ctx: Ctx, orderId: string, reason: strin
     throw err;
   }
   await editCardFor(ctx.api, 'loader_order', orderId,
-    `❌ *Failed* · by ${ctx.from?.first_name ?? 'admin'}\n_${reason.trim()}_`);
+    `❌ *Failed* · by ${md(ctx.from?.first_name)}\n_${md(reason.trim(), '')}_`);
   await ctx.reply('❌ Marked failed — the player was told the reason.');
 }
 
@@ -182,7 +191,7 @@ export async function sbCreated(ctx: Ctx, playerId: string): Promise<void> {
     throw err;
   }
   await ctx.answerCallbackQuery({ text: 'Created — the player has been told.' });
-  await ctx.editMessageText(`✅ *Sportsbook account created* · by ${ctx.from?.first_name ?? 'admin'}`, { parse_mode: 'Markdown' });
+  await ctx.editMessageText(`✅ *Sportsbook account created* · by ${md(ctx.from?.first_name)}`, { parse_mode: 'Markdown' });
 }
 
 /** Admin taps "Credit" on a Stripe receipt → ask for the amount that was paid. */
@@ -208,7 +217,7 @@ export async function stripeCreditOk(ctx: Ctx, claimId: string): Promise<void> {
     throw err;
   }
   await ctx.answerCallbackQuery({ text: 'Credited — the player has been told.' });
-  await ctx.editMessageCaption({ caption: `✅ *Credited* · by ${ctx.from?.first_name ?? 'admin'}`, parse_mode: 'Markdown' }).catch(() => {});
+  await ctx.editMessageCaption({ caption: `✅ *Credited* · by ${md(ctx.from?.first_name)}`, parse_mode: 'Markdown' }).catch(() => {});
 }
 
 /** The admin's reply with the amount → credit the player through the normal path. */
@@ -321,7 +330,7 @@ export async function fillVerify(ctx: Ctx, fillId: string): Promise<void> {
  *  released — it reflects the loader order's real state and self-heals a stale card. */
 async function advanceToLoaderStep(ctx: Ctx, adminId: string, fillId: string): Promise<void> {
   const sql = db();
-  const who = ctx.from?.first_name ?? 'admin';
+  const who = md(ctx.from?.first_name);
   const [o] = await sql<{ id: string; delta: number; currency: string; player_name: string; platform_uid: string; status: string }[]>`
     select id, delta, currency, player_name, platform_uid, status from loader_orders
      where ref_type = 'fill' and ref_id = ${fillId} order by created_at desc limit 1`;
@@ -336,7 +345,7 @@ async function advanceToLoaderStep(ctx: Ctx, adminId: string, fillId: string): P
              where kind='loader.work' and ref_type='loader_order' and ref_id=${o.id} and status='pending'`;
   await editCard(ctx,
     `🎰 *ADD ${money(o.delta, o.currency)}* to their table\n` +
-      `Player: *${o.player_name}*\nID: \`${o.platform_uid}\`\n\n_Claimed by ${who}._ Add it on the platform, then:`,
+      `Player: *${md(o.player_name)}*\nID: \`${o.platform_uid}\`\n\n_Claimed by ${who}._ Add it on the platform, then:`,
     new InlineKeyboard()
       .text(`✅ Done — added ${money(o.delta, o.currency)}`, `lo:done:${o.id}:${o.delta}`)
       .text('❌ Failed', `lo:fail:${o.id}`),
@@ -355,5 +364,5 @@ export async function fillDiscard(ctx: Ctx, fillId: string): Promise<void> {
     throw err;
   }
   await ctx.answerCallbackQuery({ text: 'Payment discarded.' });
-  await editCard(ctx, `🗑 *Payment discarded* · by ${ctx.from?.first_name ?? 'admin'}`);
+  await editCard(ctx, `🗑 *Payment discarded* · by ${md(ctx.from?.first_name)}`);
 }

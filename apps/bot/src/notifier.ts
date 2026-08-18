@@ -3,6 +3,10 @@ import { db, type Notification } from '@union/core';
 import type { Ctx } from './session.js';
 import { money } from './words.js';
 
+/** Neutralise legacy-Markdown control chars in an interpolated name, so a name like
+ *  "john_doe" (underscore) can't break a card's Markdown and stop it being sent. */
+const md = (s: unknown): string => String(s ?? '').replace(/[_*`[\]]/g, ' ').replace(/\s+/g, ' ').trim();
+
 /**
  * Drains the notifications outbox to Telegram.
  *
@@ -237,7 +241,7 @@ export function renderNotification(n: Notification): Rendered | null {
     case 'fill.receipt_admin': {
       const imgs: string[] = (Array.isArray(p.file_ids) && p.file_ids.length ? p.file_ids
         : Array.isArray(p.urls) ? p.urls : [p.file_id || p.url]).filter(Boolean);
-      const who = p.from_name ?? p.name;
+      const who = md(p.from_name ?? p.name);
       const tag = p.platform ? ` [${p.platform}]` : '';
       const text = `*🏦 Payment to verify — receipt${imgs.length > 1 ? 's' : ''} attached*\n\n` +
         `${who ? `From: *${who}*${tag}\n` : ''}` +
@@ -300,7 +304,7 @@ export function renderNotification(n: Notification): Rendered | null {
     case 'loader.work': {
       const load = Number(p.delta) > 0;
       const reload = p.reason === 'withdraw.cancel_reload';
-      const who = `${p.account ?? p.player_name}${p.platform ? ` [${p.platform}]` : ''}`;
+      const who = `${md(p.account ?? p.player_name)}${p.platform ? ` [${p.platform}]` : ''}`;
       return {
         text: reload
           ? `↩️ *Player cancelled a cash-out — re-load ${m(Math.abs(Number(p.delta)), p.currency)}*\n` +
@@ -333,7 +337,7 @@ export function renderNotification(n: Notification): Rendered | null {
       return { text: `👤 *New player* — ${p.name ?? (p.username ? '@'+p.username : p.telegram_id)}\nWaiting to add their account.` };
     case 'player.claim':
       return {
-        text: `👤 *${p.name}* wants to link ${p.platform}: \`${p.uid_claimed}\`` +
+        text: `👤 *${md(p.name)}* wants to link ${p.platform}: \`${p.uid_claimed}\`` +
           (p.username ? `\nUsername: \`${p.username}\`` : '') + `\n\n` +
           `Check the ID against the roster, then approve.`,
         keyboard: p.pp_id
@@ -341,14 +345,14 @@ export function renderNotification(n: Notification): Rendered | null {
           : undefined,
       };
     case 'player.needs_club':
-      return { text: `📍 *${p.name}* (${p.platform} ${p.uid}) is approved but not assigned to a club yet.` };
+      return { text: `📍 *${md(p.name)}* (${p.platform} ${p.uid}) is approved but not assigned to a club yet.` };
     case 'payment.detected': {
       // A clean source label. Stripe carries the exact method it detected
       // (Apple Pay / Cash App Pay / Link / Card …) in `method`.
       const src = p.source === 'paypal' ? 'PayPal'
         : p.source === 'cashapp' ? 'Cash App'
         : (p.method || (p.source === 'stripe' ? 'Card' : 'crypto'));
-      const who = p.name || 'someone';
+      const who = md(p.name) || 'someone';
       const amt = m(p.amount, p.currency);
       if (p.kind === 'request' || p.request) {
         return { text: `📨 *${who}* requested *${amt}* via *${src}*` };
@@ -407,7 +411,7 @@ export function renderNotification(n: Notification): Rendered | null {
     }
     case 'sportsbook.create':
       return {
-        text: `🆕 *Create a Sportsbook account*\n\nFor: *${p.name}*\n` +
+        text: `🆕 *Create a Sportsbook account*\n\nFor: *${md(p.name)}*\n` +
           `Username: \`${p.username}\`\nPassword: \`${p.password}\`\n\n` +
           `Create it on APT Sports with these exact details, then tap below — the player is told automatically.`,
         keyboard: new InlineKeyboard().text('✅ Account created', `sb:made:${p.player_id}`),
@@ -415,7 +419,7 @@ export function renderNotification(n: Notification): Rendered | null {
     case 'withdraw.needs_payout':
       return String(p.method).toLowerCase().includes('paypal')
         ? {
-            text: `💸 *PayPal cash-out — approve a request*\n\nFrom: *${p.name}*\nAmount: *${m(p.amount, p.currency)}*\n\n` +
+            text: `💸 *PayPal cash-out — approve a request*\n\nFrom: *${md(p.name)}*\nAmount: *${m(p.amount, p.currency)}*\n\n` +
               `They'll send a PayPal money request to your account for this amount. Approve & pay it, then tap below.`,
             keyboard: new InlineKeyboard().text('✅ I paid it', `wd:pay:${p.withdraw_id}`),
           }
@@ -423,13 +427,13 @@ export function renderNotification(n: Notification): Rendered | null {
             text: (p.small
               ? `🔹 *Small cash-out — pay it directly.*\nUnder the ${m(p.min, p.currency)} minimum, so no depositor will match it.\n\n`
               : '') +
-              `💸 *Cash-out to pay* (${p.method})\n\n${p.name ? 'To: *' + p.name + '*\n' : ''}` +
+              `💸 *Cash-out to pay* (${p.method})\n\n${p.name ? 'To: *' + md(p.name) + '*\n' : ''}` +
               `Amount: *${m(p.amount, p.currency)}*\nSend to: \`${p.handle}\` _(tap to copy)_\n\n` +
               `Pay it, then tap below and send the transaction ID.`,
             keyboard: new InlineKeyboard().text('✅ I paid it', `wd:pay:${p.withdraw_id}`),
           };
     case 'loader.delivery_failed':
-      return { text: `⚠️ *Couldn't add value* to ${p.player_name} (\`${p.platform_uid}\`)\n${m(p.delta, p.currency)}\n_${p.reason}_\n\nNeeds a human.` };
+      return { text: `⚠️ *Couldn't add value* to ${md(p.player_name)} (\`${p.platform_uid}\`)\n${m(p.delta, p.currency)}\n_${md(p.reason)}_\n\nNeeds a human.` };
     case 'loader.failed_player':
       return {
         text: Number(p.delta) > 0
