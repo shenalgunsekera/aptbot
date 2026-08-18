@@ -1,4 +1,4 @@
-export { renderNotification, sendRendered } from './notifier.js';
+export { renderNotification, sendRendered, editCardFor } from './notifier.js';
 import { Bot, session, GrammyError, HttpError } from 'grammy';
 import { db, closeDb } from '@union/core';
 import { type Ctx, type SessionData, initialSession } from './session.js';

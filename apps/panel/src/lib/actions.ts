@@ -137,10 +137,22 @@ export async function editPlayerFull(
 
 // ─── Payments (fills) ────────────────────────────────────────────────────────
 
+/** Best-effort: after a panel action, rewrite the matching Telegram admin card so
+ *  it doesn't sit stale with a live Verify/Claim button for something already done.
+ *  Never throws — a card-sync failure must not fail the money action. */
+async function syncCard(refType: string, refId: string, text: string): Promise<void> {
+  try {
+    const { getBot } = await import('./bot');
+    const { editCardFor } = await import('@union/bot/build');
+    await editCardFor((await getBot()).api, refType, refId, text);
+  } catch (err) { console.error('[panel] card sync failed:', err); }
+}
+
 export async function verifyPayment(fillId: string, note: string): Promise<Result> {
   return run(async () => {
     const s = await requireAdmin();
     await db()`select fill_admin_verify(${fillId}::uuid, ${s.admin.id}::uuid, ${note})`;
+    await syncCard('fill', fillId, '✅ *Verified in the panel* — money on its way.');
     return 'Verified and released.';
   }, ['/transactions', '/']);
 }
@@ -176,6 +188,7 @@ export async function claimJob(orderId: string): Promise<Result> {
   return run(async () => {
     const s = await requireAdmin();
     await db()`select loader_order_claim(${orderId}::uuid, ${s.admin.id}::uuid)`;
+    await syncCard('loader_order', orderId, '🎰 *Claimed in the panel* — being loaded.');
     return "Claimed — it's yours.";
   }, ['/jobs', '/']);
 }
@@ -184,6 +197,7 @@ export async function completeJob(orderId: string, actualDelta: number | null, n
   return run(async () => {
     const s = await requireAdmin();
     await db()`select loader_order_complete(${orderId}::uuid, ${s.admin.id}::uuid, ${actualDelta}::bigint, ${note})`;
+    await syncCard('loader_order', orderId, '✅ *Done* — loaded from the panel.');
     return 'Done.';
   }, ['/jobs', '/']);
 }
@@ -192,6 +206,7 @@ export async function failJob(orderId: string, reason: string): Promise<Result> 
   return run(async () => {
     const s = await requireAdmin();
     await db()`select loader_order_fail(${orderId}::uuid, ${s.admin.id}::uuid, ${reason})`;
+    await syncCard('loader_order', orderId, '❌ *Failed* — from the panel.');
     return 'Marked failed.';
   }, ['/jobs', '/']);
 }
