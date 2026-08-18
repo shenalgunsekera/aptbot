@@ -663,13 +663,23 @@ async function sendReceiptsToReviewer(fillId: string): Promise<void> {
   const [f] = await sql<{
     amount: number; currency: string; payment_ref: string | null;
     method: string; depositor_name: string | null; payout_handle: string | null; payout_name: string | null;
+    from_name: string | null; platform: string | null;
   }[]>`
     select f.amount, f.currency, f.payment_ref, pm.name as method,
-           f.payout_handle, f.payout_name, dp.display_name as depositor_name
+           f.payout_handle, f.payout_name, dp.display_name as depositor_name,
+           pf.name as platform,
+           -- The account this deposit funds: ClubGG username (not the numeric ID),
+           -- Sportsbook username, else the player's display name — never an ID.
+           coalesce(
+             case when pf.code = 'clubgg' then pp.platform_username else pp.platform_uid end,
+             dp.display_name
+           ) as from_name
       from fills f
       join payment_methods pm on pm.id = f.method_id
       left join deposit_requests d on d.id = f.deposit_id
       left join players dp on dp.id = d.player_id
+      left join platforms pf on pf.id = d.platform_id
+      left join player_platforms pp on pp.player_id = d.player_id and pp.platform_id = d.platform_id
      where f.id = ${fillId}`;
   if (!f) return;
 
@@ -685,6 +695,7 @@ async function sendReceiptsToReviewer(fillId: string): Promise<void> {
     fill_id: fillId, file_ids: fileIds, urls,
     amount: f.amount, currency: f.currency, payment_ref: f.payment_ref,
     method: f.method, name: f.depositor_name,
+    from_name: f.from_name ?? f.depositor_name, platform: f.platform,
     payout_handle: f.payout_handle, payout_name: f.payout_name,
   };
   await sql`select notify_admins('fill.receipt_admin', 'fill', ${fillId}::uuid, ${sql.json(payload)}::jsonb)`;

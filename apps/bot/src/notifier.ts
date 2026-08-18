@@ -237,8 +237,10 @@ export function renderNotification(n: Notification): Rendered | null {
     case 'fill.receipt_admin': {
       const imgs: string[] = (Array.isArray(p.file_ids) && p.file_ids.length ? p.file_ids
         : Array.isArray(p.urls) ? p.urls : [p.file_id || p.url]).filter(Boolean);
+      const who = p.from_name ?? p.name;
+      const tag = p.platform ? ` [${p.platform}]` : '';
       const text = `*🏦 Payment to verify — receipt${imgs.length > 1 ? 's' : ''} attached*\n\n` +
-        `${p.name ? 'From: *' + p.name + '*\n' : ''}` +
+        `${who ? `From: *${who}*${tag}\n` : ''}` +
         `Amount: *${m(p.amount, p.currency)}* (${p.method})` +
         (p.payout_handle ? `\nTo: \`${p.payout_handle}\`` : '') +
         (p.payout_name ? `\nName: *${p.payout_name}*` : '') +
@@ -298,12 +300,13 @@ export function renderNotification(n: Notification): Rendered | null {
     case 'loader.work': {
       const load = Number(p.delta) > 0;
       const reload = p.reason === 'withdraw.cancel_reload';
+      const who = `${p.account ?? p.player_name}${p.platform ? ` [${p.platform}]` : ''}`;
       return {
         text: reload
           ? `↩️ *Player cancelled a cash-out — re-load ${m(Math.abs(Number(p.delta)), p.currency)}*\n` +
-            `Player: *${p.player_name}*\nID: \`${p.platform_uid}\`\nClub: ${p.club}\n\nPut it back on their table, then mark done.`
+            `Player: *${who}*\nID: \`${p.platform_uid}\`\nClub: ${p.club}\n\nPut it back on their table, then mark done.`
           : `🎰 *${load ? 'ADD' : 'TAKE OFF'} ${m(Math.abs(Number(p.delta)), p.currency)}*\n` +
-            `Player: *${p.player_name}*\nID: \`${p.platform_uid}\`\nClub: ${p.club}\nReason: ${p.reason}`,
+            `Player: *${who}*\nID: \`${p.platform_uid}\`\nClub: ${p.club}\nReason: ${p.reason}`,
         keyboard: new InlineKeyboard().text('✋ Claim', `lo:claim:${n.ref_id}`),
       };
     }
