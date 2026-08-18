@@ -35,32 +35,40 @@ export async function loaderClaim(ctx: Ctx, orderId: string): Promise<void> {
   const sql = db();
   try {
     await sql`select loader_order_claim(${orderId}::uuid, ${admin.id}::uuid)`;
+    await ctx.answerCallbackQuery({ text: 'Claimed — it\'s yours.' });
   } catch (err) {
-    if (isUserError(err)) return void (await ctx.answerCallbackQuery({ text: userMessage(err), show_alert: true }));
-    throw err;
+    if (!isUserError(err)) throw err;
+    // Already claimed (in the panel, or by someone else) or already done — don't
+    // dead-end: tell them, then refresh the card to its real state so it stops
+    // looking stuck and the claimer/owner can finish it.
+    await ctx.answerCallbackQuery({ text: userMessage(err), show_alert: true });
   }
+  await showLoaderStep(ctx, orderId);
+}
 
-  const [o] = await sql<{ delta: number; currency: string; player_name: string; platform_uid: string }[]>`
-    select delta, currency, player_name, platform_uid from loader_orders where id = ${orderId}`;
+/** Render a loader order's current step onto the card: the Done/Failed action
+ *  (with who claimed it) while pending/claimed, or a done/closed summary. */
+async function showLoaderStep(ctx: Ctx, orderId: string): Promise<void> {
+  const sql = db();
+  const [o] = await sql<{ delta: number; currency: string; player_name: string; platform_uid: string; status: string; claimer: string | null }[]>`
+    select o.delta, o.currency, o.player_name, o.platform_uid, o.status, a.display_name as claimer
+      from loader_orders o left join admins a on a.id = o.claimed_by where o.id = ${orderId}`;
+  if (!o) return void (await editCard(ctx, '↩️ That task no longer exists.'));
   const load = o.delta > 0;
+  if (o.status === 'done') return void (await editCard(ctx, `✅ *Done* — ${money(Math.abs(o.delta), o.currency)} ${load ? 'added' : 'taken off'}.`));
+  if (o.status === 'cancelled' || o.status === 'failed') return void (await editCard(ctx, `⚠️ *${o.status[0]!.toUpperCase() + o.status.slice(1)}* — ${money(Math.abs(o.delta), o.currency)} ${load ? 'add' : 'take-off'}.`));
 
-  await ctx.answerCallbackQuery({ text: 'Claimed — it\'s yours.' });
-  await ctx.editMessageText(
+  const by = o.claimer ? `_Claimed by ${o.claimer}._ ` : '';
+  await editCard(ctx,
     `🎰 *${load ? 'ADD' : 'TAKE OFF'} ${money(Math.abs(o.delta), o.currency)}*\n` +
-      `Player: *${o.player_name}*\nID: \`${o.platform_uid}\`\n\n_Claimed by ${ctx.from?.first_name ?? 'admin'}._ ` +
-      `When done, tap the amount you actually ${load ? 'added' : 'took off'}:`,
-    {
-      parse_mode: 'Markdown',
-      reply_markup: load
-        // For a load, the amount is fixed (we owe it), so one Done button.
-        ? new InlineKeyboard().text(`✅ Done — added ${money(o.delta, o.currency)}`, `lo:done:${orderId}:${o.delta}`)
-                              .text('❌ Failed', `lo:fail:${orderId}`)
-        // For a take-off, the loader reports what was actually there.
-        : new InlineKeyboard()
-            .text(`✅ All ${money(-o.delta, o.currency)}`, `lo:done:${orderId}:${o.delta}`).row()
-            .text('✏️ Different amount', `lo:short:${orderId}`)
-            .text('❌ Nothing there', `lo:done:${orderId}:0`),
-    },
+      `Player: *${o.player_name}*\nID: \`${o.platform_uid}\`\n\n${by}When done, tap the amount you actually ${load ? 'added' : 'took off'}:`,
+    load
+      ? new InlineKeyboard().text(`✅ Done — added ${money(o.delta, o.currency)}`, `lo:done:${orderId}:${o.delta}`)
+                            .text('❌ Failed', `lo:fail:${orderId}`)
+      : new InlineKeyboard()
+          .text(`✅ All ${money(-o.delta, o.currency)}`, `lo:done:${orderId}:${o.delta}`).row()
+          .text('✏️ Different amount', `lo:short:${orderId}`)
+          .text('❌ Nothing there', `lo:done:${orderId}:0`),
   );
 }
 
