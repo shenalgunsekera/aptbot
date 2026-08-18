@@ -1,5 +1,3 @@
-import { createCheckout } from '@zkp2p/pay-sdk';
-
 /**
  * Mint a PeerPay (ZKP2P Pay) checkout link for a deposit. The player pays through
  * the returned URL (via Venmo / Cash App / …) and USDC settles to the merchant's
@@ -11,6 +9,12 @@ import { createCheckout } from '@zkp2p/pay-sdk';
  *
  * Returns the checkout URL, or null if PeerPay isn't configured or the call fails
  * — the caller then falls back to the backup tag.
+ *
+ * The SDK is imported LAZILY (inside the call) on purpose: @zkp2p/pay-sdk is
+ * ESM-only, and a top-level import made every module that pulls in @union/core
+ * (the panel's API routes, the Telegram bot) crash at load if the SDK failed to
+ * initialise in the serverless runtime. Loading it only when a PeerPay checkout is
+ * actually minted keeps auth, the bots, and everything else working regardless.
  */
 const API_BASE = 'https://api.pay.peer.xyz';
 const CHECKOUT_BASE = 'https://pay.peer.xyz';
@@ -34,6 +38,7 @@ export async function peerpayCheckout(opts: {
   const usdc = (opts.amountCents / 100).toFixed(2);
 
   try {
+    const { createCheckout } = await import('@zkp2p/pay-sdk');
     const r = await createCheckout(
       {
         requestedUsdcAmount: usdc,
