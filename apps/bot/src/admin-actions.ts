@@ -297,21 +297,33 @@ export async function fillVerify(ctx: Ctx, fillId: string): Promise<void> {
   const sql = db();
   try {
     await sql`select fill_admin_verify(${fillId}::uuid, ${admin.id}::uuid, 'verified via telegram')`;
+    await ctx.answerCallbackQuery({ text: 'Verified — money on its way.' });
   } catch (err) {
-    if (isUserError(err)) return void (await ctx.answerCallbackQuery({ text: userMessage(err), show_alert: true }));
-    throw err;
+    if (!isUserError(err)) throw err;
+    // Already released/handled — verified in the panel, by another admin, or this
+    // card went stale. Don't dead-end: tell them, then refresh the card to the
+    // step it's actually at (the loader task) so it stops looking stuck.
+    await ctx.answerCallbackQuery({ text: userMessage(err), show_alert: true });
   }
-  await ctx.answerCallbackQuery({ text: 'Verified — money on its way.' });
+  await advanceToLoaderStep(ctx, admin.id, fillId);
+}
 
+/** Turn the verify card into the loader "ADD to table" step (or a done/closed
+ *  summary). Safe to call whether we just released the fill or found it already
+ *  released — it reflects the loader order's real state and self-heals a stale card. */
+async function advanceToLoaderStep(ctx: Ctx, adminId: string, fillId: string): Promise<void> {
+  const sql = db();
   const who = ctx.from?.first_name ?? 'admin';
-  const [o] = await sql<{ id: string; delta: number; currency: string; player_name: string; platform_uid: string }[]>`
-    select id, delta, currency, player_name, platform_uid from loader_orders
+  const [o] = await sql<{ id: string; delta: number; currency: string; player_name: string; platform_uid: string; status: string }[]>`
+    select id, delta, currency, player_name, platform_uid, status from loader_orders
      where ref_type = 'fill' and ref_id = ${fillId} order by created_at desc limit 1`;
-  if (!o) { await editCard(ctx, `✅ *Verified & released* · by ${who}`); return; }
+  if (!o) return void (await editCard(ctx, `✅ *Verified & released* · by ${who}`));
+  if (o.status === 'done') return void (await editCard(ctx, `✅ *Verified & loaded* — ${money(o.delta, o.currency)} added to their table.`));
+  if (o.status === 'cancelled' || o.status === 'failed') return void (await editCard(ctx, `✅ *Verified* — loading was ${o.status}.`));
 
-  // Lock the loader task to this admin (mutex), and suppress the standalone
-  // loader card — this same message now IS the loader step.
-  try { await sql`select loader_order_claim(${o.id}::uuid, ${admin.id}::uuid)`; } catch { /* raced; fine */ }
+  // Lock the loader task to this admin (mutex, idempotent), and suppress the
+  // standalone loader card — this same message now IS the loader step.
+  try { await sql`select loader_order_claim(${o.id}::uuid, ${adminId}::uuid)`; } catch { /* raced; fine */ }
   await sql`update notifications set status='skipped'
              where kind='loader.work' and ref_type='loader_order' and ref_id=${o.id} and status='pending'`;
   await editCard(ctx,
