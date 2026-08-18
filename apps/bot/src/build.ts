@@ -56,6 +56,7 @@ export const PLAYER_COMMANDS = [
   { command: 'editwithdraw', description: 'Change how you get paid' },
   { command: 'support', description: 'Message our team' },
   { command: 'guide', description: 'What each command does' },
+  { command: 'stop', description: "Stop whatever you're in the middle of" },
 ];
 export const GROUP_COMMANDS = [
   ...PLAYER_COMMANDS,
@@ -82,7 +83,28 @@ export async function syncCommands(bot: Bot<Ctx>): Promise<void> {
  */
 export function buildBot(token: string): Bot<Ctx> {
   const bot = new Bot<Ctx>(token);
-  
+
+  // SAFETY NET — Markdown can never break a message, anywhere. If Telegram rejects
+  // any API call for a parse error (a name/handle with a stray _ * ` [ that slipped
+  // past sanitising), transparently resend it as PLAIN TEXT instead of failing. A
+  // card might briefly show a raw asterisk, but it ALWAYS sends/edits — no silent
+  // failure, no stuck card. Applies to every send + edit from this bot AND the
+  // panel's drain (both use buildBot).
+  bot.api.config.use(async (prev, method, payload, signal) => {
+    try {
+      return await prev(method, payload, signal);
+    } catch (err) {
+      const desc = String((err as { description?: string })?.description ?? (err as Error)?.message ?? '');
+      const p = payload as Record<string, unknown>;
+      if (/can'?t parse entities|can'?t find end/i.test(desc) && p && p.parse_mode) {
+        const { parse_mode: _pm, entities: _e, caption_entities: _ce, ...rest } = p;
+        void _pm; void _e; void _ce;
+        return await prev(method, rest as typeof payload, signal);
+      }
+      throw err;
+    }
+  });
+
   // Key sessions by USER, not chat: money commands are DM-only, but a per-user key
   // means a stray group message can never corrupt an in-flight flow.
   //
@@ -120,7 +142,9 @@ export function buildBot(token: string): Bot<Ctx> {
     if (await isAdminGroup(ctx)) return;
     await start(ctx);
   });
-  bot.command('cancel', async (ctx) => {
+  // /stop is the generic "get me out of whatever I'm doing". /cancel stays as a
+  // silent alias so anyone's old muscle-memory still works.
+  bot.command(['stop', 'cancel'], async (ctx) => {
     ctx.session.step = { name: 'idle' };
     await ctx.reply('Okay, stopped. 👍');
   });
@@ -143,7 +167,7 @@ export function buildBot(token: string): Bot<Ctx> {
         `💳 */editdeposit* — change which payment methods you deposit with.\n` +
         `🏦 */editwithdraw* — change which payment methods you cash-out with.\n\n` +
         `💬 */support* — message our team directly.\n` +
-        `🛑 */cancel* — stop whatever you're in the middle of.`,
+        `🛑 */stop* — stop whatever you're in the middle of.`,
       { parse_mode: 'Markdown' },
     ),
   );

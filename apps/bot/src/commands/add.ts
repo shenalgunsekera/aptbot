@@ -92,7 +92,7 @@ async function askAmount(ctx: Ctx, platformId: string, methodId: string): Promis
     `How much do you want to add to *${pf?.name}*?\n\n` +
       `Between ${whole(cfg.min_amount)} and ${whole(cfg.max_amount)}, in multiples of ` +
       `${whole(cfg.amount_step)}. ` +
-      `Just send the number, like \`20\` or \`50\`.\n\n/cancel to stop.`,
+      `Just send the number, like \`20\` or \`50\`.\n\n/stop to cancel.`,
     { parse_mode: 'Markdown' },
   );
 }
@@ -254,7 +254,8 @@ async function startStripeDeposit(ctx: Ctx, platformId: string, methodCode = 'st
       step1 +
       `(between ${whole(cfg.min_amount)} and ${whole(STRIPE_MAX_CENTS)}) and pay.\n\n` +
       `When you're done, come back here and *send a screenshot of the "Thanks for your payment" screen* ` +
-      `so we can confirm it and add your money.`,
+      `so we can confirm it and add your money.\n\n` +
+      `_Changed your mind? Just don't pay — nothing is charged until you do._`,
     { parse_mode: 'Markdown', reply_markup: new InlineKeyboard().url('💳 Pay now', STRIPE_LINK()) },
   );
 }
@@ -384,7 +385,8 @@ async function sendStaffProvideInstruction(ctx: Ctx, f: Fill, methodName: string
   await clearQuestion(ctx);
   await ctx.reply(
     `⏳ *Hold on a moment* — a staff member is getting you a payment handle for ` +
-      `*${money(f.amount, f.currency)}*. You'll get it right here shortly.`,
+      `*${money(f.amount, f.currency)}*. You'll get it right here shortly.\n\n` +
+      `_Changed your mind? /canceldeposit anytime before you pay._`,
     { parse_mode: 'Markdown' },
   );
 
@@ -663,11 +665,11 @@ async function sendReceiptsToReviewer(fillId: string): Promise<void> {
   const [f] = await sql<{
     amount: number; currency: string; payment_ref: string | null;
     method: string; depositor_name: string | null; payout_handle: string | null; payout_name: string | null;
-    from_name: string | null; platform: string | null;
+    from_name: string | null; platform: string | null; club: string | null;
   }[]>`
     select f.amount, f.currency, f.payment_ref, pm.name as method,
            f.payout_handle, f.payout_name, dp.display_name as depositor_name,
-           pf.name as platform,
+           pf.name as platform, c.name as club,
            -- The account this deposit funds: ClubGG username (not the numeric ID),
            -- Sportsbook username, else the player's display name — never an ID.
            coalesce(
@@ -680,6 +682,7 @@ async function sendReceiptsToReviewer(fillId: string): Promise<void> {
       left join players dp on dp.id = d.player_id
       left join platforms pf on pf.id = d.platform_id
       left join player_platforms pp on pp.player_id = d.player_id and pp.platform_id = d.platform_id
+      left join clubs c on c.id = pp.club_id
      where f.id = ${fillId}`;
   if (!f) return;
 
@@ -695,7 +698,7 @@ async function sendReceiptsToReviewer(fillId: string): Promise<void> {
     fill_id: fillId, file_ids: fileIds, urls,
     amount: f.amount, currency: f.currency, payment_ref: f.payment_ref,
     method: f.method, name: f.depositor_name,
-    from_name: f.from_name ?? f.depositor_name, platform: f.platform,
+    from_name: f.from_name ?? f.depositor_name, platform: f.platform, club: f.club,
     payout_handle: f.payout_handle, payout_name: f.payout_name,
   };
   await sql`select notify_admins('fill.receipt_admin', 'fill', ${fillId}::uuid, ${sql.json(payload)}::jsonb)`;

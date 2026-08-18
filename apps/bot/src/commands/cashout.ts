@@ -85,7 +85,7 @@ async function askAmount(ctx: Ctx, platform: Platform): Promise<void> {
     `How much do you want to cash-out from *${platform.name}*?\n\n` +
       `Between ${whole(cfg.min_amount)} and ${whole(cfg.max_amount)}, in multiples of ` +
       `${whole(cfg.amount_step)}. Send the number, like \`50\`. ` +
-      `We'll take that much off your table if it's there.\n\n/cancel to stop.`,
+      `We'll take that much off your table if it's there.\n\n/stop to cancel.`,
     { parse_mode: 'Markdown' },
   );
 }
@@ -253,7 +253,7 @@ export async function cashoutHandle(
     let ok = true;
     try { ok = new RegExp(m.handle_pattern).test(handle.trim()); } catch { ok = true; }
     if (!ok) {
-      await ctx.reply(`That doesn't look right for ${m.name}. Send it again, or /cancel.`);
+      await ctx.reply(`That doesn't look right for ${m.name}. Send it again, or /stop.`);
       return;
     }
   }

@@ -94,6 +94,13 @@ export class Notifier {
       }
       if (!chatId) { await sql`update notifications set status='skipped' where id=${n.id}`; continue; }
 
+      // Don't post a stale loader "Claim" card once a Verify tap already claimed
+      // the task inline (see the panel drain for the full note).
+      if (n.kind === 'loader.work') {
+        const [o] = await sql<{ status: string }[]>`select status from loader_orders where id = ${n.ref_id}`;
+        if (o && o.status !== 'pending') { await sql`update notifications set status='skipped' where id=${n.id}`; continue; }
+      }
+
       const msg = renderNotification(n);
       if (!msg) { await sql`update notifications set status='skipped' where id=${n.id}`; continue; }
 
@@ -242,7 +249,7 @@ export function renderNotification(n: Notification): Rendered | null {
       const imgs: string[] = (Array.isArray(p.file_ids) && p.file_ids.length ? p.file_ids
         : Array.isArray(p.urls) ? p.urls : [p.file_id || p.url]).filter(Boolean);
       const who = md(p.from_name ?? p.name);
-      const tag = p.platform ? ` [${p.platform}]` : '';
+      const tag = p.platform ? ` [${md(p.platform)}${p.club ? ' · ' + md(p.club) : ''}]` : '';
       const text = `*🏦 Payment to verify — receipt${imgs.length > 1 ? 's' : ''} attached*\n\n` +
         `${who ? `From: *${who}*${tag}\n` : ''}` +
         `Amount: *${m(p.amount, p.currency)}* (${p.method})` +

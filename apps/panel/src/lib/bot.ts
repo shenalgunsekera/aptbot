@@ -104,6 +104,14 @@ export async function drainNotifications(bot: BotT, limit = 25): Promise<number>
     const chatId = n.audience === 'admins'
       ? ((n.kind === 'payment.detected' ? cfg?.payments_channel_chat_id : null) ?? cfg?.admin_group_chat_id)
       : (cm?.player_chat ?? cm?.admin_tg);
+    // A loader "Claim" card is suppressed the instant a Verify tap claims the task
+    // inline. If a concurrent drain reached this row first, the task is no longer
+    // pending — don't post a stale, clickable Claim button (the "random Claim button
+    // after Verify" bug).
+    if (n.kind === 'loader.work') {
+      const [o] = await sql<{ status: string }[]>`select status from loader_orders where id = ${n.ref_id}`;
+      if (o && o.status !== 'pending') { await sql`update notifications set status='skipped' where id=${n.id}`; continue; }
+    }
     const msg = renderNotification(n);
     if (!chatId || !msg) { await sql`update notifications set status='skipped' where id=${n.id}`; continue; }
     try {
