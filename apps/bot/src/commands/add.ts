@@ -606,10 +606,26 @@ export async function addReceipt(ctx: Ctx, fillId: string): Promise<void> {
 export async function cancelDeposit(ctx: Ctx): Promise<void> {
   const p = await requireActive(ctx);
   if (!p) return;
-  const [d] = await db()<{ id: string }[]>`select id from deposit_cancel_latest(${p.id}::uuid)`;
+  const sql = db();
+  const [d] = await sql<{ id: string }[]>`select id from deposit_cancel_latest(${p.id}::uuid)`;
   ctx.session.step = { name: 'idle' };
   if (!d?.id) {
-    await ctx.reply("You don't have a deposit to cancel. (If you already sent a receipt, it's being checked — /support if you need help.)");
+    // Nothing un-paid to cancel — but if a receipt is already in, say THAT clearly
+    // instead of "you don't have a deposit". It can't be cancelled (the payment may
+    // have gone through); an admin verifies it.
+    const [chk] = await sql<{ amount: number; currency: string }[]>`
+      select amount, currency from deposit_requests
+       where player_id = ${p.id} and status = 'awaiting_confirmation'
+       order by created_at desc limit 1`;
+    if (chk) {
+      await ctx.reply(
+        `⏳ Your *${money(chk.amount, chk.currency)}* payment is being checked by our team — it can't be cancelled now. ` +
+          `You'll get a message here the moment it's confirmed. /support if you need help.`,
+        { parse_mode: 'Markdown' },
+      );
+      return;
+    }
+    await ctx.reply("You don't have a deposit to cancel. Start one anytime with /deposit.");
     return;
   }
   await ctx.reply('✅ Your deposit was cancelled. If you already sent the money, contact us with /support and we\'ll sort it out.');
