@@ -215,10 +215,13 @@ export async function sendRendered(bot: Bot<Ctx>, chatId: number, msg: Rendered)
  *  Takes an Api so both the notifier (bot.api) and handlers (ctx.api) can use it. */
 export async function editCardFor(
   api: Bot<Ctx>['api'], refType: string, refId: string, text: string, keyboard?: InlineKeyboard,
+  kind?: string,
 ): Promise<boolean> {
-  const [n] = await db()<{ sent_chat_id: string | null; sent_message_id: string | null }[]>`
+  const sql = db();
+  const [n] = await sql<{ sent_chat_id: string | null; sent_message_id: string | null }[]>`
     select sent_chat_id, sent_message_id from notifications
      where ref_type = ${refType} and ref_id = ${refId}::uuid and platform = 'telegram'
+       ${kind ? sql`and kind = ${kind}` : sql``}
        and status = 'sent' and sent_message_id is not null
      order by id desc limit 1`;
   if (!n?.sent_chat_id || !n.sent_message_id) return false;

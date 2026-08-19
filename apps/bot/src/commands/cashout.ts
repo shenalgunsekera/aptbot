@@ -409,6 +409,14 @@ async function doCancel(ctx: Ctx, withdrawId: string, amount: number): Promise<v
     throw err;
   }
 
+  // A small P2P (or club) cash-out may have a "pay it directly" admin card up.
+  // On a FULL cancel it's moot — neutralise it so no admin pays a cancelled one.
+  if (j.full) {
+    await editCardFor(ctx.api, 'withdraw_request', withdrawId,
+      '🚫 *Cancelled by the player — do not pay.* The chips are being put back on their table.',
+      undefined, 'withdraw.needs_payout').catch(() => {});
+  }
+
   if (j.scenario === 'pending_full') {
     await editCardFor(ctx.api, 'loader_order', j.order_id, '↩️ *Cash-out cancelled by the player* — nothing to take off.');
     return void (await ctx.reply('✅ Your cash-out was cancelled. Nothing was taken off your table.'));
@@ -567,6 +575,11 @@ export async function cashoutRetract(ctx: Ctx, withdrawId: string): Promise<void
     if (isUserError(err)) return void (await ctx.answerCallbackQuery({ text: userMessage(err), show_alert: true }));
     throw err;
   }
+
+  // Neutralise any "pay it directly" admin card — this cash-out is cancelled.
+  await editCardFor(ctx.api, 'withdraw_request', withdrawId,
+    '🚫 *Cancelled by the player — do not pay.* Anything that came off their table is being put back.',
+    undefined, 'withdraw.needs_payout').catch(() => {});
 
   // If money had already come off the player's table, an admin has to re-load it.
   // (pending_unload = nothing was taken yet, so no reimbursement needed.)
