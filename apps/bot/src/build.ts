@@ -18,7 +18,7 @@ import {
   addReceipt, addDone, stripeReceipt, cancelDeposit, peerpayBackup, handleStaffReply,
   staffProvided, staffWaitReceipt,
 } from './commands/add.js';
-import { adminAdd, adminRemove } from './commands/adjust.js';
+import { pauseWithdraw, resumeWithdraw, adjustCommand, adjustPayReply } from './commands/adjust.js';
 import {
   cashoutStart, cashoutPickPlatform, cashoutPickClub, cashoutAmount, cashoutPickMethod,
   cashoutSavedHandle, cashoutSavedMethod, cashoutHandle, cashoutRetract, cashoutCancel,
@@ -176,12 +176,13 @@ export function buildBot(token: string): Bot<Ctx> {
   );
 
   bot.command('deposit', dmOnly(addStart));
-  // /add and /remove are admin cash-out adjustments run in the player's own chat
-  // (auto-detected). For a non-admin, /add falls back to the deposit flow, so the
-  // player-facing meaning of /add is unchanged. NOT dmOnly — admins act in the
-  // chat where the issue is.
-  bot.command('add', adminAdd);
-  bot.command('remove', adminRemove);
+  // Admin cash-out controls, run in the chat the player talks to us in (the bot
+  // finds the player by that chat). NOT dmOnly — admins act where the issue is.
+  bot.command('pausewithdraw', pauseWithdraw);
+  bot.command('resumewithdraw', resumeWithdraw);
+  // /adjust +50  → grow the cash-out;  /adjust -50 (with a screenshot) → record a
+  // payment made. A photo-caption `/adjust -50` is handled in the photo handler.
+  bot.command('adjust', (ctx) => adjustCommand(ctx, typeof ctx.match === 'string' ? ctx.match : ''));
   bot.command('canceldeposit', dmOnly(cancelDeposit));
   bot.command(['withdraw', 'cashout'], dmOnly(cashoutStart));
   bot.command(['cancelwithdraw', 'cancelcashout'], dmOnly(cashoutCancel));
@@ -501,6 +502,16 @@ export function buildBot(token: string): Bot<Ctx> {
       if (!receiptId) return void (await ctx.reply("I couldn't read that image — try sending it again."));
       await withdrawPayConfirm(ctx, payId, receiptId, true);
       return;
+    }
+
+    // Admin recording a payment via /adjust: a photo captioned "/adjust -50", or a
+    // screenshot replying to the "/adjust -50" prompt. Runs before the group guard
+    // so it works in the player's own chat.
+    const photoId = ctx.message.photo?.at(-1)?.file_id ?? ctx.message.document?.file_id;
+    const adj = /^\/adjust(@\w+)?\s+(.+)/i.exec((ctx.message.caption ?? '').trim());
+    if (adj && photoId) { await adjustCommand(ctx, adj[2]!, photoId); return; }
+    if ((ctx.session as any)._adjustPay && photoId && /payment you sent/i.test(ctx.message.reply_to_message?.text ?? '')) {
+      await adjustPayReply(ctx, photoId); return;
     }
 
     if (await isAdminGroup(ctx)) return;
