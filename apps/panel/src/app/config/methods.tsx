@@ -29,6 +29,9 @@ export function MethodsEditor({ methods }: { methods: any[] }) {
                 <td>
                   <strong>{m.name}</strong>
                   <div className="mono" style={{ fontSize: 10, color: 'var(--text-faint)' }}>{m.code}</div>
+                  <span className={`badge ${m.settlement === 'p2p' ? 'ok' : 'muted'}`} style={{ marginTop: 2 }}>
+                    {m.settlement === 'p2p' ? '👥 P2P' : '🏦 club'}
+                  </span>
                 </td>
                 <td className="mono">{m.currency}</td>
                 <td>
@@ -152,6 +155,21 @@ function MethodForm({ method }: { method: any | null }) {
         <div className="field-hint">
           Get this right. Marking a chargeback-able method as irreversible removes the only
           defence you have against a depositor pulling their money back after taking the chips.
+        </div>
+      </div>
+
+      <div className="field">
+        <label htmlFor="settlement">Settlement</label>
+        <select id="settlement" name="settlement" defaultValue={method?.settlement ?? 'club'}>
+          <option value="p2p">Peer-to-peer — matched to a cash-out, exactly like Venmo &amp; Zelle.</option>
+          <option value="club">Company-settled — you pay / receive from your own account.</option>
+        </select>
+        <div className="field-hint">
+          <strong>Peer-to-peer</strong>: a deposit is matched to a waiting cash-out (FIFO) and the
+          depositor pays that player directly, using the amount tiers below. Set a club account /
+          backstop for when nobody is queued. <strong>Company-settled</strong>: every deposit goes to
+          your club account and each cash-out is paid by an admin. Turn this to <em>Peer-to-peer</em>
+          for Cash App or PayPal to make them behave just like Venmo.
         </div>
       </div>
 
