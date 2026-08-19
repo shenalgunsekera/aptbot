@@ -115,23 +115,27 @@ export async function addAmount(ctx: Ctx, platformId: string, methodId: string, 
   }
 
   // Route by tier (BEFORE creating a deposit for the Stripe path). A 'STRIPE' tier
-  // on any method — or the Stripe method's own default (anything that isn't a
-  // Staff/PeerPay tier) — diverts to the fixed card link. 'STAFF'/'PEERPAY' and
-  // real handles fall through to deposit_create + runMatch.
-  const [mrow] = await sql0<{ code: string }[]>`select code from payment_methods where id = ${methodId}`;
+  // on a CLUB method — or the Stripe method itself — diverts to the fixed card
+  // link. A P2P method (Venmo/Zelle, Cash App/PayPal when toggled) is NEVER
+  // pre-diverted here: it must reach deposit_match, which pays a queued cash-out
+  // first and only then falls to its backstop. 'STAFF'/'PEERPAY' and real handles
+  // fall through to deposit_create + runMatch.
+  const [mrow] = await sql0<{ code: string; settlement: string }[]>`select code, settlement from payment_methods where id = ${methodId}`;
   const code = mrow?.code ?? '';
-  const [tier] = await sql0<{ handle: string | null }[]>`
-    select club_handle_for(${methodId}::uuid, ${amount}::bigint) as handle`;
-  const h = tier?.handle;
-  if (h === 'STRIPE' || (code === 'stripe' && h !== 'STAFF' && h !== 'PEERPAY')) {
-    // The card/Apple Pay link caps at $500 — don't let someone enter more here, or
-    // they'd pay $500 but we'd have the larger figure they typed on file.
-    if (amount > STRIPE_MAX_CENTS) {
-      await ctx.reply(`The largest card / Apple Pay payment is *${whole(STRIPE_MAX_CENTS)}*. Enter a smaller amount, or use another method.`, { parse_mode: 'Markdown' });
+  if (mrow?.settlement !== 'p2p') {
+    const [tier] = await sql0<{ handle: string | null }[]>`
+      select club_handle_for(${methodId}::uuid, ${amount}::bigint) as handle`;
+    const h = tier?.handle;
+    if (h === 'STRIPE' || (code === 'stripe' && h !== 'STAFF' && h !== 'PEERPAY')) {
+      // The card/Apple Pay link caps at $500 — don't let someone enter more here, or
+      // they'd pay $500 but we'd have the larger figure they typed on file.
+      if (amount > STRIPE_MAX_CENTS) {
+        await ctx.reply(`The largest card / Apple Pay payment is *${whole(STRIPE_MAX_CENTS)}*. Enter a smaller amount, or use another method.`, { parse_mode: 'Markdown' });
+        return;
+      }
+      await startStripeDeposit(ctx, platformId, code, amount);
       return;
     }
-    await startStripeDeposit(ctx, platformId, code, amount);
-    return;
   }
 
   await runMatch(ctx, platformId, amount, methodId);
