@@ -86,13 +86,18 @@ export async function payments(ctx: Ctx): Promise<void> {
   ];
   for (const w of showable) {
     for (const pay of (w.payments ?? []) as any[]) {
-      if (!pay.receipt || seen.has(pay.receipt)) continue;
-      seen.add(pay.receipt);
-      try {
-        await ctx.replyWithPhoto(pay.receipt, {
-          caption: `Receipt ${pay.receipt_ref ?? ''} — ${money(pay.amount)}${pay.ref ? ` · ref ${pay.ref}` : ''}`,
-        });
-      } catch { /* a broken/expired image link shouldn't break the list */ }
+      // A payment can have up to two screenshots now — show every one.
+      const imgs: string[] = (Array.isArray(pay.receipts) && pay.receipts.length
+        ? pay.receipts : [pay.receipt]).filter((u: unknown): u is string => !!u);
+      for (const img of imgs) {
+        if (seen.has(img)) continue;
+        seen.add(img);
+        try {
+          await ctx.replyWithPhoto(img, {
+            caption: `Receipt ${pay.receipt_ref ?? ''} — ${money(pay.amount)}${pay.ref ? ` · ref ${pay.ref}` : ''}`,
+          });
+        } catch { /* a broken/expired image link shouldn't break the list */ }
+      }
     }
   }
 }

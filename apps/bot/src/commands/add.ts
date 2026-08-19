@@ -5,7 +5,7 @@ import {
 } from '@union/core';
 import type { Ctx } from '../session.js';
 import { requireActive } from '../player.js';
-import { money, whole, parseAmount, amountProblem, receiptInstruction, receiptCount } from '../words.js';
+import { money, whole, parseAmount, amountProblem, receiptInstruction } from '../words.js';
 import { resolvePlatform, platformKeyboard } from '../prefs.js';
 import { ask, clearQuestion } from '../ask.js';
 
@@ -520,6 +520,18 @@ export async function addReceipt(ctx: Ctx, fillId: string): Promise<void> {
     return;
   }
 
+  // A player may send up to TWO screenshots, together in one album. Telegram
+  // delivers an album as separate updates sharing a media_group_id. Cap at two:
+  // if we already have both, gently ignore extra frames (once, not per frame).
+  const mediaGroup = ctx.message?.media_group_id ?? null;
+  const [pre] = await sql<{ n: number }[]>`
+    select count(*)::int n from receipts where ref_type='fill' and ref_id=${fillId}`;
+  if ((pre?.n ?? 0) >= 2) {
+    ctx.session.step = { name: 'idle' };
+    if (!mediaGroup) await ctx.reply('✅ Got it — we already have your two screenshots.');
+    return;
+  }
+
   const [f] = await sql<{ deposit_id: string | null }[]>`
     select deposit_id from fills where id = ${fillId}`;
   const platformId = f?.deposit_id
@@ -564,21 +576,15 @@ export async function addReceipt(ctx: Ctx, fillId: string): Promise<void> {
     }
   }
 
-  // Auto-finalize once we have the images the method needs — no /done to tap.
-  const [meth] = await sql<{ code: string }[]>`
-    select pm.code from fills fl join payment_methods pm on pm.id = fl.method_id where fl.id = ${fillId}`;
-  const needed = receiptCount(meth?.code ?? '');
-  const [rc] = await sql<{ n: number }[]>`
-    select count(*)::int n from receipts where ref_type='fill' and ref_id=${fillId}`;
-  const have = rc?.n ?? 1;
+  // An album's second frame arrives as its own update, a moment later. Wait
+  // briefly so it lands and stores before we gather, then race to send — the
+  // atomic claim in sendReceiptsToReviewer guarantees exactly one card with
+  // BOTH images. A lone screenshot has no media_group_id and finalizes at once.
+  if (mediaGroup) await new Promise((r) => setTimeout(r, 2500));
 
-  if (have < needed) {
-    await ctx.reply(`✅ Got it. Now send the *other* image (the transaction ID).`, { parse_mode: 'Markdown' });
-    return;
-  }
-  await sendReceiptsToReviewer(fillId);
+  const sent = await sendReceiptsToReviewer(fillId);
   ctx.session.step = { name: 'idle' };
-  await ctx.reply(finishedMessage());
+  if (sent) await ctx.reply(finishedMessage());
 }
 
 /** /canceldeposit — drop the player's latest un-paid deposit. */
@@ -670,9 +676,19 @@ export async function addDone(ctx: Ctx, fillId: string): Promise<void> {
   await ctx.reply(finishedMessage());
 }
 
-/** Queue ALL of a fill's receipts to the admin group as one album + Verify. */
-async function sendReceiptsToReviewer(fillId: string): Promise<void> {
+/** Queue ALL of a fill's receipts to the admin group as one album + Verify.
+ *
+ * Sends EXACTLY ONCE: the two frames of a photo album arrive as two separate
+ * (possibly concurrent) bot updates, and /done can race them too. `receipts_sent_at`
+ * is claimed atomically here, so only the first caller ever posts the card — the
+ * rest see the claim is taken and no-op. Returns whether THIS call sent it. */
+async function sendReceiptsToReviewer(fillId: string): Promise<boolean> {
   const sql = db();
+  const [claim] = await sql<{ id: string }[]>`
+    update fills set receipts_sent_at = now()
+     where id = ${fillId} and receipts_sent_at is null
+     returning id`;
+  if (!claim) return false;   // an album partner or /done already sent it
   const [f] = await sql<{
     amount: number; currency: string; payment_ref: string | null;
     method: string; depositor_name: string | null; payout_handle: string | null; payout_name: string | null;
@@ -695,7 +711,7 @@ async function sendReceiptsToReviewer(fillId: string): Promise<void> {
       left join player_platforms pp on pp.player_id = d.player_id and pp.platform_id = d.platform_id
       left join clubs c on c.id = pp.club_id
      where f.id = ${fillId}`;
-  if (!f) return;
+  if (!f) return false;
 
   // Prefer Telegram file_ids (instant re-send, no re-upload); fall back to the
   // stored Firebase URLs.
@@ -713,6 +729,7 @@ async function sendReceiptsToReviewer(fillId: string): Promise<void> {
     payout_handle: f.payout_handle, payout_name: f.payout_name,
   };
   await sql`select notify_admins('fill.receipt_admin', 'fill', ${fillId}::uuid, ${sql.json(payload)}::jsonb)`;
+  return true;
 }
 
 function finishedMessage(): string {

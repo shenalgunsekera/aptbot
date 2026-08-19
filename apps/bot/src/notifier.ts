@@ -264,8 +264,16 @@ export function renderNotification(n: Notification): Rendered | null {
     }
     case 'fill.released':
       return { text: `✅ *${m(p.credit, p.currency)} is on its way to your table.*` };
-    case 'fill.settled':
-      return { text: `✅ *${m(p.amount, p.currency)} — that part of your cash-out is done.*` };
+    case 'fill.settled': {
+      // Show the payee the proof they were paid: the screenshot(s) the payer
+      // uploaded. Prefer Telegram file_ids (instant); fall back to public urls
+      // (e.g. the payer was on Discord). Text-only if there's no image.
+      const imgs: string[] = (Array.isArray(p.file_ids) && p.file_ids.length ? p.file_ids
+        : Array.isArray(p.urls) ? p.urls : []).filter(Boolean);
+      const text = `✅ *${m(p.amount, p.currency)} — that part of your cash-out is done.*` +
+        (imgs.length ? `\n\nHere ${imgs.length > 1 ? 'are the screenshots' : 'is the screenshot'} of your payment.` : '');
+      return imgs.length > 1 ? { photos: imgs, text } : imgs.length === 1 ? { photo: imgs[0], text } : { text };
+    }
     case 'fill.confirmed_pending_hold':
       return { text: `✅ Confirmed! Their money releases after a short hold.` };
     case 'fill.lock_expired':

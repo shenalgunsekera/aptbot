@@ -119,9 +119,13 @@ export default async function TransactionsPage({
                   <td className="mono" style={{ fontSize: 11 }}>{r.payment_ref ?? '—'}</td>
                   <td>
                     {(r.receipts ?? []).length > 0
-                      ? <a href={r.receipts[0].url} target="_blank" rel="noreferrer">
-                          <img src={r.receipts[0].url} alt="receipt" className="receipt-thumb" />
-                        </a>
+                      ? <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                          {(r.receipts as { url: string }[]).filter((x) => x?.url).map((rc, idx) => (
+                            <a key={idx} href={rc.url} target="_blank" rel="noreferrer">
+                              <img src={rc.url} alt={`receipt ${idx + 1}`} className="receipt-thumb" />
+                            </a>
+                          ))}
+                        </div>
                       : <span className="badge muted">none</span>}
                   </td>
                   <td>
