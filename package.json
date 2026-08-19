@@ -16,6 +16,7 @@
     "db:psql": "docker compose exec -T db psql -U union -d union",
     "_comment_test": "--test-concurrency=1 is required: the test files share one database and each resets it, so running files in parallel makes them truncate each other mid-test.",
     "test:db": "node --test --test-concurrency=1 db/tests/ledger.test.mjs db/tests/concurrency.test.mjs",
+    "smoke": "node scripts/smoke-money.mjs",
     "demo:p2p": "node scripts/demo-p2p.mjs",
     "demo:auto": "tsx scripts/demo-autoloader.mjs",
     "typecheck": "pnpm -r typecheck",
