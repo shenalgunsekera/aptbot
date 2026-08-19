@@ -563,8 +563,9 @@ export async function addReceipt(ctx: Ctx, fillId: string): Promise<void> {
     return;
   }
 
-  // Submit proof for every locked slice on the first receipt (p_notify=false — we
-  // send the album ourselves once all needed images are in).
+  // Submit proof for every locked slice (p_notify=false — we send the receipts to
+  // the admins ourselves once the player is done). Idempotent: it only touches
+  // still-locked slices, so a second album frame re-calling it is a no-op.
   const locked = await sql<{ id: string }[]>`
     select id from fills where deposit_id = ${f!.deposit_id} and status = 'locked' order by seq`;
   if (locked.length) {
@@ -576,11 +577,19 @@ export async function addReceipt(ctx: Ctx, fillId: string): Promise<void> {
     }
   }
 
-  // An album's second frame arrives as its own update, a moment later. Wait
-  // briefly so it lands and stores before we gather, then race to send — the
-  // atomic claim in sendReceiptsToReviewer guarantees exactly one card with
-  // BOTH images. A lone screenshot has no media_group_id and finalizes at once.
-  if (mediaGroup) await new Promise((r) => setTimeout(r, 2500));
+  // WHY WE MUST NOT FINALIZE ON AN ALBUM'S FIRST FRAME.
+  // Two screenshots sent together are ONE album = two separate Telegram updates.
+  // On the production webhook, Telegram delivers the SECOND update only after the
+  // first returns — so if the first frame sent the admin card and reset the step,
+  // the second would land on an idle session and be dropped (exactly the "only one
+  // shows" bug). So: a lone photo (no media_group_id) finalizes at once; an album
+  // waits, keeping the step alive, and finalizes when its second frame makes two.
+  // sendReceiptsToReviewer claims atomically, so a concurrent delivery (both frames
+  // at once) still yields exactly one card with both images.
+  const [rc] = await sql<{ n: number }[]>`
+    select count(*)::int n from receipts where ref_type='fill' and ref_id=${fillId}`;
+  const have = rc?.n ?? 1;
+  if (mediaGroup && have < 2) return;   // album's first frame — keep collecting, keep the step
 
   const sent = await sendReceiptsToReviewer(fillId);
   ctx.session.step = { name: 'idle' };
