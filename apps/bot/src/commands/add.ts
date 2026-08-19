@@ -337,11 +337,12 @@ async function sendPeerpayInstruction(ctx: Ctx, f: Fill, m: PaymentMethod): Prom
     return;
   }
 
+  const [pcfg] = await db()<{ match_timeout_seconds: number }[]>`select match_timeout_seconds from config where id`;
   const kb = new InlineKeyboard()
     .url('💳 Pay now', url).row()
     .text(`⚠️ ${m.name} not available?`, `pp:backup:${f.id}`);
   await ctx.reply(
-    `*💸 Pay ${money(f.amount, f.currency)} — you have a few minutes*\n\n` +
+    `*💸 Pay ${money(f.amount, f.currency)} — you have ${windowLabel(pcfg?.match_timeout_seconds ?? 300)}*\n\n` +
       `1. Tap *Pay now*.\n` +
       `2. Choose *${m.name}* on the page and send the payment.\n` +
       `3. Come back and *send a screenshot of the confirmation* here so we can add your money.\n\n` +

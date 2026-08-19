@@ -32,8 +32,8 @@ export function ConfigForm({ cfg }: { cfg: any }) {
       <div className="grid cols-2">
         <div className="card">
           <h2 style={{ marginTop: 0 }}>Matching</h2>
-          <Field name="match_timeout_seconds" label="Match timeout (seconds)" def={cfg.match_timeout_seconds}
-                 hint="How long a depositor holds a revealed handle before the slice returns to the front of the queue. Spec default 1800 (30 min)." />
+          <Field name="match_timeout_seconds" label="Payment window / match timeout (seconds)" def={cfg.match_timeout_seconds}
+                 hint="The payment window: how long a depositor has to pay before the slice returns to the queue. This exact time is what the bot shows players (“you have N minutes”) and what the Payments countdown uses — change it here and everything follows. Spec default 1800 (30 min)." />
           <Field name="handle_reveals_per_hour" label="Handle reveals per hour, per player" def={cfg.handle_reveals_per_hour}
                  hint="Stops someone opening deposits in a loop just to harvest everyone's payout handles." />
           <Field name="max_open_deposits_per_player" label="Max open deposits per player" def={cfg.max_open_deposits_per_player} />
