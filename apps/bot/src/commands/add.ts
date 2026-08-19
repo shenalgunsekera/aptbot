@@ -396,11 +396,22 @@ async function sendStaffProvideInstruction(ctx: Ctx, f: Fill, methodName: string
     await ctx.reply("We couldn't reach a staff member right now. Please /support and we'll help you pay.");
     return;
   }
-  const [pl] = await sql<{ name: string | null }[]>`
-    select dp.display_name as name from deposit_requests d join players dp on dp.id = d.player_id where d.id = ${f.deposit_id}`;
-  const playerName = pl?.name ?? 'A player';
+  // Identify the depositor by their platform ACCOUNT, same as the verify card:
+  // ClubGG username (not the numeric ID) or Sportsbook username, plus the club.
+  const [pl] = await sql<{ from_name: string | null; platform: string | null; club: string | null }[]>`
+    select coalesce(case when pf.code = 'clubgg' then pp.platform_username else pp.platform_uid end, dp.display_name) as from_name,
+           pf.name as platform, c.name as club
+      from deposit_requests d
+      join players dp on dp.id = d.player_id
+      left join platforms pf on pf.id = d.platform_id
+      left join player_platforms pp on pp.player_id = d.player_id and pp.platform_id = d.platform_id
+      left join clubs c on c.id = pp.club_id
+     where d.id = ${f.deposit_id}`;
+  const who = pl?.from_name ?? 'A player';
+  const tag = pl?.platform ? ` [${pl.platform}${pl.club ? ' · ' + pl.club : ''}]` : '';
+  const playerName = `${who}${tag}`;
   const sent = await ctx.api.sendMessage(String(adminChat),
-    `🙋 *Payment handle needed*\n\n*${playerName}* wants to deposit *${money(f.amount, f.currency)}* via *${methodName}*.\n\n` +
+    `🙋 *Payment handle needed*\n\n*${who}*${tag} wants to deposit *${money(f.amount, f.currency)}* via *${methodName}*.\n\n` +
       `↩️ *Reply to this message* with the tag or link to send them.`,
     { parse_mode: 'Markdown' });
   await sql`
