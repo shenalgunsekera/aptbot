@@ -49,10 +49,13 @@ async function tronUsdt(address: string): Promise<void> {
 // extId = the dedup prefix (chain-specific); methodCode = which method's deposit
 // this matches. USDC is USDC regardless of chain, so several chains map to the
 // same method with different extId prefixes.
+// offset 100 (was 20): on a busy treasury address an incoming payment can fall
+// outside a short window — etherscan tokentx returns in+out mixed, so we read
+// deeper and filter to inbound client-side.
 async function evmToken(chainId: number, contract: string, extId: string, methodCode: string, address: string, label?: string): Promise<void> {
   const key = process.env.ETHERSCAN_API_KEY;
   if (!key) return;
-  const url = `https://api.etherscan.io/v2/api?chainid=${chainId}&module=account&action=tokentx&contractaddress=${contract}&address=${address}&page=1&offset=20&sort=desc&apikey=${key}`;
+  const url = `https://api.etherscan.io/v2/api?chainid=${chainId}&module=account&action=tokentx&contractaddress=${contract}&address=${address}&page=1&offset=100&sort=desc&apikey=${key}`;
   const res = await tfetch(url).then((r) => r.json());
   if (!Array.isArray(res?.result)) return;
   for (const t of res.result) {
@@ -134,17 +137,48 @@ async function getPrices(ids: string[]): Promise<Record<string, number>> {
   return out;
 }
 
-/** USDC lives at the SAME EVM address on every EVM chain, so watch the club's USDC
- *  address across the common ones — a player who sent USDC over Polygon/Arbitrum/
- *  Optimism/Ethereum to it used to go undetected (we only watched Base). Each is a
- *  distinct dedup prefix; all map to the usdc_base method (USDC ≈ $1 everywhere). */
-const USDC_CHAINS: [number, string, string, string][] = [
-  [8453,  '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', 'usdc_base',     'USDC (Base)'],
-  [1,     '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', 'usdc_erc20',    'USDC (Ethereum)'],
-  [137,   '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', 'usdc_polygon',  'USDC (Polygon)'],
-  [42161, '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', 'usdc_arbitrum', 'USDC (Arbitrum)'],
-  [10,    '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85', 'usdc_optimism', 'USDC (Optimism)'],
+// Stablecoins are fungible across tokens AND chains for a club: a sender may pay
+// USDC to the "USDT" address, or USDT on Polygon to the "USDC" address, etc. — and
+// the club owns every one of these addresses. So we watch BOTH USDT and USDC at
+// EVERY club EVM address, on every chain, and record each by its ACTUAL token
+// (USDT→usdt_erc20, USDC→usdc_base) so it matches the right deposit. Dedup is on
+// chain-tagged tx hash. This is what fixes "sent USDC to the USDT address".
+type EvmTok = { code: string; contract: string; sym: 'USDT' | 'USDC' };
+const EVM_STABLES: { chain: number; name: string; tokens: EvmTok[] }[] = [
+  { chain: 1, name: 'Ethereum', tokens: [
+    { code: 'usdt_erc20', contract: '0xdAC17F958D2ee523a2206206994597C13D831ec7', sym: 'USDT' },
+    { code: 'usdc_base',  contract: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', sym: 'USDC' },
+  ] },
+  { chain: 8453, name: 'Base', tokens: [
+    { code: 'usdc_base', contract: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', sym: 'USDC' },
+  ] },
+  { chain: 137, name: 'Polygon', tokens: [
+    { code: 'usdc_base',  contract: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', sym: 'USDC' },
+    { code: 'usdt_erc20', contract: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F', sym: 'USDT' },
+  ] },
+  { chain: 42161, name: 'Arbitrum', tokens: [
+    { code: 'usdc_base',  contract: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', sym: 'USDC' },
+    { code: 'usdt_erc20', contract: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9', sym: 'USDT' },
+  ] },
+  { chain: 10, name: 'Optimism', tokens: [
+    { code: 'usdc_base',  contract: '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85', sym: 'USDC' },
+    { code: 'usdt_erc20', contract: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58', sym: 'USDT' },
+  ] },
 ];
+
+/** Run tasks with bounded concurrency + a small stagger, to respect etherscan's
+ *  ~5 req/s free tier (a throttled poll just retries next cron — dedup is safe). */
+async function runLimited(tasks: (() => Promise<void>)[], limit = 3, stagger = 220): Promise<void> {
+  let i = 0;
+  const worker = async (): Promise<void> => {
+    while (i < tasks.length) {
+      const t = tasks[i++]!;
+      try { await t(); } catch { /* per-task caught already */ }
+      if (i < tasks.length) await new Promise((r) => setTimeout(r, stagger));
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker));
+}
 
 export async function detectCryptoPayments(): Promise<{ polled: number; disabled: string[] }> {
   const { db } = await import('@union/core');
@@ -153,31 +187,30 @@ export async function detectCryptoPayments(): Promise<{ polled: number; disabled
   const addr = new Map(methods.map((m) => [m.code, m.club_handle]));
 
   const jobs: Promise<unknown>[] = [];
-  // Methods that are enabled + have an address but CANNOT be watched because their
-  // chain API key is missing — surfaced so a silent misconfig becomes a loud alert.
   const disabled: string[] = [];
   const evmKey = !!process.env.ETHERSCAN_API_KEY;
 
-  // USDT tron — keyless (TronGrid). USDT/USDC on EVM chains — need ETHERSCAN_API_KEY.
+  // USDT tron — keyless (TronGrid).
   const usdtTron = addr.get('usdt_trc20');
   if (usdtTron) jobs.push(tronUsdt(usdtTron).catch((err) => console.error('[crypto] usdt_trc20 poll failed:', err)));
 
-  const usdtEvm = addr.get('usdt_erc20');
-  if (usdtEvm) {
-    if (evmKey) jobs.push(evmToken(1, '0xdAC17F958D2ee523a2206206994597C13D831ec7', 'usdt_erc20', 'usdt_erc20', usdtEvm).catch((err) => console.error('[crypto] usdt_erc20 poll failed:', err)));
-    else disabled.push('usdt_erc20');
-  }
-
-  const usdcAddr = addr.get('usdc_base');
-  if (usdcAddr) {
-    if (evmKey) for (const [chain, contract, extId, label] of USDC_CHAINS) {
-      jobs.push(evmToken(chain, contract, extId, 'usdc_base', usdcAddr, label).catch((err) => console.error(`[crypto] ${extId} poll failed:`, err)));
-    } else disabled.push('usdc_base');
+  // Every club EVM stablecoin address (dedup) × every chain × both tokens.
+  const evmAddrs = [...new Set([addr.get('usdt_erc20'), addr.get('usdc_base')].filter((a): a is string => !!a))];
+  if (evmAddrs.length) {
+    if (!evmKey) { if (addr.get('usdt_erc20')) disabled.push('usdt_erc20'); if (addr.get('usdc_base')) disabled.push('usdc_base'); }
+    else {
+      const evmTasks: (() => Promise<void>)[] = [];
+      for (const a of evmAddrs) for (const { chain, name, tokens } of EVM_STABLES) for (const tk of tokens) {
+        const ext = `${tk.code}_${chain}`;
+        evmTasks.push(() => evmToken(chain, tk.contract, ext, tk.code, a, `${tk.sym} (${name})`)
+          .catch((err) => console.error(`[crypto] ${ext} @ ${a.slice(0, 8)} poll failed:`, err)));
+      }
+      jobs.push(runLimited(evmTasks));
+    }
   }
 
   const active = Object.keys(PRICED).filter((code) => addr.get(code));
   if (active.length) {
-    // eth needs the etherscan key; btc/ltc/sol/xrp are keyless.
     if (!evmKey && addr.get('eth')) disabled.push('eth');
     let prices: Record<string, number> = {};
     try { prices = await getPrices(active.map((c) => PRICED[c]!.cg)); }
@@ -186,11 +219,11 @@ export async function detectCryptoPayments(): Promise<{ polled: number; disabled
       if (code === 'eth' && !evmKey) continue;
       const a = addr.get(code)!;
       const price = prices[PRICED[code]!.cg];
-      if (!price) continue;   // no price → skip this cycle rather than mis-match
+      if (!price) continue;
       jobs.push(PRICED[code]!.run(a, price).catch((err) => console.error(`[crypto] ${code} poll failed:`, err)));
     }
   }
 
   await Promise.allSettled(jobs);
-  return { polled: jobs.length, disabled };
+  return { polled: jobs.length, disabled: [...new Set(disabled)] };
 }
