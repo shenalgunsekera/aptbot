@@ -46,7 +46,10 @@ async function tronUsdt(address: string): Promise<void> {
   }
 }
 
-async function evmToken(chainId: number, contract: string, code: string, address: string, label?: string): Promise<void> {
+// extId = the dedup prefix (chain-specific); methodCode = which method's deposit
+// this matches. USDC is USDC regardless of chain, so several chains map to the
+// same method with different extId prefixes.
+async function evmToken(chainId: number, contract: string, extId: string, methodCode: string, address: string, label?: string): Promise<void> {
   const key = process.env.ETHERSCAN_API_KEY;
   if (!key) return;
   const url = `https://api.etherscan.io/v2/api?chainid=${chainId}&module=account&action=tokentx&contractaddress=${contract}&address=${address}&page=1&offset=20&sort=desc&apikey=${key}`;
@@ -55,7 +58,7 @@ async function evmToken(chainId: number, contract: string, code: string, address
   for (const t of res.result) {
     if ((t.to ?? '').toLowerCase() !== address.toLowerCase()) continue;
     const usd = Math.round(Number(t.value ?? 0) / 10 ** Number(t.tokenDecimal ?? 6) * 100);
-    await recordDetection({ source: 'crypto', externalId: `${code}:${t.hash}`, methodCode: code, amount: usd, currency: 'USD', raw: { hash: t.hash, ...(label ? { source_detail: label } : {}) } });
+    await recordDetection({ source: 'crypto', externalId: `${extId}:${t.hash}`, methodCode, amount: usd, currency: 'USD', raw: { hash: t.hash, ...(label ? { source_detail: label } : {}) } });
   }
 }
 
@@ -131,42 +134,56 @@ async function getPrices(ids: string[]): Promise<Record<string, number>> {
   return out;
 }
 
-export async function detectCryptoPayments(): Promise<number> {
+/** USDC lives at the SAME EVM address on every EVM chain, so watch the club's USDC
+ *  address across the common ones — a player who sent USDC over Polygon/Arbitrum/
+ *  Optimism/Ethereum to it used to go undetected (we only watched Base). Each is a
+ *  distinct dedup prefix; all map to the usdc_base method (USDC ≈ $1 everywhere). */
+const USDC_CHAINS: [number, string, string, string][] = [
+  [8453,  '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', 'usdc_base',     'USDC (Base)'],
+  [1,     '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', 'usdc_erc20',    'USDC (Ethereum)'],
+  [137,   '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', 'usdc_polygon',  'USDC (Polygon)'],
+  [42161, '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', 'usdc_arbitrum', 'USDC (Arbitrum)'],
+  [10,    '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85', 'usdc_optimism', 'USDC (Optimism)'],
+];
+
+export async function detectCryptoPayments(): Promise<{ polled: number; disabled: string[] }> {
   const { db } = await import('@union/core');
   const methods = await db()<{ code: string; club_handle: string | null }[]>`
     select code, club_handle from payment_methods where enabled and settlement = 'club'`;
   const addr = new Map(methods.map((m) => [m.code, m.club_handle]));
 
-  // Build every poll first, then run them all AT ONCE (allSettled) so one slow
-  // chain can't hold up the others — the whole sweep finishes in ~one call's time.
   const jobs: Promise<unknown>[] = [];
+  // Methods that are enabled + have an address but CANNOT be watched because their
+  // chain API key is missing — surfaced so a silent misconfig becomes a loud alert.
+  const disabled: string[] = [];
+  const evmKey = !!process.env.ETHERSCAN_API_KEY;
 
-  const stable: [string, (a: string) => Promise<void>][] = [
-    ['usdt_trc20', tronUsdt],
-    ['usdt_erc20', (a) => evmToken(1, '0xdAC17F958D2ee523a2206206994597C13D831ec7', 'usdt_erc20', a)],
-    ['usdc_base',  (a) => evmToken(8453, '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', 'usdc_base', a)],
-  ];
-  for (const [code, run] of stable) {
-    const a = addr.get(code);
-    if (a) jobs.push(run(a).catch((err) => console.error(`[crypto] ${code} poll failed:`, err)));
+  // USDT tron — keyless (TronGrid). USDT/USDC on EVM chains — need ETHERSCAN_API_KEY.
+  const usdtTron = addr.get('usdt_trc20');
+  if (usdtTron) jobs.push(tronUsdt(usdtTron).catch((err) => console.error('[crypto] usdt_trc20 poll failed:', err)));
+
+  const usdtEvm = addr.get('usdt_erc20');
+  if (usdtEvm) {
+    if (evmKey) jobs.push(evmToken(1, '0xdAC17F958D2ee523a2206206994597C13D831ec7', 'usdt_erc20', 'usdt_erc20', usdtEvm).catch((err) => console.error('[crypto] usdt_erc20 poll failed:', err)));
+    else disabled.push('usdt_erc20');
   }
 
-  // USDC on ETHEREUM mainnet (ERC-20). We were only watching USDC on Base, so a
-  // player who sent USDC over Ethereum to the club's USDC address went undetected.
-  // Watch ONLY the USDC address — polling the general ETH address here would pick
-  // up unrelated USDC treasury movements and spam the feed. Dedup is on the tx hash.
-  const USDC_ETH = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
   const usdcAddr = addr.get('usdc_base');
   if (usdcAddr) {
-    jobs.push(evmToken(1, USDC_ETH, 'usdc_erc20', usdcAddr, 'USDC (ERC-20)').catch((err) => console.error('[crypto] usdc_erc20 poll failed:', err)));
+    if (evmKey) for (const [chain, contract, extId, label] of USDC_CHAINS) {
+      jobs.push(evmToken(chain, contract, extId, 'usdc_base', usdcAddr, label).catch((err) => console.error(`[crypto] ${extId} poll failed:`, err)));
+    } else disabled.push('usdc_base');
   }
 
   const active = Object.keys(PRICED).filter((code) => addr.get(code));
   if (active.length) {
+    // eth needs the etherscan key; btc/ltc/sol/xrp are keyless.
+    if (!evmKey && addr.get('eth')) disabled.push('eth');
     let prices: Record<string, number> = {};
     try { prices = await getPrices(active.map((c) => PRICED[c]!.cg)); }
     catch (err) { console.error('[crypto] price fetch failed:', err); }
     for (const code of active) {
+      if (code === 'eth' && !evmKey) continue;
       const a = addr.get(code)!;
       const price = prices[PRICED[code]!.cg];
       if (!price) continue;   // no price → skip this cycle rather than mis-match
@@ -175,5 +192,5 @@ export async function detectCryptoPayments(): Promise<number> {
   }
 
   await Promise.allSettled(jobs);
-  return jobs.length;
+  return { polled: jobs.length, disabled };
 }

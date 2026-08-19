@@ -460,6 +460,10 @@ export function renderNotification(n: Notification): Rendered | null {
           };
     case 'loader.delivery_failed':
       return { text: `⚠️ *Couldn't add value* to ${md(p.player_name)} (\`${p.platform_uid}\`)\n${m(p.delta, p.currency)}\n_${md(p.reason)}_\n\nNeeds a human.` };
+    case 'crypto.detection_down':
+      return { text: `🚨 *Crypto auto-detection is OFF* for: ${(Array.isArray(p.methods) ? p.methods : []).join(', ') || 'some coins'}.\n\n` +
+        `The chain API key (\`ETHERSCAN_API_KEY\`) isn't set, so incoming USDC / USDT / ETH won't be picked up automatically. ` +
+        `Set it in the panel's Vercel env to switch detection back on. Until then, verify those deposits by hand.` };
     case 'loader.failed_player':
       return {
         text: Number(p.delta) > 0

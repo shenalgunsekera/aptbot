@@ -38,9 +38,15 @@ export async function GET(req: Request): Promise<Response> {
     // Poll stablecoin addresses for incoming payments (matched exactly by amount,
     // then queued as an admin heads-up). Best-effort — never break the cron.
     let cryptoPolled = 0;
+    let cryptoDisabled: string[] = [];
     try {
       const { detectCryptoPayments } = await import('../../../lib/crypto-watch');
-      cryptoPolled = await withTimeout(detectCryptoPayments(), 20000, 0);
+      const r = await withTimeout(detectCryptoPayments(), 20000, { polled: 0, disabled: [] as string[] });
+      cryptoPolled = r.polled;
+      cryptoDisabled = r.disabled;
+      // A crypto method is ENABLED but can't be watched (missing chain API key).
+      // Never let that stay silent — alert admins (at most once every 6h).
+      if (cryptoDisabled.length) await alertCryptoDown(cryptoDisabled);
     } catch (err) { console.error('[cron] crypto poll failed:', err); }
 
     // NOTE: PayPal / Cash App email detection is handled by the INSTANT push
@@ -62,11 +68,28 @@ export async function GET(req: Request): Promise<Response> {
     // one cron cycle.
     const webhookFixed = await ensureWebhook(bot, req);
 
-    return Response.json({ ok: true, ...swept, delivered, cryptoPolled, paypalSeen, emailBreakdown, emailConfigured, emailError, webhookFixed });
+    return Response.json({ ok: true, ...swept, delivered, cryptoPolled, cryptoDisabled, paypalSeen, emailBreakdown, emailConfigured, emailError, webhookFixed });
   } catch (err) {
     console.error('[cron] failed:', err);
     return Response.json({ ok: false, error: String(err) }, { status: 500 });
   }
+}
+
+/** Enabled crypto methods can't be watched (missing chain API key) → tell admins,
+ *  loudly, on BOTH platforms — but at most once every 6h so it doesn't spam. */
+async function alertCryptoDown(methods: string[]): Promise<void> {
+  try {
+    const sql = db();
+    const [recent] = await sql<{ x: number }[]>`
+      select 1 x from notifications
+       where kind = 'crypto.detection_down' and created_at > now() - interval '6 hours' limit 1`;
+    if (recent) return;
+    for (const platform of ['telegram', 'discord'] as const) {
+      await sql`insert into notifications (audience, kind, ref_type, ref_id, payload, platform)
+        values ('admins', 'crypto.detection_down', 'config', gen_random_uuid(),
+                ${sql.json({ methods })}::jsonb, ${platform})`;
+    }
+  } catch (err) { console.error('[cron] crypto-down alert failed:', err); }
 }
 
 async function ensureWebhook(bot: Awaited<ReturnType<typeof getBot>>, req: Request): Promise<boolean> {
