@@ -61,7 +61,8 @@ async function evmToken(chainId: number, contract: string, extId: string, method
   for (const t of res.result) {
     if ((t.to ?? '').toLowerCase() !== address.toLowerCase()) continue;
     const usd = Math.round(Number(t.value ?? 0) / 10 ** Number(t.tokenDecimal ?? 6) * 100);
-    await recordDetection({ source: 'crypto', externalId: `${extId}:${t.hash}`, methodCode, amount: usd, currency: 'USD', raw: { hash: t.hash, ...(label ? { source_detail: label } : {}) } });
+    const ts = Number(t.timeStamp) || undefined;   // epoch seconds — lets old txs stay silent on a re-scan
+    await recordDetection({ source: 'crypto', externalId: `${extId}:${t.hash}`, methodCode, amount: usd, currency: 'USD', raw: { hash: t.hash, ts, ...(label ? { source_detail: label } : {}) } });
   }
 }
 
