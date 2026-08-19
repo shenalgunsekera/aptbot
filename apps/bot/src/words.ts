@@ -121,7 +121,13 @@ export function receiptInstruction(code: string): string {
  *  to the player's handle; PayPal/Cash App the player requests from our handle. */
 export function cashoutConfirm(
   code: string, methodName: string, handle: string, amount: string, clubHandle?: string | null,
+  settlement?: string,
 ): string {
+  // Peer-to-peer methods (Venmo/Zelle, and Cash App/PayPal when toggled to P2P):
+  // the player's tag joins the queue and a depositor pays them directly.
+  if (settlement === 'p2p') {
+    return `✅ *Cash-out started!*\n\nYour ${methodName} \`${handle}\` has been added to the queue. You'll receive *${amount}* within 24 hours.`;
+  }
   const club = clubHandle ? '`' + clubHandle + '`' : 'our account';
   const copy = clubHandle ? ' _(tap to copy)_' : '';
   switch (code) {

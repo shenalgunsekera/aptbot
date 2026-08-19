@@ -274,7 +274,7 @@ export async function cashoutHandle(
   await clearQuestion(ctx);
 
   const amt = money(w.requested_amount, w.currency);
-  const body = cashoutConfirm(m?.code ?? '', m?.name ?? 'payment', w.payout_handle, amt, m?.club_handle);
+  const body = cashoutConfirm(m?.code ?? '', m?.name ?? 'payment', w.payout_handle, amt, m?.club_handle, m?.settlement);
   await ctx.reply(
     body,
     { parse_mode: 'Markdown' },
