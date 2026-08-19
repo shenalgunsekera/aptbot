@@ -87,19 +87,31 @@ export async function payments(ctx: Ctx): Promise<void> {
   for (const w of showable) {
     for (const pay of (w.payments ?? []) as any[]) {
       // A payment can have up to two screenshots now — show every one.
-      const imgs: string[] = (Array.isArray(pay.receipts) && pay.receipts.length
-        ? pay.receipts : [pay.receipt]).filter((u: unknown): u is string => !!u);
-      for (const img of imgs) {
-        if (seen.has(img)) continue;
-        seen.add(img);
+      for (const rc of receiptsOf(pay)) {
+        if (seen.has(rc.url)) continue;
+        seen.add(rc.url);
         try {
-          await ctx.replyWithPhoto(img, {
-            caption: `Receipt ${pay.receipt_ref ?? ''} — ${money(pay.amount)}${pay.ref ? ` · ref ${pay.ref}` : ''}`,
+          await ctx.replyWithPhoto(rc.url, {
+            caption: `Receipt ${rc.ref ?? ''} — ${money(pay.amount)}${pay.ref ? ` · ref ${pay.ref}` : ''}`,
           });
         } catch { /* a broken/expired image link shouldn't break the list */ }
       }
     }
   }
+}
+
+/** Every receipt on a payment as {url, ref}. Prefers the new `receipts` array
+ *  (all screenshots); falls back to the singular `receipt`/`receipt_ref`. */
+function receiptsOf(pay: any): { url: string; ref?: string }[] {
+  const list = Array.isArray(pay.receipts) && pay.receipts.length
+    ? pay.receipts.map((r: any) => (typeof r === 'string' ? { url: r } : r))
+    : (pay.receipt ? [{ url: pay.receipt, ref: pay.receipt_ref }] : []);
+  return list.filter((r: any) => r?.url);
+}
+
+/** Markdown links for ALL of a payment's receipts, each on its own line. */
+function receiptLinks(pay: any): string {
+  return receiptsOf(pay).map((r) => `\n     📄 [Receipt ${r.ref ?? ''}](${r.url})`).join('');
 }
 
 function renderCashout(w: any, brief = false): string {
@@ -113,10 +125,10 @@ function renderCashout(w: any, brief = false): string {
   if (pays.length && !brief) {
     for (const [i, pay] of pays.entries()) out.push(payLine(i, pay));
   } else if (pays.length && brief) {
-    // Brief: just the receipt links, still reachable.
-    const withReceipts = pays.filter((x) => x.receipt);
-    for (const [i, pay] of withReceipts.entries()) {
-      out.push(`  📄 [Receipt ${pay.receipt_ref ?? i + 1}](${pay.receipt}) — ${money(pay.amount)}`);
+    // Brief: just the receipt links (all of them), still reachable.
+    for (const pay of pays) {
+      const links = receiptLinks(pay);
+      if (links) out.push(`  💵 ${money(pay.amount)}${links}`);
     }
   }
   return out.join('\n') + '\n';
@@ -126,7 +138,7 @@ function renderDeposit(d: any, brief = false): string {
   const out: string[] = [`*${money(d.amount)}* via ${d.method} — _${friendlyStatus('deposit', d.status)}_`];
   const pays = (d.payments ?? []) as any[];
   for (const [i, pay] of pays.entries()) {
-    if (brief && !pay.receipt) continue;
+    if (brief && receiptsOf(pay).length === 0) continue;
     out.push(payLine(i, pay, pay.to));
   }
   return out.join('\n') + '\n';
@@ -138,7 +150,7 @@ function payLine(i: number, pay: any, to?: string): string {
     `  ${tick} Payment ${i + 1}: *${money(pay.amount)}*` +
     (to ? ` to \`${to}\`` : '') +
     (pay.ref ? ` — ref \`${pay.ref}\`` : '') +
-    (pay.receipt ? `\n     📄 [Receipt ${pay.receipt_ref ?? ''}](${pay.receipt})` : '')
+    receiptLinks(pay)
   );
 }
 
