@@ -281,6 +281,8 @@ export function renderNotification(n: Notification): Rendered | null {
       return { text: `✅ Confirmed! Their money releases after a short hold.` };
     case 'fill.lock_expired':
       return { text: `⏱ *Your payment timed out.*\n\nThe ${m(p.amount, p.currency)} went back in the queue — no proof arrived in time. If you already sent it, message us now.` };
+    case 'deposit.discarded':
+      return { text: `❌ *Your ${m(p.amount, p.currency)} payment couldn't be verified* and was discarded.\n\nIf you did send it, message us with /support. Otherwise you can start again with /deposit.` };
     case 'withdraw.queued':
       return {
         text: p.short
@@ -393,19 +395,17 @@ export function renderNotification(n: Notification): Rendered | null {
       return { text: `💸 Payment of ${approx}*${amt}* sent by *${who}* via *${src}*` };
     }
     case 'stripe.claim':
-      return p.amount
-        ? {
-            photo: p.file_id || p.url,
-            text: `🍎 *Card / Apple Pay receipt — from ${p.name ?? 'a player'}*\n\n` +
-              `Matched payment: *${m(p.amount, p.currency)}*. Check the receipt, then tap to credit.`,
-            keyboard: new InlineKeyboard().text(`✅ Verify & Credit ${m(p.amount, p.currency)}`, `st:ok:${p.claim_id}`),
-          }
-        : {
-            photo: p.file_id || p.url,
-            text: `🍎 *Card / Apple Pay receipt — from ${p.name ?? 'a player'}*\n\n` +
-              `We haven't matched a payment amount yet. Check the "Payment received" alert, then enter the amount.`,
-            keyboard: new InlineKeyboard().text('💵 Credit (enter amount)', `st:credit:${p.claim_id}`),
-          };
+      // Same shape as a P2P/club receipt: Verify or Discard. The amount is already
+      // on file (the player's, or the webhook's), so Verify is one tap.
+      return {
+        photo: p.file_id || p.url,
+        text: `🍎 *Card / Apple Pay receipt — from ${p.name ?? 'a player'}*\n\n` +
+          (p.amount ? `Amount: *${m(p.amount, p.currency)}*\n` : '') +
+          `Check it landed, then Verify — or Discard if it didn't.`,
+        keyboard: new InlineKeyboard()
+          .text(p.amount ? `✅ Verify & Credit ${m(p.amount, p.currency)}` : '✅ Verify', `st:ok:${p.claim_id}`)
+          .text('🗑 Discard', `st:discard:${p.claim_id}`),
+      };
     case 'withdraw.retracted':
       return {
         text: `↩️ *Cash-out cancelled by ${p.name ?? 'a player'}*\n\n` +

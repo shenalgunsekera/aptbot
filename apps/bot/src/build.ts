@@ -32,7 +32,7 @@ import { supportStart, relayInquiryToAdmins, maybeRelayAdminReply } from './comm
 import { setAdmin, approvePlayer } from './admin-mgmt.js';
 import {
   loaderClaim, loaderDone, loaderShort, loaderFail, loaderFailConfirm, fillVerify, fillDiscard, withdrawPayPrompt, withdrawPayConfirm,
-  stripeCreditPrompt, stripeCreditConfirm, stripeCreditOk,
+  stripeCreditPrompt, stripeCreditConfirm, stripeCreditOk, stripeDiscard,
   p2pStatus, p2pWait, p2pOn, p2pSetPrompt, p2pSetConfirm,
 } from './admin-actions.js';
 import { pgSessionStorage } from './session-store.js';
@@ -374,6 +374,7 @@ export function buildBot(token: string): Bot<Ctx> {
   bot.callbackQuery(/^p2p:wait:(.+)$/, (ctx) => p2pWait(ctx, ctx.match![1]!));
   bot.callbackQuery(/^p2p:on:(.+)$/, (ctx) => p2pOn(ctx, ctx.match![1]!));
   bot.callbackQuery(/^st:ok:(.+)$/, (ctx) => stripeCreditOk(ctx, ctx.match![1]!));
+  bot.callbackQuery(/^st:discard:(.+)$/, (ctx) => stripeDiscard(ctx, ctx.match![1]!));
   bot.callbackQuery(/^st:credit:(.+)$/, (ctx) => stripeCreditPrompt(ctx, ctx.match![1]!));
   bot.callbackQuery('noop', (ctx) => ctx.answerCallbackQuery({ text: 'Open the panel for full details.' }));
   
@@ -506,7 +507,7 @@ export function buildBot(token: string): Bot<Ctx> {
     const step = ctx.session.step;
   
     if (step.name === 'add:receipt') return void (await addReceipt(ctx, step.fillId));
-    if (step.name === 'add:stripe') return void (await stripeReceipt(ctx, step.platformId));
+    if (step.name === 'add:stripe') return void (await stripeReceipt(ctx, step.platformId, step.amount));
     if (step.name === 'add:staffwait') return void (await staffWaitReceipt(ctx, step.fillId));
   
     // A screenshot attached to an open dispute.

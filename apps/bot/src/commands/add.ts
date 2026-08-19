@@ -124,7 +124,7 @@ export async function addAmount(ctx: Ctx, platformId: string, methodId: string, 
     select club_handle_for(${methodId}::uuid, ${amount}::bigint) as handle`;
   const h = tier?.handle;
   if (h === 'STRIPE' || (code === 'stripe' && h !== 'STAFF' && h !== 'PEERPAY')) {
-    await startStripeDeposit(ctx, platformId, code);
+    await startStripeDeposit(ctx, platformId, code, amount);
     return;
   }
 
@@ -183,9 +183,9 @@ async function askAddMethod(ctx: Ctx, platformId: string): Promise<void> {
  *  method that HAS tiers (e.g. > $249 → Staff) — asks the amount here so the tier
  *  can route it. */
 async function addProceed(ctx: Ctx, platformId: string, method: PaymentMethod): Promise<void> {
-  const tiers = (method as { handle_tiers?: unknown }).handle_tiers;
-  const hasTiers = Array.isArray(tiers) && tiers.length > 0;
-  if (method.code === 'stripe' && !hasTiers) return void (await startStripeDeposit(ctx, platformId, 'stripe'));
+  // Every method — Stripe/card included — now asks the amount up front. The player
+  // pays that exact amount, so the admin gets a one-tap Verify / Discard card
+  // (same as Venmo), never a "type the amount" step.
   await askAmount(ctx, platformId, method.id);
 }
 
@@ -237,23 +237,21 @@ const STRIPE_LINK = () => process.env.STRIPE_PAYMENT_LINK ?? 'https://buy.stripe
 // global deposit max_amount.
 const STRIPE_MAX_CENTS = 50000;
 
-async function startStripeDeposit(ctx: Ctx, platformId: string, methodCode = 'stripe'): Promise<void> {
-  const [cfg] = await db()<{ min_amount: number; max_amount: number }[]>`
-    select min_amount, max_amount from config where id`;
-  ctx.session.step = { name: 'add:stripe', platformId };
+async function startStripeDeposit(ctx: Ctx, platformId: string, methodCode = 'stripe', amount?: number): Promise<void> {
+  ctx.session.step = { name: 'add:stripe', platformId, amount };
   await clearQuestion(ctx);
   // Same secure link for both, but tailor the wording: a Cash App deposit routed
   // here pays with Cash App Pay ON the page; a card/Apple Pay deposit doesn't.
   const isCashapp = methodCode === 'cashapp';
   const title = isCashapp ? '💵 *Pay with Cash App Pay*' : '💳 *Pay by Card or Apple Pay*';
+  const amt = amount ? `*${money(amount)}*` : 'the amount';
   const step1 = isCashapp
-    ? 'Tap below, choose *Cash App Pay* on the page, then *enter the amount you want to add* '
-    : 'Tap below, then on the page *enter the amount you want to add* ';
+    ? `Tap below, choose *Cash App Pay* on the page, and pay ${amt}.`
+    : `Tap below and pay ${amt} on the page.`;
   await ctx.reply(
     `${title}\n\n` +
       step1 +
-      `(between ${whole(cfg.min_amount)} and ${whole(STRIPE_MAX_CENTS)}) and pay.\n\n` +
-      `When you're done, come back here and *send a screenshot of the "Thanks for your payment" screen* ` +
+      `\n\nWhen you're done, come back here and *send a screenshot of the "Thanks for your payment" screen* ` +
       `so we can confirm it and add your money.\n\n` +
       `_Changed your mind? Just don't pay — nothing is charged until you do._`,
     { parse_mode: 'Markdown', reply_markup: new InlineKeyboard().url('💳 Pay now', STRIPE_LINK()) },
@@ -612,7 +610,7 @@ export async function cancelDeposit(ctx: Ctx): Promise<void> {
 /** Player sent a receipt for a Stripe (fixed-link) payment. Store it and alert
  *  the admins with the image + a Credit button — they enter the amount that
  *  arrived (which the payment heads-up already told them), and it's credited. */
-export async function stripeReceipt(ctx: Ctx, platformId: string): Promise<void> {
+export async function stripeReceipt(ctx: Ctx, platformId: string, amount?: number): Promise<void> {
   const sql = db();
   const p = await requireActive(ctx);
   if (!p) return;
@@ -643,13 +641,16 @@ export async function stripeReceipt(ctx: Ctx, platformId: string): Promise<void>
     console.error('stripe receipt upload failed:', err);
   }
 
-  // Pull in the amount from the matching webhook payment, so the admin can credit
-  // in one tap without typing it.
-  const [al] = await sql<{ amt: number | null }[]>`select stripe_claim_autolink(${claim!.id}::uuid) as amt`;
+  // Match the webhook payment if one arrived (it's the ACTUAL amount) — else fall
+  // back to the amount the player chose in the bot. Either way an amount is always
+  // on file, so the admin gets a one-tap Verify / Discard, never "enter amount".
+  await sql`select stripe_claim_autolink(${claim!.id}::uuid) as amt`;
+  await sql`update stripe_claims set amount = coalesce(amount, ${amount ?? null}::bigint) where id = ${claim!.id}`;
+  const [cur] = await sql<{ amount: number | null }[]>`select amount from stripe_claims where id = ${claim!.id}`;
 
   await sql`select notify_admins('stripe.claim', 'stripe_claim', ${claim!.id}::uuid, ${sql.json({
     claim_id: claim!.id, file_id: fileId, url, name: p.display_name,
-    amount: al?.amt ?? null, currency: 'USD',
+    amount: cur?.amount ?? null, currency: 'USD',
   })}::jsonb)`;
 
   ctx.session.step = { name: 'idle' };

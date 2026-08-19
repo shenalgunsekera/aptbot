@@ -33,7 +33,7 @@ export type Step =
   | { name: 'add:method'; platformId: string }
   | { name: 'add:amount'; platformId: string; methodId: string }
   | { name: 'add:receipt'; fillId: string }
-  | { name: 'add:stripe'; platformId: string }
+  | { name: 'add:stripe'; platformId: string; amount?: number }
   | { name: 'add:staffwait'; fillId: string }   // waiting for a staff member to send a handle
   // cash-out
   | { name: 'out:platform' }

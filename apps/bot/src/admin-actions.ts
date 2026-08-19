@@ -225,6 +225,22 @@ export async function stripeCreditOk(ctx: Ctx, claimId: string): Promise<void> {
   await ctx.editMessageCaption({ caption: `✅ *Credited* · by ${md(ctx.from?.first_name)}`, parse_mode: 'Markdown' }).catch(() => {});
 }
 
+/** 🗑 Discard a Stripe receipt — the payment didn't land. No credit, symmetric
+ *  with a P2P/club Discard. */
+export async function stripeDiscard(ctx: Ctx, claimId: string): Promise<void> {
+  const admin = await adminFor(ctx);
+  if (!admin) return void (await ctx.answerCallbackQuery({ text: 'Admins only.', show_alert: true }));
+  try {
+    await db()`select stripe_claim_discard(${claimId}::uuid, ${admin.id}::uuid)`;
+  } catch (err) {
+    if (isUserError(err)) return void (await ctx.answerCallbackQuery({ text: userMessage(err), show_alert: true }));
+    throw err;
+  }
+  await ctx.answerCallbackQuery({ text: 'Discarded.' });
+  await ctx.editMessageCaption({ caption: `🗑 *Discarded* · by ${md(ctx.from?.first_name)}`, parse_mode: 'Markdown' })
+    .catch(() => ctx.editMessageText(`🗑 *Discarded* · by ${md(ctx.from?.first_name)}`, { parse_mode: 'Markdown' }).catch(() => {}));
+}
+
 /** The admin's reply with the amount → credit the player through the normal path. */
 export async function stripeCreditConfirm(ctx: Ctx, claimId: string, amountText: string): Promise<void> {
   const admin = await adminFor(ctx);
