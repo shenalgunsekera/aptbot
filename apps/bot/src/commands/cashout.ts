@@ -440,11 +440,16 @@ async function doCancel(ctx: Ctx, withdrawId: string, amount: number): Promise<v
  * cash-out row (so created_at / queued_at, and therefore the queue spot, never
  * change). See withdraw_topup / withdraw_topup_apply (migration 0077).
  */
+// A live cash-out plus how much of it is ALREADY PAID (released fills). What's
+// still owed to the player is (amount - paid) — that's the number an add-on grows.
+type TopupOut = { id: string; amount: number | null; paid: number; currency: string; method: string };
+
 export async function addToWithdrawStart(ctx: Ctx): Promise<void> {
   const p = await requireActive(ctx);
   if (!p) return;
-  const outs = await db()<{ id: string; amount: number | null; amount_remaining: number; currency: string; method: string }[]>`
-    select w.id, w.amount, w.amount_remaining, w.currency, pm.name as method
+  const outs = await db()<TopupOut[]>`
+    select w.id, w.amount, w.currency, pm.name as method,
+           coalesce((select sum(f.amount) from fills f where f.withdraw_id = w.id and f.status = 'released'), 0) as paid
       from withdraw_requests w join payment_methods pm on pm.id = w.method_id
      where w.player_id = ${p.id} and w.status in ('queued','partially_filled')
        and w.cancel_requested_at is null
@@ -459,9 +464,10 @@ export async function addToWithdrawStart(ctx: Ctx): Promise<void> {
   if (outs.length === 1) return void (await askTopupAmount(ctx, outs[0]!));
   const kb = new InlineKeyboard();
   for (const o of outs) {
-    const label = o.amount_remaining < (o.amount ?? 0)
-      ? `${money(o.amount ?? 0, o.currency)} via ${o.method} (${money(o.amount_remaining, o.currency)} left)`
-      : `${money(o.amount ?? 0, o.currency)} via ${o.method}`;
+    const total = Number(o.amount ?? 0), paid = Number(o.paid);
+    const label = paid > 0
+      ? `${money(total, o.currency)} via ${o.method} (${money(total - paid, o.currency)} still to pay)`
+      : `${money(total, o.currency)} via ${o.method}`;
     kb.text(label, `wt:pick:${o.id}`).row();
   }
   await ctx.reply('Which cash-out do you want to add to?', { reply_markup: kb });
@@ -471,8 +477,9 @@ export async function addToWithdrawStart(ctx: Ctx): Promise<void> {
 export async function addToWithdrawPick(ctx: Ctx, withdrawId: string): Promise<void> {
   const p = await requireActive(ctx);
   if (!p) return;
-  const [w] = await db()<{ id: string; amount: number | null; amount_remaining: number; currency: string; method: string }[]>`
-    select w.id, w.amount, w.amount_remaining, w.currency, pm.name as method
+  const [w] = await db()<TopupOut[]>`
+    select w.id, w.amount, w.currency, pm.name as method,
+           coalesce((select sum(f.amount) from fills f where f.withdraw_id = w.id and f.status = 'released'), 0) as paid
       from withdraw_requests w join payment_methods pm on pm.id = w.method_id
      where w.id = ${withdrawId} and w.player_id = ${p.id}
        and w.status in ('queued','partially_filled') and w.cancel_requested_at is null`;
@@ -482,24 +489,24 @@ export async function addToWithdrawPick(ctx: Ctx, withdrawId: string): Promise<v
   await askTopupAmount(ctx, w);
 }
 
-async function askTopupAmount(
-  ctx: Ctx, w: { id: string; amount: number | null; amount_remaining: number; currency: string; method: string },
-): Promise<void> {
+async function askTopupAmount(ctx: Ctx, w: TopupOut): Promise<void> {
   const [cfg] = await db()<{ amount_step: number }[]>`select amount_step from config where id`;
   ctx.session.step = { name: 'out:topup_amount', withdrawId: w.id };
-  // Account for a partially-paid cash-out: show what's already on its way vs.
-  // what's still waiting, so "currently $40" doesn't read as if nothing was paid.
-  const total = w.amount ?? 0;
-  const paid = total - w.amount_remaining;
+  // Be accurate about a partially-PAID cash-out: what's already paid (released)
+  // vs. what's still owed. An add-on grows the "still to pay" — so $20 left + $20
+  // added = $40 still to pay.
+  const total = Number(w.amount ?? 0);
+  const paid = Number(w.paid);
+  const toPay = total - paid;
   const state = paid > 0
-    ? `Your ${w.method} cash-out is *${money(total, w.currency)}* — ` +
-      `*${money(paid, w.currency)}* already on its way, *${money(w.amount_remaining, w.currency)}* still waiting in the queue.`
-    : `Your ${w.method} cash-out is currently *${money(total, w.currency)}*.`;
+    ? `You have *${money(toPay, w.currency)}* still to be paid on your ${w.method} cash-out ` +
+      `(*${money(paid, w.currency)}* of the *${money(total, w.currency)}* is already paid).`
+    : `Your ${w.method} cash-out is currently *${money(total, w.currency)}*, all still to be paid.`;
   await ask(ctx,
     `${state}\n\n` +
-      `How much do you want to *add* to it? Send the number, like \`20\`, in multiples of ` +
-      `${whole(cfg.amount_step)}. We'll take that much more off your table and add it to this ` +
-      `same cash-out — you keep your place in line.\n\n/stop to cancel.`,
+      `How much do you want to *add*? Send the number, like \`20\`, in multiples of ${whole(cfg.amount_step)} — ` +
+      `it's added on top of what's still owed (so ${money(toPay, w.currency)} + $20 = ${money(toPay + 2000, w.currency)} still to pay). ` +
+      `We take it off your table and add it to this same cash-out, so you keep your place in line.\n\n/stop to cancel.`,
     { parse_mode: 'Markdown' },
   );
 }

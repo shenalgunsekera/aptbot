@@ -292,7 +292,7 @@ export function renderNotification(n: Notification): Rendered | null {
     case 'withdraw.completed':
       return { text: `🎉 *Cash-out complete!* ${m(p.amount, p.currency)} — all done.` };
     case 'withdraw.topup_applied':
-      return { text: `➕ *${m(p.added, p.currency)} was added to your cash-out* — it's now *${m(p.new_total, p.currency)}*.\nYou kept your place in line.` };
+      return { text: `➕ *${m(p.added, p.currency)} added to your cash-out* — you now have *${m(p.to_pay ?? p.new_total, p.currency)}* still to be paid.\nYou kept your place in line.` };
     case 'withdraw.topup_none':
       return { text: `We couldn't add to your cash-out — there was nothing extra to take off your table right now. Nothing changed.` };
     case 'withdraw.cancelled':
