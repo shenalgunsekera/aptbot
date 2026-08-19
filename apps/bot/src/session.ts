@@ -42,6 +42,7 @@ export type Step =
   | { name: 'out:method'; platformId: string; amount: number }
   | { name: 'out:handle'; platformId: string; amount: number; methodId: string }
   | { name: 'out:cancel_amount'; withdrawId: string }
+  | { name: 'out:topup_amount'; withdrawId: string }   // /addtowithdraw — how much to add
   | { name: 'dispute:reason'; fillId: string };
 
 /** Scratch state for the guided onboarding, held across steps. Durable (the

@@ -24,6 +24,7 @@ import {
   cashoutSavedHandle, cashoutSavedMethod, cashoutHandle, cashoutRetract, cashoutCancel,
   cashoutCancelPick, cashoutCancelFull, cashoutCancelPartPrompt, cashoutCancelAmount,
   cashoutReducePrompt, cashoutReduceConfirm,
+  addToWithdrawStart, addToWithdrawPick, addToWithdrawAmount,
 } from './commands/cashout.js';
 import { disputeReason } from './commands/confirm.js';
 import { payments } from './commands/payments.js';
@@ -48,6 +49,7 @@ export const PLAYER_COMMANDS = [
   { command: 'canceldeposit', description: 'Cancel your latest unpaid deposit' },
   { command: 'withdraw', description: 'Cash-out' },
   { command: 'cancelwithdraw', description: 'Cancel a cash-out that has not been paid' },
+  { command: 'addtowithdraw', description: 'Add more to a cash-out already in the queue' },
   { command: 'pending', description: 'Your pending cash-outs' },
   { command: 'payments', description: 'Completed payments & receipts' },
   { command: 'editplatform', description: 'Add or remove ClubGG / Sportsbook' },
@@ -159,6 +161,7 @@ export function buildBot(token: string): Bot<Ctx> {
         `✖️ */canceldeposit* — cancel your most recent deposit if you haven't paid yet.\n` +
         `💸 */withdraw* — cash-out. We take it off your table and pay you the way you've set up.\n` +
         `✖️ */cancelwithdraw* — cancel a cash-out that hasn't been paid yet.\n` +
+        `➕ */addtowithdraw* — add more to a cash-out already in the queue, keeping your place in line.\n` +
         `⏳ */pending* — see deposits and cash-outs still in progress, and cancel a cash-out if you need to.\n` +
         `📄 */payments* — your history of completed payments and receipts.\n\n` +
         `*Change your setup anytime:*\n` +
@@ -182,6 +185,7 @@ export function buildBot(token: string): Bot<Ctx> {
   bot.command('canceldeposit', dmOnly(cancelDeposit));
   bot.command(['withdraw', 'cashout'], dmOnly(cashoutStart));
   bot.command(['cancelwithdraw', 'cancelcashout'], dmOnly(cashoutCancel));
+  bot.command(['addtowithdraw', 'addtocashout'], dmOnly(addToWithdrawStart));
   bot.command(['pending', 'me'], dmOnly(me));
   bot.command(['payments', 'history', 'receipts'], dmOnly(payments));
   bot.command(['support', 'help_me', 'contact'], dmOnly(supportStart));
@@ -347,6 +351,7 @@ export function buildBot(token: string): Bot<Ctx> {
   bot.callbackQuery(/^wc:full:(.+)$/, (ctx) => cashoutCancelFull(ctx, ctx.match![1]!));
   bot.callbackQuery(/^wc:part:(.+)$/, (ctx) => cashoutCancelPartPrompt(ctx, ctx.match![1]!));
   bot.callbackQuery(/^wd:reduce:(.+)$/, (ctx) => cashoutReducePrompt(ctx, ctx.match![1]!));
+  bot.callbackQuery(/^wt:pick:(.+)$/, (ctx) => addToWithdrawPick(ctx, ctx.match![1]!));
   bot.callbackQuery(/^out:h:(.+)$/, async (ctx) => {
     const s = ctx.session.step;
     if (s.name !== 'out:handle') return void (await ctx.answerCallbackQuery({ text: 'That expired — /withdraw again.' }));
@@ -475,6 +480,7 @@ export function buildBot(token: string): Bot<Ctx> {
       case 'out:amount': return void (await cashoutAmount(ctx, step.platformId, text));
       case 'out:handle': return void (await cashoutHandle(ctx, step.platformId, step.amount, step.methodId, text));
       case 'out:cancel_amount': return void (await cashoutCancelAmount(ctx, step.withdrawId, text));
+      case 'out:topup_amount': return void (await addToWithdrawAmount(ctx, step.withdrawId, text));
       case 'dispute:reason': return void (await disputeReason(ctx, step.fillId, text));
       default:
         // Stray text when not in a flow: do NOT auto-relay every message (that

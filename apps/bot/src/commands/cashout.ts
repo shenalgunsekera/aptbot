@@ -432,6 +432,99 @@ async function doCancel(ctx: Ctx, withdrawId: string, amount: number): Promise<v
   );
 }
 
+// ─── /addtowithdraw — add to an existing, queued cash-out ────────────────────
+/**
+ * Increase a cash-out that's already waiting in the queue, WITHOUT losing the
+ * player's place in line. The extra is taken off the tables by a loader — the
+ * same "TAKE OFF" card admins already work — and then escrowed onto the SAME
+ * cash-out row (so created_at / queued_at, and therefore the queue spot, never
+ * change). See withdraw_topup / withdraw_topup_apply (migration 0077).
+ */
+export async function addToWithdrawStart(ctx: Ctx): Promise<void> {
+  const p = await requireActive(ctx);
+  if (!p) return;
+  const outs = await db()<{ id: string; amount: number | null; amount_remaining: number; currency: string; method: string }[]>`
+    select w.id, w.amount, w.amount_remaining, w.currency, pm.name as method
+      from withdraw_requests w join payment_methods pm on pm.id = w.method_id
+     where w.player_id = ${p.id} and w.status in ('queued','partially_filled')
+       and w.cancel_requested_at is null
+     order by w.created_at desc`;
+  if (!outs.length) {
+    await ctx.reply(
+      "You don't have a cash-out in the queue to add to. Start one with /withdraw " +
+        "(you can add to it once it's waiting to be paid).",
+    );
+    return;
+  }
+  if (outs.length === 1) return void (await askTopupAmount(ctx, outs[0]!));
+  const kb = new InlineKeyboard();
+  for (const o of outs) kb.text(`${money(o.amount ?? 0, o.currency)} via ${o.method}`, `wt:pick:${o.id}`).row();
+  await ctx.reply('Which cash-out do you want to add to?', { reply_markup: kb });
+}
+
+/** wt:pick — chose which cash-out to add to (multi case). */
+export async function addToWithdrawPick(ctx: Ctx, withdrawId: string): Promise<void> {
+  const p = await requireActive(ctx);
+  if (!p) return;
+  const [w] = await db()<{ id: string; amount: number | null; amount_remaining: number; currency: string; method: string }[]>`
+    select w.id, w.amount, w.amount_remaining, w.currency, pm.name as method
+      from withdraw_requests w join payment_methods pm on pm.id = w.method_id
+     where w.id = ${withdrawId} and w.player_id = ${p.id}
+       and w.status in ('queued','partially_filled') and w.cancel_requested_at is null`;
+  await ctx.answerCallbackQuery();
+  try { await ctx.editMessageReplyMarkup(); } catch { /* buttons already gone */ }
+  if (!w) return void (await ctx.reply('That cash-out can no longer be added to.'));
+  await askTopupAmount(ctx, w);
+}
+
+async function askTopupAmount(
+  ctx: Ctx, w: { id: string; amount: number | null; currency: string; method: string },
+): Promise<void> {
+  const [cfg] = await db()<{ amount_step: number }[]>`select amount_step from config where id`;
+  ctx.session.step = { name: 'out:topup_amount', withdrawId: w.id };
+  await ask(ctx,
+    `Your ${w.method} cash-out is currently *${money(w.amount ?? 0, w.currency)}*.\n\n` +
+      `How much do you want to *add* to it? Send the number, like \`20\`, in multiples of ` +
+      `${whole(cfg.amount_step)}. We'll take that much more off your table and add it to this ` +
+      `same cash-out — you keep your place in line.\n\n/stop to cancel.`,
+    { parse_mode: 'Markdown' },
+  );
+}
+
+export async function addToWithdrawAmount(ctx: Ctx, withdrawId: string, text: string): Promise<void> {
+  const p = await requireActive(ctx);
+  if (!p) return;
+  const amount = parseAmount(text);
+  if (amount === null || amount <= 0) {
+    return void (await ctx.reply("That doesn't look like an amount. Try `20`.", { parse_mode: 'Markdown' }));
+  }
+  const [cfg] = await db()<{ amount_step: number }[]>`select amount_step from config where id`;
+  if (cfg.amount_step > 0 && amount % cfg.amount_step !== 0) {
+    return void (await ctx.reply(`Please add in whole multiples of ${whole(cfg.amount_step)} — no cents.`));
+  }
+
+  try {
+    // The DB does the full check (still queued, not cancelling, one add-on at a
+    // time, method cap, daily cap) and raises the extra take-off card for admins.
+    await db()`select withdraw_topup(${withdrawId}::uuid, ${amount}::bigint)`;
+  } catch (err) {
+    ctx.session.step = { name: 'idle' };
+    if (isUserError(err)) return void (await ctx.reply(`❌ ${userMessage(err)}`));
+    console.error('withdraw_topup failed:', err);
+    await ctx.reply('Something went wrong. Nothing was taken from your account. Try again shortly.');
+    return;
+  }
+
+  ctx.session.step = { name: 'idle' };
+  await clearQuestion(ctx);
+  await ctx.reply(
+    `✅ *Got it — adding ${money(amount)} to your cash-out.*\n\n` +
+      `We're taking that much more off your table now. It joins this same cash-out, so ` +
+      `you *keep your place in line* — you'll just be paid the larger amount.`,
+    { parse_mode: 'Markdown' },
+  );
+}
+
 export async function cashoutRetract(ctx: Ctx, withdrawId: string): Promise<void> {
   const p = await requireActive(ctx);
   if (!p) return;
