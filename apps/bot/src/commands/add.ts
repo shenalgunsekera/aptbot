@@ -124,6 +124,12 @@ export async function addAmount(ctx: Ctx, platformId: string, methodId: string, 
     select club_handle_for(${methodId}::uuid, ${amount}::bigint) as handle`;
   const h = tier?.handle;
   if (h === 'STRIPE' || (code === 'stripe' && h !== 'STAFF' && h !== 'PEERPAY')) {
+    // The card/Apple Pay link caps at $500 — don't let someone enter more here, or
+    // they'd pay $500 but we'd have the larger figure they typed on file.
+    if (amount > STRIPE_MAX_CENTS) {
+      await ctx.reply(`The largest card / Apple Pay payment is *${whole(STRIPE_MAX_CENTS)}*. Enter a smaller amount, or use another method.`, { parse_mode: 'Markdown' });
+      return;
+    }
     await startStripeDeposit(ctx, platformId, code, amount);
     return;
   }
