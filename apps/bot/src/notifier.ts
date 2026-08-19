@@ -280,7 +280,7 @@ export function renderNotification(n: Notification): Rendered | null {
     case 'fill.confirmed_pending_hold':
       return { text: `✅ Confirmed! Their money releases after a short hold.` };
     case 'fill.lock_expired':
-      return { text: `⏱ *Your payment timed out.*\n\nThe ${m(p.amount, p.currency)} went back in the queue — no proof arrived in time. If you already sent it, message us now.` };
+      return { text: `⏱ *Time's up on your ${m(p.amount, p.currency)} deposit.*\n\nNo payment arrived in time, so it was cancelled. Start again with /deposit to try once more. If you already sent it, message us with /support.` };
     case 'deposit.discarded':
       return { text: `❌ *Your ${m(p.amount, p.currency)} payment couldn't be verified* and was discarded.\n\nIf you did send it, message us with /support. Otherwise you can start again with /deposit.` };
     case 'withdraw.queued':

@@ -160,3 +160,10 @@ export function friendlyStatus(kind: 'deposit' | 'withdraw', status: string): st
 
 /** Shorten a long handle for a button label without losing the ends. */
 export const shortHandle = (s: string) => (s.length <= 24 ? s : `${s.slice(0, 10)}…${s.slice(-8)}`);
+
+/** The payment window, worded from the configured match timeout (seconds) — so
+ *  the deposit prompt shows the REAL time a player has, not a hardcoded "5 min". */
+export function windowLabel(seconds: number): string {
+  const mins = Math.max(1, Math.round((seconds || 0) / 60));
+  return mins === 1 ? '1 minute' : `${mins} minutes`;
+}

@@ -40,7 +40,7 @@ export default async function TransactionsPage({
     : sql``;
 
   const rows = await sql<any[]>`
-    select v.*, f.detected_at, f.detected_source
+    select v.*, f.detected_at, f.detected_source, f.lock_expires_at
       from v_fills_detail v
       left join fills f on f.id = v.id
      where ${where} ${search}
@@ -98,6 +98,13 @@ export default async function TransactionsPage({
                       <div className="badge ok" style={{ marginTop: 4 }} title={`Auto-detected via ${r.detected_source}`}>
                         💚 payment detected
                       </div>
+                    )}
+                    {r.status === 'locked' && r.lock_expires_at && (
+                      new Date(r.lock_expires_at) > new Date()
+                        ? <div className="badge warn" style={{ marginTop: 4 }} title="Time the payer has to pay before the slice returns to the queue">
+                            ⏳ pay by <Ago at={r.lock_expires_at} />
+                          </div>
+                        : <div className="badge red" style={{ marginTop: 4 }}>⏳ window passed</div>
                     )}
                   </td>
                   <td className="num">

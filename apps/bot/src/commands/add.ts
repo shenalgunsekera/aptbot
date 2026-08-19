@@ -5,7 +5,7 @@ import {
 } from '@union/core';
 import type { Ctx } from '../session.js';
 import { requireActive } from '../player.js';
-import { money, whole, parseAmount, amountProblem, receiptInstruction } from '../words.js';
+import { money, whole, parseAmount, amountProblem, receiptInstruction, windowLabel } from '../words.js';
 import { resolvePlatform, platformKeyboard } from '../prefs.js';
 import { ask, clearQuestion } from '../ask.js';
 
@@ -293,9 +293,10 @@ async function runMatch(ctx: Ctx, platformId: string, amount: number, methodId: 
     return;
   }
 
-  // We SAY 5 minutes for urgency, but the real window is generous — the p2p slice
-  // holds ~25 min and club/crypto deposits hold 24h — so a slow payer never fails.
-  const lines: string[] = [`*💸 Send your payment now — you have 5 minutes*\n`];
+  // The real window is the configured match timeout — show it honestly so the
+  // player knows exactly how long they have (and it stays in step with the panel).
+  const [tcfg] = await sql<{ match_timeout_seconds: number }[]>`select match_timeout_seconds from config where id`;
+  const lines: string[] = [`*💸 Send your payment now — you have ${windowLabel(tcfg?.match_timeout_seconds ?? 300)}*\n`];
 
   if (fills.length > 1) {
     lines.push(`Your ${money(amount)} is split across *${fills.length} people*. Pay *each* separately:\n`);
