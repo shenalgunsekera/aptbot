@@ -89,7 +89,12 @@ export async function loaderDone(ctx: Ctx, orderId: string, actualDelta: number)
   try {
     await sql`select loader_order_complete(${orderId}::uuid, ${admin.id}::uuid, ${actualDelta}::bigint, 'via telegram')`;
   } catch (err) {
-    if (isUserError(err)) return void (await ctx.answerCallbackQuery({ text: userMessage(err), show_alert: true }));
+    if (isUserError(err)) {
+      // Already done/claimed elsewhere (e.g. a stale duplicate card). Don't
+      // dead-end with a live button — refresh THIS card to the job's real state.
+      await ctx.answerCallbackQuery({ text: userMessage(err), show_alert: true });
+      return void (await showLoaderStep(ctx, orderId));
+    }
     throw err;
   }
   await ctx.answerCallbackQuery({ text: 'Done — saved.' });
@@ -343,6 +348,9 @@ async function advanceToLoaderStep(ctx: Ctx, adminId: string, fillId: string): P
   try { await sql`select loader_order_claim(${o.id}::uuid, ${adminId}::uuid)`; } catch { /* raced; fine */ }
   await sql`update notifications set status='skipped'
              where kind='loader.work' and ref_type='loader_order' and ref_id=${o.id} and status='pending'`;
+  // If the standalone loader card was ALREADY delivered before this verify, it's
+  // now a duplicate — neutralise it so nobody taps a dead "Add" button on it.
+  await editCardFor(ctx.api, 'loader_order', o.id, '↪️ *Being handled on the payment card above.*').catch(() => {});
   await editCard(ctx,
     `🎰 *ADD ${money(o.delta, o.currency)}* to their table\n` +
       `Player: *${md(o.player_name)}*\nID: \`${o.platform_uid}\`\n\n_Claimed by ${who}._ Add it on the platform, then:`,
