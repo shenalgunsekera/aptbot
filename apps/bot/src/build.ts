@@ -62,6 +62,9 @@ export const PLAYER_COMMANDS = [
 ];
 export const GROUP_COMMANDS = [
   ...PLAYER_COMMANDS,
+  { command: 'pausewithdraw', description: 'Pause this player\'s cash-out (admins)' },
+  { command: 'resumewithdraw', description: 'Resume this player\'s cash-out (admins)' },
+  { command: 'adjust', description: '+amount grows a cash-out; -amount records a payment (admins)' },
   { command: 'setadmingroup', description: 'Make this the admin group (admins only)' },
   { command: 'paymentchannel', description: 'Make this the payments feed (admins only)' },
   { command: 'setadmin', description: 'Add an admin (owner only)' },
