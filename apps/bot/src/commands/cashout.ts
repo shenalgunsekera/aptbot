@@ -458,7 +458,12 @@ export async function addToWithdrawStart(ctx: Ctx): Promise<void> {
   }
   if (outs.length === 1) return void (await askTopupAmount(ctx, outs[0]!));
   const kb = new InlineKeyboard();
-  for (const o of outs) kb.text(`${money(o.amount ?? 0, o.currency)} via ${o.method}`, `wt:pick:${o.id}`).row();
+  for (const o of outs) {
+    const label = o.amount_remaining < (o.amount ?? 0)
+      ? `${money(o.amount ?? 0, o.currency)} via ${o.method} (${money(o.amount_remaining, o.currency)} left)`
+      : `${money(o.amount ?? 0, o.currency)} via ${o.method}`;
+    kb.text(label, `wt:pick:${o.id}`).row();
+  }
   await ctx.reply('Which cash-out do you want to add to?', { reply_markup: kb });
 }
 
@@ -478,12 +483,20 @@ export async function addToWithdrawPick(ctx: Ctx, withdrawId: string): Promise<v
 }
 
 async function askTopupAmount(
-  ctx: Ctx, w: { id: string; amount: number | null; currency: string; method: string },
+  ctx: Ctx, w: { id: string; amount: number | null; amount_remaining: number; currency: string; method: string },
 ): Promise<void> {
   const [cfg] = await db()<{ amount_step: number }[]>`select amount_step from config where id`;
   ctx.session.step = { name: 'out:topup_amount', withdrawId: w.id };
+  // Account for a partially-paid cash-out: show what's already on its way vs.
+  // what's still waiting, so "currently $40" doesn't read as if nothing was paid.
+  const total = w.amount ?? 0;
+  const paid = total - w.amount_remaining;
+  const state = paid > 0
+    ? `Your ${w.method} cash-out is *${money(total, w.currency)}* — ` +
+      `*${money(paid, w.currency)}* already on its way, *${money(w.amount_remaining, w.currency)}* still waiting in the queue.`
+    : `Your ${w.method} cash-out is currently *${money(total, w.currency)}*.`;
   await ask(ctx,
-    `Your ${w.method} cash-out is currently *${money(w.amount ?? 0, w.currency)}*.\n\n` +
+    `${state}\n\n` +
       `How much do you want to *add* to it? Send the number, like \`20\`, in multiples of ` +
       `${whole(cfg.amount_step)}. We'll take that much more off your table and add it to this ` +
       `same cash-out — you keep your place in line.\n\n/stop to cancel.`,
