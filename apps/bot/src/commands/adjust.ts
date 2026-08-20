@@ -1,4 +1,4 @@
-import { db, isUserError, userMessage } from '@union/core';
+import { db, isUserError, userMessage, uploadReceipt, storageConfigured } from '@union/core';
 import type { Ctx } from '../session.js';
 import { isAdminGroup } from '../guards.js';
 import { money, parseAmount } from '../words.js';
@@ -158,11 +158,31 @@ export async function adjustCommand(ctx: Ctx, argsRaw: string, receiptFileId?: s
   await recordPayment(ctx, r.withdrawId, amt, receiptFileId, admin.id, r.player.name);
 }
 
-async function recordPayment(ctx: Ctx, withdrawId: string, amount: number, receipt: string, adminId: string, who: string): Promise<void> {
+async function recordPayment(ctx: Ctx, withdrawId: string, amount: number, receiptFileId: string, adminId: string, who: string): Promise<void> {
+  // Upload the screenshot to Firebase so the receipt has a permanent, clickable
+  // https url in the player's history — a bare Telegram file_id can't be a link.
+  // Falls back to the file_id if storage isn't configured (still shows as an image).
+  const receipt = await toReceiptUrl(ctx, receiptFileId, withdrawId);
   try {
     await db()`select withdraw_club_payout(${withdrawId}::uuid, ${adminId}::uuid, ${amount}::bigint, null, 'paid via /adjust', ${receipt})`;
   } catch (err) { if (isUserError(err)) return void (await ctx.reply(`❌ ${userMessage(err)}`)); throw err; }
   await ctx.reply(`✅ Recorded *${money(amount)}* paid to ${who} — the receipt was sent to them and their cash-out reduced.`, { parse_mode: 'Markdown' });
+}
+
+/** A Telegram file_id → a permanent Firebase https url (clickable in /withdrawalhistory).
+ *  Best-effort: on any failure keep the file_id, which still renders as an image. */
+async function toReceiptUrl(ctx: Ctx, fileId: string, refId: string): Promise<string> {
+  if (!storageConfigured()) return fileId;
+  try {
+    const file = await ctx.api.getFile(fileId);
+    const res = await fetch(`https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`);
+    const bytes = Buffer.from(await res.arrayBuffer());
+    const stored = await uploadReceipt(bytes, 'image/jpeg', 'fill', refId);
+    return stored.url;
+  } catch (err) {
+    console.error('[adjust] receipt upload failed, keeping file_id:', err);
+    return fileId;
+  }
 }
 
 /** The admin's screenshot reply after a text `/adjust -X`. */

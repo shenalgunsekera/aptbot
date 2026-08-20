@@ -34,7 +34,9 @@ export async function withdrawalHistory(ctx: Ctx): Promise<void> {
   if (!lines.length) lines.push('No completed cash-outs yet.');
 
   await sendChunks(ctx, lines);
-  await postReceipts(ctx, [...ongoing, ...done]);
+  // Still post the receipt images for the three most recent cash-outs, so the
+  // screenshots are right there under the list (the links above open them too).
+  await postReceipts(ctx, [...ongoing, ...done].slice(0, 3));
 }
 
 /** /deposithistory — the deposits the player has made, with the receipts sent. */
@@ -54,7 +56,7 @@ export async function depositHistory(ctx: Ctx): Promise<void> {
   if (!lines.length) lines.push('No completed deposits yet.');
 
   await sendChunks(ctx, lines);
-  await postReceipts(ctx, [...ongoing, ...done]);
+  await postReceipts(ctx, [...ongoing, ...done].slice(0, 3));
 }
 
 async function sendChunks(ctx: Ctx, lines: string[]): Promise<void> {
@@ -93,13 +95,13 @@ function receiptsOf(pay: any): { url: string; ref?: string }[] {
   return list.filter((r: any) => r?.url);
 }
 
-/** Receipt lines. Only an http(s) url becomes a clickable link — a Telegram
- *  file_id isn't a URL, so it's shown as plain text and posted as an image below. */
+/** Receipt lines. Almost every receipt now has a permanent https url, so it's a
+ *  clickable link; a rare legacy file_id (not a URL) shows as plain text. */
 function receiptLinks(pay: any): string {
   return receiptsOf(pay).map((r) =>
     /^https?:\/\//i.test(r.url)
       ? `\n     📄 [Receipt ${r.ref ?? ''}](${r.url})`
-      : `\n     📄 Receipt ${r.ref ?? ''} _(image below)_`,
+      : `\n     📄 Receipt ${r.ref ?? ''}`,
   ).join('');
 }
 
