@@ -3,6 +3,7 @@ import { db, isUserError, userMessage } from '@union/core';
 import type { Ctx } from './session.js';
 import { money } from './words.js';
 import { editCardFor } from './notifier.js';
+import { toReceiptUrl } from './commands/adjust.js';
 
 /**
  * ADMIN GROUP ACTIONS
@@ -177,11 +178,16 @@ export async function withdrawPayPrompt(ctx: Ctx, withdrawId: string): Promise<v
   const admin = await adminFor(ctx);
   if (!admin) return void (await ctx.answerCallbackQuery({ text: 'Admins only.', show_alert: true }));
   await ctx.answerCallbackQuery();
-  (ctx.session as any)._payWithdraw = withdrawId;
-  await ctx.reply(
+  // Drop the "I paid it" button right away so a second tap can't spawn a duplicate
+  // prompt; the card is rewritten to its finished state once the payment is recorded.
+  try { await ctx.editMessageReplyMarkup(); } catch { /* already gone */ }
+  const s = ctx.session as unknown as { _payWithdraw?: string; _payPromptMsg?: number };
+  s._payWithdraw = withdrawId;
+  const prompt = await ctx.reply(
     `Reply to THIS message with a *screenshot* of the payment you sent for cash-out \`${withdrawId.slice(0, 8)}\` — the player gets it as their receipt.\n\n_No screenshot? You can reply with the transaction ID instead._`,
     { parse_mode: 'Markdown', reply_markup: { force_reply: true } },
   );
+  s._payPromptMsg = prompt.message_id;
 }
 
 /** The admin's reply → record the payout from float. `image` is a photo file_id
@@ -192,20 +198,39 @@ export async function withdrawPayConfirm(
   const admin = await adminFor(ctx);
   if (!admin) return;
   const sql = db();
+  const s = ctx.session as unknown as { _payPromptMsg?: number };
+  const promptMsg = s._payPromptMsg;
+  s._payPromptMsg = undefined;
+
+  // A screenshot receipt → upload to Firebase so it's a permanent, clickable link
+  // in the player's history (a bare Telegram file_id can't be linked). Falls back
+  // to the file_id on any failure, which still renders as an image.
+  const receipt = image ? await toReceiptUrl(ctx, value, withdrawId) : null;
+
+  let paid: { amount: number; currency: string } | undefined;
   try {
-    await sql`select withdraw_club_payout(${withdrawId}::uuid, ${admin.id}::uuid, null,
-                                          ${image ? null : value.trim()}, 'paid via telegram',
-                                          ${image ? value : null})`;
+    [paid] = await sql<{ amount: number; currency: string }[]>`
+      select amount, currency from withdraw_club_payout(
+        ${withdrawId}::uuid, ${admin.id}::uuid, null,
+        ${image ? null : value.trim()}, 'paid via telegram', ${receipt})`;
   } catch (err) {
     if (isUserError(err)) return void (await ctx.reply(`❌ ${userMessage(err)}`));
     throw err;
   }
-  await ctx.reply(
-    image
-      ? '✅ Recorded as paid — the receipt was sent to the player.'
-      : `✅ Recorded as paid (ref \`${value.trim()}\`). The player has been told.`,
-    { parse_mode: 'Markdown' },
-  );
+
+  // Rewrite the "cash-out to pay" card to a single finished message, then clear the
+  // prompt and the admin's reply so nothing stale is left behind (like the loader card).
+  const [wr] = await sql<{ name: string | null }[]>`
+    select pl.display_name as name from withdraw_requests w
+      join players pl on pl.id = w.player_id where w.id = ${withdrawId}`;
+  const ref = image ? '' : ` (ref \`${md(value.trim(), '')}\`)`;
+  const doneText = `✅ *Cash-out paid* — ${money(paid!.amount, paid!.currency)} to *${md(wr?.name)}* · by ${md(ctx.from?.first_name)}${ref}`;
+  const edited = await editCardFor(ctx.api, 'withdraw_request', withdrawId, doneText, undefined, 'withdraw.needs_payout')
+    .catch(() => false);
+  if (promptMsg) await ctx.api.deleteMessage(ctx.chat!.id, promptMsg).catch(() => { /* best effort */ });
+  await ctx.api.deleteMessage(ctx.chat!.id, ctx.message!.message_id).catch(() => { /* needs delete rights */ });
+  // If the card couldn't be edited (none tracked), still leave one confirmation.
+  if (!edited) await ctx.reply(doneText, { parse_mode: 'Markdown' });
 }
 
 /** Admin taps "Account created" on a Sportsbook creation request → activate the

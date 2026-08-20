@@ -171,7 +171,7 @@ async function recordPayment(ctx: Ctx, withdrawId: string, amount: number, recei
 
 /** A Telegram file_id → a permanent Firebase https url (clickable in /withdrawalhistory).
  *  Best-effort: on any failure keep the file_id, which still renders as an image. */
-async function toReceiptUrl(ctx: Ctx, fileId: string, refId: string): Promise<string> {
+export async function toReceiptUrl(ctx: Ctx, fileId: string, refId: string): Promise<string> {
   if (!storageConfigured()) return fileId;
   try {
     const file = await ctx.api.getFile(fileId);
