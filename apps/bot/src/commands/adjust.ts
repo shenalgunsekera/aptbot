@@ -1,9 +1,10 @@
 import { db, isUserError, userMessage } from '@union/core';
 import type { Ctx } from '../session.js';
+import { isAdminGroup } from '../guards.js';
 import { money, parseAmount } from '../words.js';
 
 /**
- * ADMIN CASH-OUT CONTROLS — run inside the chat the player talks to us in.
+ * ADMIN CASH-OUT CONTROLS — for the admin acting on ONE player's cash-out.
  *
  *   /pausewithdraw   take their cash-out out of the queue so nobody else pays it
  *   /resumewithdraw  put it back at its original place in the queue
@@ -12,8 +13,12 @@ import { money, parseAmount } from '../words.js';
  *                    the cash-out, saves the receipt to their history, completes
  *                    it if it hits $0. Works even while paused.
  *
- * The player is found by the chat this is run in (players.chat_id). Every change
- * runs the same audited DB function the panel uses.
+ * WHICH PLAYER: two ways, so an admin can act wherever the player is in front of
+ * them. (1) In the ADMIN GROUP, REPLY to that player's card — their cash-out
+ * card, a receipt-to-verify, a loader job, or their support message — and we
+ * resolve the player from the message being replied to. (2) In the player's own
+ * chat / per-member group, we resolve by that chat (players.chat_id). Every
+ * change runs the same audited DB function the panel uses.
  */
 async function adminFor(ctx: Ctx): Promise<{ id: string } | null> {
   const tg = ctx.from?.id;
@@ -25,12 +30,54 @@ async function adminFor(ctx: Ctx): Promise<{ id: string } | null> {
 
 type Target = { player: { id: string; name: string }; withdrawId: string };
 
-/** The player whose chat this is + their latest in-progress cash-out (or a msg). */
+/**
+ * In the admin group, the player is whoever the replied-to card/message belongs
+ * to. A card records its player via its ref (withdraw/deposit/fill/loader/player);
+ * a support message via support_threads. Returns null when there's no reply, or
+ * the reply isn't a message we can tie to a player.
+ */
+async function playerFromGroupReply(ctx: Ctx): Promise<{ id: string; display_name: string | null } | null> {
+  const mid = ctx.message?.reply_to_message?.message_id;
+  if (!mid) return null;
+  const sql = db();
+  const [row] = await sql<{ id: string; display_name: string | null }[]>`
+    select pl.id, pl.display_name
+      from players pl
+     where pl.id = coalesce(
+       (select st.player_id from support_threads st
+         where st.group_message_id = ${mid} order by st.id desc limit 1),
+       (select case n.ref_type
+          when 'withdraw_request' then (select w.player_id from withdraw_requests w where w.id = n.ref_id)
+          when 'deposit_request'  then (select d.player_id from deposit_requests d where d.id = n.ref_id)
+          when 'fill'             then (select w.player_id from fills f
+                                          join withdraw_requests w on w.id = f.withdraw_id where f.id = n.ref_id)
+          when 'loader_order'     then (select lo.player_id from loader_orders lo where lo.id = n.ref_id)
+          when 'player'           then n.ref_id
+          else null end
+        from notifications n
+        where n.platform = 'telegram'
+          and n.sent_message_id = ${String(mid)}
+          and n.sent_chat_id = ${String(ctx.chat!.id)}
+        order by n.id desc limit 1))`;
+  return row ?? null;
+}
+
+/** The target player + their latest in-progress cash-out. In the admin group we
+ *  resolve from the replied-to card; elsewhere from the chat this runs in. */
 async function target(ctx: Ctx): Promise<Target | { error: string } | null> {
   const sql = db();
-  const [pl] = await sql<{ id: string; display_name: string | null }[]>`
-    select id, display_name from players where chat_id = ${ctx.chat!.id}`;
-  if (!pl) return { error: "No player is linked to this chat, so there's nothing to do here." };
+  let pl: { id: string; display_name: string | null } | undefined;
+  if (await isAdminGroup(ctx)) {
+    const fromReply = await playerFromGroupReply(ctx);
+    if (!fromReply) {
+      return { error: "Reply to the player's cash-out card (or their message) with this command, so I know who you mean." };
+    }
+    pl = fromReply;
+  } else {
+    [pl] = await sql<{ id: string; display_name: string | null }[]>`
+      select id, display_name from players where chat_id = ${ctx.chat!.id}`;
+    if (!pl) return { error: "No player is linked to this chat, so there's nothing to do here." };
+  }
   const [w] = await sql<{ id: string }[]>`
     select id from withdraw_requests
      where player_id = ${pl.id} and status in ('queued', 'partially_filled', 'filled')
