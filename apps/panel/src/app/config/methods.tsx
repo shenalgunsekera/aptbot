@@ -161,15 +161,14 @@ function MethodForm({ method }: { method: any | null }) {
       <div className="field">
         <label htmlFor="settlement">Settlement</label>
         <select id="settlement" name="settlement" defaultValue={method?.settlement ?? 'club'}>
-          <option value="p2p">Peer-to-peer — matched to a cash-out, exactly like Venmo &amp; Zelle.</option>
+          <option value="p2p">Peer-to-peer — matched to a cash-out.</option>
           <option value="club">Company-settled — you pay / receive from your own account.</option>
         </select>
         <div className="field-hint">
           <strong>Peer-to-peer</strong>: a deposit is matched to a waiting cash-out (FIFO) and the
           depositor pays that player directly, using the amount tiers below. Set a club account /
           backstop for when nobody is queued. <strong>Company-settled</strong>: every deposit goes to
-          your club account and each cash-out is paid by an admin. Turn this to <em>Peer-to-peer</em>
-          for Cash App or PayPal to make them behave just like Venmo.
+          your club account and each cash-out is paid by an admin.
         </div>
       </div>
 
@@ -216,7 +215,7 @@ function MethodForm({ method }: { method: any | null }) {
         <label htmlFor="withdraw_payout_mode">Cash-out payout (company-settled)</label>
         <select id="withdraw_payout_mode" name="withdraw_payout_mode"
                 defaultValue={method?.withdraw_payout_mode ?? 'admin_paid'}>
-          <option value="admin_paid">Admin pays &amp; uploads a screenshot (like crypto)</option>
+          <option value="admin_paid">Admin pays &amp; uploads a screenshot</option>
           <option value="request">Money request — the player requests, an admin approves</option>
         </select>
         <div className="field-hint">
