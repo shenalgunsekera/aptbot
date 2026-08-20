@@ -449,10 +449,14 @@ export function renderNotification(n: Notification): Rendered | null {
       // shows, so an admin can tie the payout to the right player at a glance.
       const acct = p.account ? `Account: *${md(p.account)}*${p.platform ? ` [${md(p.platform)}]` : ''}\n` : '';
       const club = p.club ? `Club: ${md(p.club)}\n` : '';
-      return String(p.method).toLowerCase().includes('paypal')
+      // How the admin settles it — set per method in the panel (company-settled
+      // only). Unset → the old name-based default (PayPal = request, else admin-pays).
+      const requestFlow = p.payout_mode ? p.payout_mode === 'request'
+        : String(p.method).toLowerCase().includes('paypal');
+      return requestFlow
         ? {
-            text: `💸 *PayPal cash-out — approve a request*\n\nFrom: *${md(p.name)}*\n${acct}${club}Amount: *${m(p.amount, p.currency)}*\n\n` +
-              `They'll send a PayPal money request to your account for this amount. Approve & pay it, then tap below.`,
+            text: `💸 *${p.method} cash-out — approve a request*\n\nFrom: *${md(p.name)}*\n${acct}${club}Amount: *${m(p.amount, p.currency)}*\n\n` +
+              `They'll send a ${p.method} money request to your account for this amount. Approve & pay it, then tap below.`,
             keyboard: new InlineKeyboard().text('✅ I paid it', `wd:pay:${p.withdraw_id}`),
           }
         : {

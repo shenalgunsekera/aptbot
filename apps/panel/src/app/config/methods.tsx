@@ -212,6 +212,20 @@ function MethodForm({ method }: { method: any | null }) {
         </div>
       </div>
 
+      <div className="field">
+        <label htmlFor="withdraw_payout_mode">Cash-out payout (company-settled)</label>
+        <select id="withdraw_payout_mode" name="withdraw_payout_mode"
+                defaultValue={method?.withdraw_payout_mode ?? 'admin_paid'}>
+          <option value="admin_paid">Admin pays &amp; uploads a screenshot (like crypto)</option>
+          <option value="request">Money request — the player requests, an admin approves</option>
+        </select>
+        <div className="field-hint">
+          How a cash-out on this method is settled by an admin. Only used for{' '}
+          <strong>Company-settled</strong> methods — a <em>Peer-to-peer</em> cash-out joins the
+          matching queue and is paid by a depositor, so this is ignored there.
+        </div>
+      </div>
+
       <TiersEditor initial={method?.handle_tiers ?? null} />
 
       <div className="field-row">

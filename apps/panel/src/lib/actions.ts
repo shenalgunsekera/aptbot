@@ -275,6 +275,7 @@ export async function upsertMethod(patch: Record<string, unknown>): Promise<Resu
       'code', 'name', 'currency', 'reversibility', 'settlement', 'enabled',
       'min_amount', 'max_amount', 'club_handle', 'hold_seconds',
       'processor_fee_bps', 'processor_fee_flat', 'handle_hint', 'handle_pattern', 'sort_order',
+      'withdraw_payout_mode',
     ]);
     const clean: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(patch)) if (allowed.has(k)) clean[k] = v;
