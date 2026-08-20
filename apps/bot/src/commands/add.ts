@@ -302,6 +302,19 @@ async function runMatch(ctx: Ctx, platformId: string, amount: number, methodId: 
     await sendStaffProvideInstruction(ctx, fills[0]!, m!.name);
     return;
   }
+  // Stripe tier on a p2p method with no queued cash-out to match: this amount
+  // routes to card / Apple Pay. Drop the unmatched p2p fill and hand off to the
+  // Stripe link (same destination as a club method's STRIPE tier pre-divert).
+  if (fills.length === 1 && fills[0]!.payout_handle === 'STRIPE') {
+    await sql`select deposit_cancel_latest(${p.id}::uuid)`;
+    if (amount > STRIPE_MAX_CENTS) {
+      ctx.session.step = { name: 'idle' };
+      await ctx.reply(`The largest card / Apple Pay payment is *${whole(STRIPE_MAX_CENTS)}*. Enter a smaller amount, or use another method.`, { parse_mode: 'Markdown' });
+      return;
+    }
+    await startStripeDeposit(ctx, platformId, m!.code, amount);
+    return;
+  }
 
   // The real window is the configured match timeout — show it honestly so the
   // player knows exactly how long they have (and it stays in step with the panel).
