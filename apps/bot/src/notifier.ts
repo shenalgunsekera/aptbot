@@ -442,10 +442,14 @@ export function renderNotification(n: Notification): Rendered | null {
           `Create it on APT Sports with these exact details, then tap below — the player is told automatically.`,
         keyboard: new InlineKeyboard().text('✅ Account created', `sb:made:${p.player_id}`),
       };
-    case 'withdraw.needs_payout':
+    case 'withdraw.needs_payout': {
+      // Who to pay, on the platform they play — same account/club the loader card
+      // shows, so an admin can tie the payout to the right player at a glance.
+      const acct = p.account ? `Account: *${md(p.account)}*${p.platform ? ` [${md(p.platform)}]` : ''}\n` : '';
+      const club = p.club ? `Club: ${md(p.club)}\n` : '';
       return String(p.method).toLowerCase().includes('paypal')
         ? {
-            text: `💸 *PayPal cash-out — approve a request*\n\nFrom: *${md(p.name)}*\nAmount: *${m(p.amount, p.currency)}*\n\n` +
+            text: `💸 *PayPal cash-out — approve a request*\n\nFrom: *${md(p.name)}*\n${acct}${club}Amount: *${m(p.amount, p.currency)}*\n\n` +
               `They'll send a PayPal money request to your account for this amount. Approve & pay it, then tap below.`,
             keyboard: new InlineKeyboard().text('✅ I paid it', `wd:pay:${p.withdraw_id}`),
           }
@@ -453,11 +457,12 @@ export function renderNotification(n: Notification): Rendered | null {
             text: (p.small
               ? `🔹 *Small cash-out — pay it directly.*\nUnder the ${m(p.min, p.currency)} minimum, so no depositor will match it.\n\n`
               : '') +
-              `💸 *Cash-out to pay* (${p.method})\n\n${p.name ? 'To: *' + md(p.name) + '*\n' : ''}` +
+              `💸 *Cash-out to pay* (${p.method})\n\n${p.name ? 'To: *' + md(p.name) + '*\n' : ''}${acct}${club}` +
               `Amount: *${m(p.amount, p.currency)}*\nSend to: \`${p.handle}\` _(tap to copy)_\n\n` +
               `Pay it, then tap below and send the transaction ID.`,
             keyboard: new InlineKeyboard().text('✅ I paid it', `wd:pay:${p.withdraw_id}`),
           };
+    }
     case 'loader.delivery_failed':
       return { text: `⚠️ *Couldn't add value* to ${md(p.player_name)} (\`${p.platform_uid}\`)\n${m(p.delta, p.currency)}\n_${md(p.reason)}_\n\nNeeds a human.` };
     case 'crypto.detection_down':
