@@ -9,6 +9,7 @@ import { money, whole, parseAmount, amountProblem, shortHandle, withdrawHandlePr
 import { resolvePlatform, resolveMethod, platformKeyboard, methodKeyboard } from '../prefs.js';
 import { ask, clearQuestion } from '../ask.js';
 import { editCardFor } from '../notifier.js';
+import { loaderIdentity, loaderIdSelect, loaderIdJoins } from '../admin-actions.js';
 
 /**
  * /withdraw — cash-out. (withdraw)
@@ -422,12 +423,12 @@ async function doCancel(ctx: Ctx, withdrawId: string, amount: number): Promise<v
     return void (await ctx.reply('✅ Your cash-out was cancelled. Nothing was taken off your table.'));
   }
   if (j.scenario === 'pending_partial') {
-    const [o] = await sql<{ delta: number; currency: string; player_name: string; platform_uid: string }[]>`
-      select delta, currency, player_name, platform_uid from loader_orders where id = ${j.order_id}`;
+    const [o] = await sql<{ delta: number; currency: string; account: string; platform: string | null; platform_uid: string; club: string | null }[]>`
+      select o.delta, o.currency, ${loaderIdSelect()} from loader_orders o ${loaderIdJoins()} where o.id = ${j.order_id}`;
     if (o) {
       await editCardFor(ctx.api, 'loader_order', j.order_id,
         `🎰 *TAKE OFF ${money(Math.abs(Number(o.delta)), o.currency)}* _(reduced by the player)_\n` +
-          `Player: *${o.player_name}*\nID: \`${o.platform_uid}\``,
+          loaderIdentity(o),
         new InlineKeyboard().text('✋ Claim', `lo:claim:${j.order_id}`));
     }
     return void (await ctx.reply(`✅ Reduced — we'll take off *${money(Number(j.new_amount ?? 0))}* instead. Your line stays.`, { parse_mode: 'Markdown' }));

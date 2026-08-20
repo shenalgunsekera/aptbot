@@ -36,6 +36,29 @@ async function adminFor(ctx: Ctx): Promise<{ id: string; role: string } | null> 
   return a ?? null;
 }
 
+/**
+ * The identity block on EVERY loader card — the platform ACCOUNT name (ClubGG
+ * username / Sportsbook username, never a bare numeric id), a [platform] tag, the
+ * numeric ID, and the club. Kept in one place, and matching the fresh loader.work
+ * card in notifier.ts, so a claimed / advanced card never drops back to just the
+ * display name. Callers select these columns via loaderIdSelect + loaderIdJoins.
+ */
+export type LoaderId = { account: string; platform: string | null; platform_uid: string; club: string | null };
+export function loaderIdentity(o: LoaderId): string {
+  const who = `${md(o.account)}${o.platform ? ` [${md(o.platform)}]` : ''}`;
+  return `Player: *${who}*\nID: \`${o.platform_uid}\`` + (o.club ? `\nClub: ${md(o.club)}` : '');
+}
+/** SQL that resolves a loader order's account/platform/club — use with loaderIdJoins. */
+export function loaderIdSelect() {
+  return db()`coalesce(case when pf.code = 'clubgg' then pp.platform_username else pp.platform_uid end, o.player_name) as account,
+              pf.name as platform, cl.name as club, o.platform_uid`;
+}
+export function loaderIdJoins() {
+  return db()`left join platforms pf on pf.id = o.platform_id
+              left join player_platforms pp on pp.player_id = o.player_id and pp.platform_id = o.platform_id
+              left join clubs cl on cl.id = o.club_id`;
+}
+
 /** Claim a loader job, then swap the message to show do/short/fail actions. */
 export async function loaderClaim(ctx: Ctx, orderId: string): Promise<void> {
   const admin = await adminFor(ctx);
@@ -59,9 +82,12 @@ export async function loaderClaim(ctx: Ctx, orderId: string): Promise<void> {
  *  (with who claimed it) while pending/claimed, or a done/closed summary. */
 async function showLoaderStep(ctx: Ctx, orderId: string): Promise<void> {
   const sql = db();
-  const [o] = await sql<{ delta: number; currency: string; player_name: string; platform_uid: string; status: string; claimer: string | null }[]>`
-    select o.delta, o.currency, o.player_name, o.platform_uid, o.status, a.display_name as claimer
-      from loader_orders o left join admins a on a.id = o.claimed_by where o.id = ${orderId}`;
+  const [o] = await sql<{ delta: number; currency: string; account: string; platform: string | null; platform_uid: string; club: string | null; status: string; claimer: string | null }[]>`
+    select o.delta, o.currency, o.status, a.display_name as claimer, ${loaderIdSelect()}
+      from loader_orders o
+      left join admins a on a.id = o.claimed_by
+      ${loaderIdJoins()}
+     where o.id = ${orderId}`;
   if (!o) return void (await editCard(ctx, '↩️ That task no longer exists.'));
   const load = o.delta > 0;
   if (o.status === 'done') return void (await editCard(ctx, `✅ *Done* — ${money(Math.abs(o.delta), o.currency)} ${load ? 'added' : 'taken off'}.`));
@@ -70,7 +96,7 @@ async function showLoaderStep(ctx: Ctx, orderId: string): Promise<void> {
   const by = o.claimer ? `_Claimed by ${md(o.claimer)}._ ` : '';
   await editCard(ctx,
     `🎰 *${load ? 'ADD' : 'TAKE OFF'} ${money(Math.abs(o.delta), o.currency)}*\n` +
-      `Player: *${md(o.player_name)}*\nID: \`${o.platform_uid}\`\n\n${by}When done, tap the amount you actually ${load ? 'added' : 'took off'}:`,
+      `${loaderIdentity(o)}\n\n${by}When done, tap the amount you actually ${load ? 'added' : 'took off'}:`,
     load
       ? new InlineKeyboard().text(`✅ Done — added ${money(o.delta, o.currency)}`, `lo:done:${orderId}:${o.delta}`)
                             .text('❌ Failed', `lo:fail:${orderId}`)
@@ -352,9 +378,11 @@ export async function fillVerify(ctx: Ctx, fillId: string): Promise<void> {
 async function advanceToLoaderStep(ctx: Ctx, adminId: string, fillId: string): Promise<void> {
   const sql = db();
   const who = md(ctx.from?.first_name);
-  const [o] = await sql<{ id: string; delta: number; currency: string; player_name: string; platform_uid: string; status: string }[]>`
-    select id, delta, currency, player_name, platform_uid, status from loader_orders
-     where ref_type = 'fill' and ref_id = ${fillId} order by created_at desc limit 1`;
+  const [o] = await sql<{ id: string; delta: number; currency: string; account: string; platform: string | null; platform_uid: string; club: string | null; status: string }[]>`
+    select o.id, o.delta, o.currency, o.status, ${loaderIdSelect()}
+      from loader_orders o
+      ${loaderIdJoins()}
+     where o.ref_type = 'fill' and o.ref_id = ${fillId} order by o.created_at desc limit 1`;
   if (!o) return void (await editCard(ctx, `✅ *Verified & released* · by ${who}`));
   if (o.status === 'done') return void (await editCard(ctx, `✅ *Verified & loaded* — ${money(o.delta, o.currency)} added to their table.`));
   if (o.status === 'cancelled' || o.status === 'failed') return void (await editCard(ctx, `✅ *Verified* — loading was ${o.status}.`));
@@ -369,7 +397,7 @@ async function advanceToLoaderStep(ctx: Ctx, adminId: string, fillId: string): P
   await editCardFor(ctx.api, 'loader_order', o.id, '↪️ *Being handled on the payment card above.*').catch(() => {});
   await editCard(ctx,
     `🎰 *ADD ${money(o.delta, o.currency)}* to their table\n` +
-      `Player: *${md(o.player_name)}*\nID: \`${o.platform_uid}\`\n\n_Claimed by ${who}._ Add it on the platform, then:`,
+      `${loaderIdentity(o)}\n\n_Claimed by ${who}._ Add it on the platform, then:`,
     new InlineKeyboard()
       .text(`✅ Done — added ${money(o.delta, o.currency)}`, `lo:done:${o.id}:${o.delta}`)
       .text('❌ Failed', `lo:fail:${o.id}`),
