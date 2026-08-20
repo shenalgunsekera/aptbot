@@ -431,7 +431,15 @@ async function doCancel(ctx: Ctx, withdrawId: string, amount: number): Promise<v
           loaderIdentity(o),
         new InlineKeyboard().text('✋ Claim', `lo:claim:${j.order_id}`));
     }
-    return void (await ctx.reply(`✅ Reduced — we'll take off *${money(Number(j.new_amount ?? 0))}* instead. Your spot in line stays.`, { parse_mode: 'Markdown' }));
+    // Be explicit: <cancelled> comes back to the table, <new_amount> is the new
+    // cash-out total. If that total sits at the minimum, say why it can't go lower.
+    const cur = o?.currency ?? 'USD';
+    const [{ min_amount }] = await sql<{ min_amount: number }[]>`select min_amount from config where id`;
+    const atMin = Number(j.new_amount ?? 0) <= Number(min_amount);
+    const note = atMin ? ` — that's the ${money(min_amount, cur)} minimum, so it can't go lower without cancelling it all` : '';
+    return void (await ctx.reply(
+      `✅ *${money(Number(j.cancelled ?? 0), cur)}* is coming back to your table. Your cash-out is now *${money(Number(j.new_amount ?? 0), cur)}*${note}. Your spot in line stays.`,
+      { parse_mode: 'Markdown' }));
   }
   // reload: the admin re-load card was raised automatically; player is confirmed once it's re-loaded.
   await ctx.reply(
