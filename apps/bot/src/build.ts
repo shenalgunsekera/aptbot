@@ -27,7 +27,7 @@ import {
   addToWithdrawStart, addToWithdrawPick, addToWithdrawAmount,
 } from './commands/cashout.js';
 import { disputeReason } from './commands/confirm.js';
-import { payments } from './commands/payments.js';
+import { withdrawalHistory, depositHistory } from './commands/payments.js';
 import { supportStart, relayInquiryToAdmins, maybeRelayAdminReply } from './commands/support.js';
 import { setAdmin, approvePlayer } from './admin-mgmt.js';
 import {
@@ -51,7 +51,8 @@ export const PLAYER_COMMANDS = [
   { command: 'cancelwithdraw', description: 'Cancel a cash-out that has not been paid' },
   { command: 'addtowithdraw', description: 'Add more to a cash-out already in the queue' },
   { command: 'pending', description: 'Your pending cash-outs' },
-  { command: 'payments', description: 'Completed payments & receipts' },
+  { command: 'withdrawalhistory', description: 'Cash-outs paid to you & receipts' },
+  { command: 'deposithistory', description: 'Deposits you made & receipts' },
   { command: 'editplatform', description: 'Add or remove ClubGG / Sportsbook' },
   { command: 'editclubs', description: 'Change which clubs you play in' },
   { command: 'editdeposit', description: 'Change how you deposit (payment methods)' },
@@ -166,7 +167,8 @@ export function buildBot(token: string): Bot<Ctx> {
         `✖️ */cancelwithdraw* — cancel a cash-out that hasn't been paid yet.\n` +
         `➕ */addtowithdraw* — add more to a cash-out already in the queue, keeping your place in line.\n` +
         `⏳ */pending* — see deposits and cash-outs still in progress, and cancel a cash-out if you need to.\n` +
-        `📄 */payments* — your history of completed payments and receipts.\n\n` +
+        `📄 */withdrawalhistory* — the cash-outs paid to you, with every receipt.\n` +
+        `📥 */deposithistory* — the deposits you've made, with every receipt.\n\n` +
         `*Change your setup anytime:*\n` +
         `➕ */editplatform* — add or remove ClubGG / Sportsbook.\n` +
         `🏆 */editclubs* — change which clubs you play in.\n` +
@@ -191,7 +193,8 @@ export function buildBot(token: string): Bot<Ctx> {
   bot.command(['cancelwithdraw', 'cancelcashout'], dmOnly(cashoutCancel));
   bot.command(['addtowithdraw', 'addtocashout'], dmOnly(addToWithdrawStart));
   bot.command(['pending', 'me'], dmOnly(me));
-  bot.command(['payments', 'history', 'receipts'], dmOnly(payments));
+  bot.command(['withdrawalhistory', 'payments', 'history', 'receipts'], dmOnly(withdrawalHistory));
+  bot.command(['deposithistory', 'deposits'], dmOnly(depositHistory));
   bot.command(['support', 'help_me', 'contact'], dmOnly(supportStart));
 
   // Update your setup later.

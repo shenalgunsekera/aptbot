@@ -4,89 +4,73 @@ import { currentPlayer } from '../player.js';
 import { money, friendlyStatus } from '../words.js';
 
 /**
- * /payments — the player's own money tracker.
+ * /withdrawalhistory — money the player RECEIVED (their cash-outs), with receipts.
+ * /deposithistory    — money the player ADDED (their deposits), with receipts.
  *
- * The point (from the spec): a $100 cash-out paid as 50 + 25 + 25 by three
- * different people is three payments, and the player must be able to see each
- * one and its receipt any time.
- *
- * ONGOING first, in full detail with receipts — that's what a player watches.
- * A few recently-finished ones follow, receipts still linked, so nothing they
- * were paid ever becomes unreachable.
+ * A $100 cash-out paid as 50 + 25 + 25 by three different people is three
+ * payments, and the player must be able to see each one AND its receipt any time.
  *
  * SECURITY: player_payments/player_deposits are scoped to this player's id, and
- * currentPlayer() resolves it from the verified Telegram user. A player can
- * never see another player's payments or receipts.
+ * currentPlayer() resolves it from the verified user — a player never sees
+ * another player's history or receipts.
  */
 const ONGOING_WD = new Set(['pending_unload', 'queued', 'partially_filled', 'filled']);
 const ONGOING_DEP = new Set(['matching', 'awaiting_payment', 'awaiting_confirmation']);
 
-export async function payments(ctx: Ctx): Promise<void> {
-  const sql = db();
+/** /withdrawalhistory — the cash-outs the player has been (or is being) paid. */
+export async function withdrawalHistory(ctx: Ctx): Promise<void> {
   const p = await currentPlayer(ctx);
   if (!p) return void (await ctx.reply('Send /start to get set up first.'));
-
-  const outs = await sql<any[]>`select * from player_payments(${p.id}::uuid) limit 25`;
-  const deps = await sql<any[]>`select * from player_deposits(${p.id}::uuid) limit 25`;
-
-  // Only show payments that actually went through — never cancelled/expired ones.
-  const outOngoing = outs.filter((w) => ONGOING_WD.has(w.status));
-  const outDone = outs.filter((w) => w.status === 'completed').slice(0, 3);
-  const depOngoing = deps.filter((d) => ONGOING_DEP.has(d.status));
-  const depDone = deps.filter((d) => d.status === 'completed').slice(0, 3);
-
-  if (!outs.length && !deps.length) {
-    await ctx.reply("You haven't added or cashed out any money yet. Use /deposit or /withdraw to start.");
-    return;
+  const outs = await db()<any[]>`select * from player_payments(${p.id}::uuid) limit 25`;
+  if (!outs.length) {
+    return void (await ctx.reply("You haven't cashed out any money yet. Use /withdraw to start."));
   }
+  const ongoing = outs.filter((w) => ONGOING_WD.has(w.status));
+  const done = outs.filter((w) => w.status === 'completed').slice(0, 5);
 
   const lines: string[] = [];
+  if (ongoing.length) { lines.push('*💸 Cash-outs in progress*\n'); for (const w of ongoing) lines.push(renderCashout(w)); }
+  if (done.length) { lines.push('*✅ Recently paid*\n'); for (const w of done) lines.push(renderCashout(w, true)); }
+  if (!lines.length) lines.push('No completed cash-outs yet.');
 
-  if (outOngoing.length) {
-    lines.push('*💸 Cash-outs in progress*\n');
-    for (const w of outOngoing) lines.push(renderCashout(w));
-  }
-  if (depOngoing.length) {
-    lines.push('*💵 Money you\'re adding*\n');
-    for (const d of depOngoing) lines.push(renderDeposit(d));
-  }
+  await sendChunks(ctx, lines);
+  await postReceipts(ctx, [...ongoing, ...done]);
+}
 
-  if (outDone.length || depDone.length) {
-    lines.push('*✅ Recently finished*\n');
-    for (const w of outDone) lines.push(renderCashout(w, true));
-    for (const d of depDone) lines.push(renderDeposit(d, true));
+/** /deposithistory — the deposits the player has made, with the receipts sent. */
+export async function depositHistory(ctx: Ctx): Promise<void> {
+  const p = await currentPlayer(ctx);
+  if (!p) return void (await ctx.reply('Send /start to get set up first.'));
+  const deps = await db()<any[]>`select * from player_deposits(${p.id}::uuid) limit 25`;
+  if (!deps.length) {
+    return void (await ctx.reply("You haven't added any money yet. Use /deposit to start."));
   }
+  const ongoing = deps.filter((d) => ONGOING_DEP.has(d.status));
+  const done = deps.filter((d) => d.status === 'completed').slice(0, 5);
 
-  if (!lines.length) {
-    // Everything is old/done beyond the recent window — still let them see the
-    // completed ones (never cancelled).
-    const done = outs.filter((w) => w.status === 'completed').slice(0, 5);
-    if (done.length) {
-      lines.push('*Your recent payments*\n');
-      for (const w of done) lines.push(renderCashout(w, true));
-    } else {
-      lines.push('No completed payments yet.');
-    }
-  }
+  const lines: string[] = [];
+  if (ongoing.length) { lines.push('*💵 Money you\'re adding*\n'); for (const d of ongoing) lines.push(renderDeposit(d)); }
+  if (done.length) { lines.push('*✅ Recently added*\n'); for (const d of done) lines.push(renderDeposit(d, true)); }
+  if (!lines.length) lines.push('No completed deposits yet.');
 
+  await sendChunks(ctx, lines);
+  await postReceipts(ctx, [...ongoing, ...done]);
+}
+
+async function sendChunks(ctx: Ctx, lines: string[]): Promise<void> {
   const full = lines.join('\n').trim();
   for (const chunk of chunkMarkdown(full, 3800)) {
     await ctx.reply(chunk, { parse_mode: 'Markdown', link_preview_options: { is_disabled: true } });
   }
+}
 
-  // Then send the actual receipt IMAGES — but only for what a player is actively
-  // watching: everything in progress, plus the SINGLE most recent finished one.
-  // Older finished payments keep their receipt LINK in the text above; we don't
-  // re-post every image or the chat floods.
+/** Post the actual receipt IMAGES so every screenshot is viewable — a Telegram
+ *  file_id and an http url both work with sendPhoto, which is why a file_id
+ *  receipt (e.g. from /adjust) shows here even though it isn't a clickable link. */
+async function postReceipts(ctx: Ctx, items: any[]): Promise<void> {
   const seen = new Set<string>();
-  const mostRecentDone = outs.find((w) => w.status === 'completed');
-  const showable = [
-    ...outs.filter((w) => ONGOING_WD.has(w.status)),
-    ...(mostRecentDone ? [mostRecentDone] : []),
-  ];
-  for (const w of showable) {
-    for (const pay of (w.payments ?? []) as any[]) {
-      // A payment can have up to two screenshots now — show every one.
+  for (const it of items) {
+    for (const pay of (it.payments ?? []) as any[]) {
       for (const rc of receiptsOf(pay)) {
         if (seen.has(rc.url)) continue;
         seen.add(rc.url);
@@ -100,8 +84,8 @@ export async function payments(ctx: Ctx): Promise<void> {
   }
 }
 
-/** Every receipt on a payment as {url, ref}. Prefers the new `receipts` array
- *  (all screenshots); falls back to the singular `receipt`/`receipt_ref`. */
+/** Every receipt on a payment as {url, ref}. Prefers the `receipts` array (all
+ *  screenshots); falls back to the singular `receipt`/`receipt_ref`. */
 function receiptsOf(pay: any): { url: string; ref?: string }[] {
   const list = Array.isArray(pay.receipts) && pay.receipts.length
     ? pay.receipts.map((r: any) => (typeof r === 'string' ? { url: r } : r))
@@ -109,9 +93,14 @@ function receiptsOf(pay: any): { url: string; ref?: string }[] {
   return list.filter((r: any) => r?.url);
 }
 
-/** Markdown links for ALL of a payment's receipts, each on its own line. */
+/** Receipt lines. Only an http(s) url becomes a clickable link — a Telegram
+ *  file_id isn't a URL, so it's shown as plain text and posted as an image below. */
 function receiptLinks(pay: any): string {
-  return receiptsOf(pay).map((r) => `\n     📄 [Receipt ${r.ref ?? ''}](${r.url})`).join('');
+  return receiptsOf(pay).map((r) =>
+    /^https?:\/\//i.test(r.url)
+      ? `\n     📄 [Receipt ${r.ref ?? ''}](${r.url})`
+      : `\n     📄 Receipt ${r.ref ?? ''} _(image below)_`,
+  ).join('');
 }
 
 function renderCashout(w: any, brief = false): string {
@@ -125,7 +114,6 @@ function renderCashout(w: any, brief = false): string {
   if (pays.length && !brief) {
     for (const [i, pay] of pays.entries()) out.push(payLine(i, pay));
   } else if (pays.length && brief) {
-    // Brief: just the receipt links (all of them), still reachable.
     for (const pay of pays) {
       const links = receiptLinks(pay);
       if (links) out.push(`  💵 ${money(pay.amount)}${links}`);

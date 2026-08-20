@@ -3,7 +3,8 @@
 export const COMMANDS_LIST =
   '💵 /deposit — add money\n' +
   '💸 /withdraw — cash-out\n' +
-  '📄 /payments — your payments & receipts\n' +
+  '📄 /withdrawalhistory — cash-outs paid to you & receipts\n' +
+  '📥 /deposithistory — deposits you made & receipts\n' +
   '📋 /pending — your account\n' +
   '➕ /editplatform — add or remove ClubGG / Sportsbook\n' +
   '🏆 /editclubs — change which clubs you play in\n' +
