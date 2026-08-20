@@ -329,16 +329,18 @@ export function renderNotification(n: Notification): Rendered | null {
       const load = Number(p.delta) > 0;
       const reload = p.reason === 'withdraw.cancel_reload';
       const topup = p.reason === 'withdraw.topup';
-      const who = `${md(p.account ?? p.player_name)}${p.platform ? ` [${p.platform}]` : ''}`;
+      // account, then [platform · club] together in the bracket — same as verify.
+      const tag = p.platform ? ` [${md(p.platform)}${p.club ? ` · ${md(p.club)}` : ''}]` : '';
+      const who = `${md(p.account ?? p.player_name)}${tag}`;
       return {
         text: reload
           ? `↩️ *Player cancelled a cash-out — re-load ${m(Math.abs(Number(p.delta)), p.currency)}*\n` +
-            `Player: *${who}*\nID: \`${p.platform_uid}\`\nClub: ${p.club}\n\nPut it back on their table, then mark done.`
+            `Player: *${who}*\nID: \`${p.platform_uid}\`\n\nPut it back on their table, then mark done.`
           : topup
           ? `➕ *Adding to a cash-out — take ${m(Math.abs(Number(p.delta)), p.currency)} off*\n` +
-            `Player: *${who}*\nID: \`${p.platform_uid}\`\nClub: ${p.club}\n\nThey're adding to a cash-out already in the queue. Take it off, then mark done.`
+            `Player: *${who}*\nID: \`${p.platform_uid}\`\n\nThey're adding to a cash-out already in the queue. Take it off, then mark done.`
           : `🎰 *${load ? 'ADD' : 'TAKE OFF'} ${m(Math.abs(Number(p.delta)), p.currency)}*\n` +
-            `Player: *${who}*\nID: \`${p.platform_uid}\`\nClub: ${p.club}\nReason: ${p.reason}`,
+            `Player: *${who}*\nID: \`${p.platform_uid}\`\nReason: ${p.reason}`,
         keyboard: new InlineKeyboard().text('✋ Claim', `lo:claim:${n.ref_id}`),
       };
     }

@@ -45,8 +45,9 @@ async function adminFor(ctx: Ctx): Promise<{ id: string; role: string } | null> 
  */
 export type LoaderId = { account: string; platform: string | null; platform_uid: string; club: string | null };
 export function loaderIdentity(o: LoaderId): string {
-  const who = `${md(o.account)}${o.platform ? ` [${md(o.platform)}]` : ''}`;
-  return `Player: *${who}*\nID: \`${o.platform_uid}\`` + (o.club ? `\nClub: ${md(o.club)}` : '');
+  // Match the verify card: account, then [platform · club] together in the bracket.
+  const tag = o.platform ? ` [${md(o.platform)}${o.club ? ` · ${md(o.club)}` : ''}]` : '';
+  return `Player: *${md(o.account)}*${tag}\nID: \`${o.platform_uid}\``;
 }
 /** SQL that resolves a loader order's account/platform/club — use with loaderIdJoins. */
 export function loaderIdSelect() {
