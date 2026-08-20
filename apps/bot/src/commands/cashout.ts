@@ -431,7 +431,7 @@ async function doCancel(ctx: Ctx, withdrawId: string, amount: number): Promise<v
           loaderIdentity(o),
         new InlineKeyboard().text('✋ Claim', `lo:claim:${j.order_id}`));
     }
-    return void (await ctx.reply(`✅ Reduced — we'll take off *${money(Number(j.new_amount ?? 0))}* instead. Your line stays.`, { parse_mode: 'Markdown' }));
+    return void (await ctx.reply(`✅ Reduced — we'll take off *${money(Number(j.new_amount ?? 0))}* instead. Your spot in line stays.`, { parse_mode: 'Markdown' }));
   }
   // reload: the admin re-load card was raised automatically; player is confirmed once it's re-loaded.
   await ctx.reply(
