@@ -75,6 +75,7 @@ export interface PaymentMethod {
   handle_hint: string | null;
   handle_pattern: string | null;
   sort_order: number;
+  withdraw_payout_mode: 'request' | 'admin_paid' | null;
 }
 
 export interface Config {
