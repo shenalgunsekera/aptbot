@@ -50,7 +50,7 @@ export default async function TransactionsPage({
     <Shell>
       <div className="page-head">
         <div>
-          <h1>Payments</h1>
+          <h1>Deposits</h1>
           <p className="sub">Every payment in full — who, how much, the reference, receipts, and the money trail.</p>
         </div>
         <form className="btn-row">
@@ -61,11 +61,11 @@ export default async function TransactionsPage({
         </form>
       </div>
 
-      <div className="btn-row" style={{ marginBottom: 12 }}>
+      <div className="tabs" role="tablist">
         {FILTERS.map((f) => (
-          <Link key={f.key} href={`/transactions?filter=${f.key}`} className="btn"
-                aria-current={filter === f.key ? 'page' : undefined}
-                style={filter === f.key ? { background: 'var(--red)', color: '#fff', borderColor: 'var(--red)' } : undefined}>
+          <Link key={f.key} href={`/transactions?filter=${f.key}`} role="tab"
+                className={`tab ${filter === f.key ? 'active' : ''}`}
+                aria-selected={filter === f.key}>
             {f.label}
           </Link>
         ))}

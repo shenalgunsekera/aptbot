@@ -8,8 +8,8 @@ import { SignOutButton } from './signout';
  * session — so a revoked admin loses access on their next navigation, not when
  * their token happens to expire.
  *
- * Plain language throughout: "Jobs", "Payments", "Cash outs" — never "loader
- * orders", "fills", "withdrawals".
+ * Plain language throughout: "Jobs", "Deposits", "Withdrawals" — never "loader
+ * orders", "fills", "escrow".
  */
 export async function Shell({ children }: { children: React.ReactNode }) {
   const session = await getSession();
@@ -36,9 +36,9 @@ export async function Shell({ children }: { children: React.ReactNode }) {
   const nav = [
     { href: '/', label: 'Overview' },
     { href: '/jobs', label: 'Jobs', count: counts?.jobs },
-    { href: '/transactions', label: 'Payments' },
+    { href: '/transactions', label: 'Deposits' },
     { href: '/receipts', label: 'Receipts' },
-    { href: '/queue', label: 'Cash outs' },
+    { href: '/queue', label: 'Withdrawals' },
     { href: '/disputes', label: 'Disputes', count: counts?.disputes },
     { href: '/players', label: 'Players', count: counts?.links },
     { href: '/audit', label: 'History' },

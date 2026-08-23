@@ -212,7 +212,7 @@ function MethodForm({ method }: { method: any | null }) {
       </div>
 
       <div className="field">
-        <label htmlFor="withdraw_payout_mode">Cash-out payout (company-settled)</label>
+        <label htmlFor="withdraw_payout_mode">Withdrawal payout (company-settled)</label>
         <select id="withdraw_payout_mode" name="withdraw_payout_mode"
                 defaultValue={method?.withdraw_payout_mode ?? 'admin_paid'}>
           <option value="admin_paid">Admin pays &amp; uploads a screenshot</option>

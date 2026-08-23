@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { db } from '@union/core';
 import { Shell } from '../../components/shell';
 import { Money, Ago } from '../../components/ui';
@@ -5,15 +6,28 @@ import { QueueActions } from './actions';
 
 export const dynamic = 'force-dynamic';
 
-export default async function QueuePage() {
+export default async function QueuePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ method?: string }>;
+}) {
+  const { method } = await searchParams;
   const sql = db();
-  const rows = await sql<any[]>`select * from v_withdraw_queue order by method_name, queue_position`;
+  const all = await sql<any[]>`select * from v_withdraw_queue order by method_name, queue_position`;
+
+  // Filter tabs by payment method — one clean list at a time instead of every
+  // method mixed together. Counts come from the full queue.
+  const counts = new Map<string, number>();
+  for (const r of all) counts.set(r.method_name, (counts.get(r.method_name) ?? 0) + 1);
+  const methodTabs = [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  const active = method && counts.has(method) ? method : 'all';
+  const rows = active === 'all' ? all : all.filter((r) => r.method_name === active);
 
   return (
     <Shell>
       <div className="page-head">
         <div>
-          <h1>Withdrawal queue</h1>
+          <h1>Withdrawals</h1>
           <p className="sub">
             Strict FIFO, oldest first. Depositors fill these automatically — or the owner can clear
             one directly from the float.
@@ -21,6 +35,20 @@ export default async function QueuePage() {
         </div>
         <a className="btn" href="/api/export?type=cashouts">⬇ Excel</a>
       </div>
+
+      {methodTabs.length > 0 && (
+        <div className="tabs" role="tablist" aria-label="Filter by payment method">
+          <Link href="/queue" role="tab" aria-selected={active === 'all'} className={`tab ${active === 'all' ? 'active' : ''}`}>
+            All <span style={{ opacity: 0.55 }}>{all.length}</span>
+          </Link>
+          {methodTabs.map(([m, c]) => (
+            <Link key={m} href={`/queue?method=${encodeURIComponent(m)}`} role="tab" aria-selected={active === m}
+                  className={`tab ${active === m ? 'active' : ''}`}>
+              {m} <span style={{ opacity: 0.55 }}>{c}</span>
+            </Link>
+          ))}
+        </div>
+      )}
 
       <div className="table-wrap">
         {rows.length === 0 ? (
