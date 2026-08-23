@@ -1,12 +1,12 @@
 'use client';
 
 import { PromptAction } from '../../components/ui';
-import { payFromClub, cancelCashout } from '../../lib/actions';
+import { payFromClub, cancelCashout, setWithdrawMin } from '../../lib/actions';
 
 export function QueueActions({
   w,
 }: {
-  w: { id: string; remaining: number; currency: string; handle: string; name: string };
+  w: { id: string; remaining: number; currency: string; handle: string; name: string; minOverride: number | null };
 }) {
   const amt = (w.remaining / 100).toFixed(2);
 
@@ -54,6 +54,25 @@ export function QueueActions({
         }
         fields={[{ name: 'reason', label: 'Reason', type: 'textarea', required: true }]}
         action={(v) => cancelCashout(w.id, v.reason ?? '')}
+      />
+
+      <PromptAction
+        label={w.minOverride ? `Min $${(w.minOverride / 100).toFixed(2)}` : 'Set min'}
+        title={`Minimum for ${w.name}'s cash-out`}
+        fields={[{
+          name: 'min',
+          label: 'Minimum ($) — must be above the default. Blank = reset.',
+          placeholder: '50',
+          defaultValue: w.minOverride ? String(w.minOverride / 100) : '',
+        }]}
+        action={async (v) => {
+          const raw = v.min?.trim();
+          const cents = raw ? Math.round(parseFloat(raw) * 100) : null;
+          if (raw && (!Number.isFinite(cents!) || cents! <= 0)) {
+            return { ok: false as const, error: 'Enter a dollar amount, or leave blank to reset.' };
+          }
+          return setWithdrawMin(w.id, cents);
+        }}
       />
     </div>
   );

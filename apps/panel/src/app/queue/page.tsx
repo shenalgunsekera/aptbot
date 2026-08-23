@@ -16,7 +16,7 @@ export default async function QueuePage({
   const all = await sql<any[]>`
     select q.*,
            coalesce(case when pf.code = 'clubgg' then pp.platform_username else pp.platform_uid end, q.display_name) as account,
-           cl.name as club, pf.code as platform_code
+           cl.name as club, pf.code as platform_code, wr.min_override
       from v_withdraw_queue q
       left join withdraw_requests wr on wr.id = q.id
       left join platforms pf on pf.id = wr.platform_id
@@ -94,6 +94,9 @@ export default async function QueuePage({
                       {r.account && r.account !== r.display_name && (
                         <div style={{ fontSize: 10, color: 'var(--text-faint)' }}>{r.display_name}</div>
                       )}
+                      {r.min_override && (
+                        <span className="badge accent" style={{ marginTop: 4 }}>min ${(r.min_override / 100).toFixed(2)}</span>
+                      )}
                     </td>
                     <td><span className="badge muted">{r.method_name}</span></td>
                     <td className="num"><Money minor={r.amount} currency={r.currency} /></td>
@@ -117,6 +120,7 @@ export default async function QueuePage({
                           currency: r.currency,
                           handle: r.payout_handle,
                           name: r.display_name ?? 'player',
+                          minOverride: r.min_override ?? null,
                         }}
                       />
                     </td>

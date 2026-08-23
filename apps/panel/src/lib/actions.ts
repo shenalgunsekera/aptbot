@@ -239,6 +239,16 @@ export async function cancelCashout(withdrawId: string, reason: string): Promise
   }, ['/queue']);
 }
 
+/** Raise (or clear) the minimum on one cash-out. cents=null clears the override.
+ *  The DB enforces "raise only, above the global minimum" and audits it. */
+export async function setWithdrawMin(withdrawId: string, cents: number | null): Promise<Result> {
+  return run(async () => {
+    const s = await requireAdmin();
+    await db()`select withdraw_set_min(${withdrawId}::uuid, ${cents}::bigint, ${s.admin.id}::uuid)`;
+    return cents == null ? 'Minimum reset to the default.' : `Minimum for this cash-out set to $${(cents / 100).toFixed(2)}.`;
+  }, ['/queue']);
+}
+
 // ─── Config (owner only) ─────────────────────────────────────────────────────
 
 export async function updateConfig(patch: Record<string, unknown>): Promise<Result> {
