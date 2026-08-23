@@ -13,13 +13,16 @@ export const dynamic = 'force-dynamic';
  * transaction, with that transaction's screenshots inside. Filter by payment
  * method and by deposit vs cash-out, with a small dashboard of the totals on top.
  */
-type Row = {
-  id: string; reference: string | null; player_name: string | null; platform_uid: string | null;
-  url: string | null; content_type: string | null; created_at: string;
-  ref_type: string | null; ref_id: string | null; platform: string | null;
-  amount: number | null; currency: string | null; method: string | null;
+type Raw = {
+  id: string; reference: string | null; url: string | null; content_type: string | null; created_at: string;
+  ref_id: string | null; player_id: string; player_name: string | null; platform_uid: string | null; up_platform: string | null;
+  amount: number | null; currency: string | null; deposit_id: string | null; withdraw_id: string | null;
+  method: string | null; method_code: string;
+  payee_id: string | null; payee_name: string | null; payee_account: string | null; payee_platform: string | null; payee_club: string | null;
+  w_amount: number | null; w_remaining: number | null; w_status: string | null;
 };
-type Agg = { method: string; method_code: string; deposits: number; cashouts: number; total: number };
+type Dir = 'deposit' | 'cashout' | 'received' | 'other';
+type Agg = { code: string; name: string; deposits: number; cashouts: number; total: number };
 
 // A small, stable palette for the donut (readable on both themes).
 const PIE = ['#5b5bd6', '#2f9e6b', '#c2790a', '#e5484d', '#0e7490', '#7c3aed', '#0284c7', '#ea580c', '#9295a8'];
@@ -34,81 +37,138 @@ export default async function ReceiptsPage({
   const sql = db();
 
   const kind = type === 'deposits' ? 'deposits' : type === 'cashouts' ? 'cashouts' : 'all';
-  const searchF = q
-    ? sql`(r.player_name ilike ${'%' + q + '%'} or r.platform_uid ilike ${'%' + q + '%'} or r.reference ilike ${'%' + q + '%'})`
+  const like = q ? '%' + q + '%' : null;
+  const searchF = like
+    ? sql`(r.player_name ilike ${like} or r.platform_uid ilike ${like} or r.reference ilike ${like} or wp.display_name ilike ${like})`
     : sql`true`;
-  const typeF = kind === 'deposits' ? sql`f.deposit_id is not null`
-    : kind === 'cashouts' ? sql`(f.withdraw_id is not null and f.deposit_id is null)`
-    : sql`true`;
-  const methodF = method && method !== 'all' ? sql`pm.code = ${method}` : sql`true`;
 
-  // Dashboard aggregates — respect the search, so the numbers match what's shown.
-  const agg = await sql<Agg[]>`
-    select coalesce(pm.name, 'Other') as method, coalesce(pm.code, 'other') as method_code,
-           count(*) filter (where f.deposit_id is not null)::int as deposits,
-           count(*) filter (where f.withdraw_id is not null and f.deposit_id is null)::int as cashouts,
-           count(*)::int as total
+  // Every receipt with its fill, the depositor side (who uploaded it) and — for a
+  // peer-to-peer deposit — the payee side (the player who actually got the money).
+  // One physical receipt is therefore BOTH the sender's proof they sent it AND the
+  // payee's proof they received it; we expand it into per-side entries below.
+  const rows = await sql<Raw[]>`
+    select r.id, r.reference, r.url, r.content_type, r.created_at, r.ref_id,
+           r.player_id, r.player_name, r.platform_uid, upf.name as up_platform,
+           f.amount, f.currency, f.deposit_id, f.withdraw_id,
+           pm.name as method, coalesce(pm.code, 'other') as method_code,
+           w.player_id as payee_id, wp.display_name as payee_name,
+           coalesce(case when wpf.code = 'clubgg' then wpp.platform_username else wpp.platform_uid end, wp.display_name) as payee_account,
+           wpf.name as payee_platform, wcl.name as payee_club,
+           w.amount as w_amount, w.amount_remaining as w_remaining, w.status as w_status
       from receipts r
+      left join platforms upf on upf.id = r.platform_id
       left join fills f on r.ref_type = 'fill' and f.id = r.ref_id
       left join payment_methods pm on pm.id = f.method_id
+      left join withdraw_requests w on w.id = f.withdraw_id
+      left join players wp on wp.id = w.player_id
+      left join platforms wpf on wpf.id = w.platform_id
+      left join player_platforms wpp on wpp.player_id = w.player_id and wpp.platform_id = w.platform_id
+      left join clubs wcl on wcl.id = wpp.club_id
      where ${searchF}
-     group by pm.name, pm.code
-     order by count(*) desc`;
+     order by r.created_at desc
+     limit 1500`;
 
+  type Entry = {
+    ownerId: string; ownerName: string; ownerAccount: string | null; platform: string | null; club: string | null;
+    dir: Dir; groupKind: 'withdraw' | 'txn'; groupId: string;
+    wAmount: number | null; wRemaining: number | null; wStatus: string | null;
+    reference: string | null; url: string | null; content_type: string | null;
+    created_at: string; amount: number | null; currency: string | null; method: string | null; method_code: string;
+  };
+  const entries: Entry[] = [];
+  for (const r of rows) {
+    const baseDir: Dir = r.deposit_id ? 'deposit' : r.withdraw_id ? 'cashout' : 'other';
+    const shared = {
+      reference: r.reference, url: r.url, content_type: r.content_type, created_at: r.created_at,
+      amount: r.amount, currency: r.currency, method: r.method, method_code: r.method_code,
+    };
+    // A cash-out receipt (a paid slice or a p2p match) is grouped by the WHOLE
+    // cash-out it belongs to, so a $1,500 cash-out paid in pieces reads as one
+    // folder. A deposit stays grouped by its own transaction.
+    entries.push({
+      ownerId: r.player_id, ownerName: r.player_name ?? 'Unknown', ownerAccount: r.platform_uid,
+      platform: r.up_platform, club: null, dir: baseDir,
+      groupKind: baseDir === 'cashout' ? 'withdraw' : 'txn',
+      groupId: (baseDir === 'cashout' ? r.withdraw_id : r.ref_id) ?? r.id,
+      wAmount: r.w_amount, wRemaining: r.w_remaining, wStatus: r.w_status, ...shared,
+    });
+    // Peer-to-peer: the sender's screenshot is also the payee's proof of receipt,
+    // so it shows in the payee's own cash-out folder as money RECEIVED.
+    if (r.deposit_id && r.withdraw_id && r.payee_id) {
+      entries.push({
+        ownerId: r.payee_id, ownerName: r.payee_name ?? 'Unknown', ownerAccount: r.payee_account,
+        platform: r.payee_platform, club: r.payee_club, dir: 'received',
+        groupKind: 'withdraw', groupId: r.withdraw_id,
+        wAmount: r.w_amount, wRemaining: r.w_remaining, wStatus: r.w_status, ...shared,
+      });
+    }
+  }
+  const inKind = (d: Dir) => kind === 'all' ? true : kind === 'deposits' ? d === 'deposit' : (d === 'cashout' || d === 'received');
+
+  // Method tabs + dashboard, counted from the entries so the tab numbers always
+  // match the folders shown. "Received / paid out" is the cash-out side.
+  const mAgg = new Map<string, Agg>();
+  for (const e of entries) {
+    const a = mAgg.get(e.method_code) ?? { code: e.method_code, name: e.method ?? 'Other', deposits: 0, cashouts: 0, total: 0 };
+    if (e.dir === 'deposit') a.deposits++;
+    else if (e.dir === 'cashout' || e.dir === 'received') a.cashouts++;
+    a.total++;
+    mAgg.set(e.method_code, a);
+  }
   const pickCount = (a: Agg) => (kind === 'deposits' ? a.deposits : kind === 'cashouts' ? a.cashouts : a.total);
-  const methodTabs = agg.filter((a) => pickCount(a) > 0);
-  const selAgg = method && method !== 'all' ? agg.find((a) => a.method_code === method) ?? null : null;
+  const methodTabs = [...mAgg.values()].filter((a) => pickCount(a) > 0).sort((x, y) => y.total - x.total);
+  const selAgg = method && method !== 'all' ? mAgg.get(method) ?? null : null;
 
-  // Tiles + donut reflect the selected method if one is chosen, else everything.
-  const tDep = selAgg ? selAgg.deposits : agg.reduce((s, a) => s + a.deposits, 0);
-  const tCash = selAgg ? selAgg.cashouts : agg.reduce((s, a) => s + a.cashouts, 0);
+  const tDep = selAgg ? selAgg.deposits : [...mAgg.values()].reduce((s, a) => s + a.deposits, 0);
+  const tCash = selAgg ? selAgg.cashouts : [...mAgg.values()].reduce((s, a) => s + a.cashouts, 0);
   const tTotal = tDep + tCash;
 
-  // Donut: a method's deposit↔cash-out split when one is selected; otherwise the
-  // spread of receipts across methods.
   const donutTitle = selAgg
-    ? `${selAgg.method} — deposits vs cash-outs`
-    : `${kind === 'deposits' ? 'Deposit' : kind === 'cashouts' ? 'Cash-out' : 'All'} receipts by method`;
+    ? `${selAgg.name} — sent vs received`
+    : `${kind === 'deposits' ? 'Deposit' : kind === 'cashouts' ? 'Received' : 'All'} receipts by method`;
   const pieData = selAgg
-    ? [{ label: 'Deposits', value: selAgg.deposits, color: '#2f9e6b' },
-       { label: 'Cash-outs', value: selAgg.cashouts, color: '#5b5bd6' }].filter((d) => d.value > 0)
-    : methodTabs.map((a, i) => ({ label: a.method, value: pickCount(a), color: PIE[i % PIE.length]! })).filter((d) => d.value > 0);
+    ? [{ label: 'Deposits (sent)', value: selAgg.deposits, color: '#2f9e6b' },
+       { label: 'Received / paid', value: selAgg.cashouts, color: '#5b5bd6' }].filter((d) => d.value > 0)
+    : methodTabs.map((a, i) => ({ label: a.name, value: pickCount(a), color: PIE[i % PIE.length]! })).filter((d) => d.value > 0);
 
-  const rows = await sql<Row[]>`
-    select r.id, r.reference, r.player_name, r.platform_uid, r.url, r.content_type,
-           r.created_at, r.ref_type, r.ref_id, pf.name as platform,
-           f.amount, f.currency, pm.name as method
-      from receipts r
-      left join platforms pf on pf.id = r.platform_id
-      left join fills f on r.ref_type = 'fill' and f.id = r.ref_id
-      left join payment_methods pm on pm.id = f.method_id
-     where ${searchF} and ${typeF} and ${methodF}
-     order by r.player_name nulls last, r.created_at desc
-     limit 800`;
-
-  // Group: player → transaction → its receipts.
+  // Filter to what's shown, then group: player → cash-out / deposit → receipts.
+  // A cash-out group carries the WHOLE request's totals so we can show how much
+  // of it has been paid and whether it's done.
+  type Group = {
+    id: string; kind: 'withdraw' | 'txn'; dir: Dir; when: string; rows: Entry[];
+    amount: number | null; currency: string | null; method: string | null;
+    wAmount: number | null; wRemaining: number | null; wStatus: string | null;
+  };
+  const shown = entries.filter((e) => (!method || method === 'all' || e.method_code === method) && inKind(e.dir));
   const players = new Map<string, {
-    name: string; uid: string | null; platform: string | null; count: number; latest: string;
-    txns: Map<string, { id: string; amount: number | null; currency: string | null; method: string | null; when: string; rows: Row[] }>;
+    id: string; name: string; account: string | null; platform: string | null; club: string | null;
+    count: number; latest: string; groups: Map<string, Group>;
   }>();
-  for (const r of rows) {
-    const pkey = `${r.player_name ?? '—'}|${r.platform_uid ?? ''}`;
-    let pl = players.get(pkey);
+  for (const e of shown) {
+    let pl = players.get(e.ownerId);
     if (!pl) {
-      pl = { name: r.player_name ?? 'Unknown', uid: r.platform_uid, platform: r.platform, count: 0, latest: r.created_at, txns: new Map() };
-      players.set(pkey, pl);
+      pl = { id: e.ownerId, name: e.ownerName, account: e.ownerAccount, platform: e.platform, club: e.club, count: 0, latest: e.created_at, groups: new Map() };
+      players.set(e.ownerId, pl);
     }
     pl.count++;
-    if (r.created_at > pl.latest) pl.latest = r.created_at;
-    const tkey = r.ref_id ?? r.id;
-    let tx = pl.txns.get(tkey);
-    if (!tx) {
-      tx = { id: tkey, amount: r.amount, currency: r.currency, method: r.method, when: r.created_at, rows: [] };
-      pl.txns.set(tkey, tx);
+    if (e.created_at > pl.latest) pl.latest = e.created_at;
+    if (!pl.account && e.ownerAccount) pl.account = e.ownerAccount;
+    if (!pl.club && e.club) pl.club = e.club;
+    let g = pl.groups.get(e.groupId);
+    if (!g) {
+      g = { id: e.groupId, kind: e.groupKind, dir: e.dir, when: e.created_at, rows: [],
+            amount: e.amount, currency: e.currency, method: e.method,
+            wAmount: e.wAmount, wRemaining: e.wRemaining, wStatus: e.wStatus };
+      pl.groups.set(e.groupId, g);
     }
-    tx.rows.push(r);
+    if (e.created_at > g.when) g.when = e.created_at;
+    g.rows.push(e);
   }
-  const playerList = [...players.values()].sort((a, b) => +new Date(b.latest) - +new Date(a.latest));
+  // Within a player: cash-outs first, then deposits, newest first.
+  const rank = (g: Group) => (g.kind === 'withdraw' ? 0 : 1);
+  const playerList = [...players.values()]
+    .map((pl) => ({ ...pl, groupList: [...pl.groups.values()].sort((a, b) => rank(a) - rank(b) || +new Date(b.when) - +new Date(a.when)) }))
+    .sort((a, b) => +new Date(b.latest) - +new Date(a.latest));
 
   // Build a URL keeping the other filters intact.
   const href = (over: { method?: string; type?: string }) => {
@@ -127,7 +187,7 @@ export default async function ReceiptsPage({
       <div className="page-head">
         <div>
           <h1>Receipts</h1>
-          <p className="sub">Filed by player, then by transaction. Open a folder to see the screenshots.</p>
+          <p className="sub">Filed by player, then by transaction. A peer-to-peer payment shows for both sides — the sender (deposit) and the payee (received).</p>
         </div>
         <ReceiptSearch initial={q ?? ''} type={kind} method={method ?? 'all'} />
       </div>
@@ -148,9 +208,9 @@ export default async function ReceiptsPage({
           </div>
         </div>
         <div className="dash-stats">
-          <div><div className="stat-label">{selAgg ? `${selAgg.method} receipts` : 'Total receipts'}</div><div className="stat-value">{tTotal}</div></div>
+          <div><div className="stat-label">{selAgg ? `${selAgg.name} receipts` : 'Total receipts'}</div><div className="stat-value">{tTotal}</div></div>
           <div><div className="stat-label">Deposits (sent)</div><div className="stat-value pos">{tDep}</div></div>
-          <div><div className="stat-label">Cash-outs (paid out)</div><div className="stat-value">{tCash}</div></div>
+          <div><div className="stat-label">Received / paid out</div><div className="stat-value">{tCash}</div></div>
         </div>
       </div>
 
@@ -160,9 +220,9 @@ export default async function ReceiptsPage({
           All <span style={{ opacity: 0.55 }}>{methodTabs.reduce((s, a) => s + pickCount(a), 0)}</span>
         </Link>
         {methodTabs.map((a) => (
-          <Link scroll={false} key={a.method_code} role="tab" aria-selected={method === a.method_code}
-                className={`tab ${method === a.method_code ? 'active' : ''}`} href={href({ method: a.method_code })}>
-            {a.method} <span style={{ opacity: 0.55 }}>{pickCount(a)}</span>
+          <Link scroll={false} key={a.code} role="tab" aria-selected={method === a.code}
+                className={`tab ${method === a.code ? 'active' : ''}`} href={href({ method: a.code })}>
+            {a.name} <span style={{ opacity: 0.55 }}>{pickCount(a)}</span>
           </Link>
         ))}
       </div>
@@ -181,31 +241,45 @@ export default async function ReceiptsPage({
       ) : (
         <div className="folders">
           {playerList.map((pl) => (
-            <details className="folder" key={`${pl.name}-${pl.uid}`}>
+            <details className="folder" key={pl.id}>
               <summary>
                 <span className="folder-icon">📁</span>
                 <span className="folder-name">{pl.name}</span>
-                {pl.uid && <span className="mono folder-sub">{pl.uid}</span>}
-                {pl.platform && <span className="badge muted">{pl.platform}</span>}
+                {pl.account && pl.account !== pl.name && <span className="mono folder-sub">{pl.account}</span>}
+                {[pl.platform, pl.club].filter(Boolean).length > 0 && (
+                  <span className="badge muted">{[pl.platform, pl.club].filter(Boolean).join(' · ')}</span>
+                )}
                 <span className="folder-count">{pl.count} receipt{pl.count > 1 ? 's' : ''} · <Ago at={pl.latest} /></span>
               </summary>
               <div className="folder-body">
-                {[...pl.txns.values()].map((tx) => (
-                  <details className="folder sub" key={tx.id} open={pl.txns.size <= 2}>
+                {pl.groupList.map((g) => {
+                  const isCashout = g.kind === 'withdraw';
+                  const total = g.wAmount ?? 0;
+                  const paid = total - (g.wRemaining ?? 0);
+                  const done = isCashout && (g.wStatus === 'filled' || (g.wRemaining ?? 0) <= 0);
+                  return (
+                  <details className="folder sub" key={g.id} open={pl.groupList.length <= 2}>
                     <summary>
-                      <span className="folder-icon">🧾</span>
+                      <span className="folder-icon">{isCashout ? '💵' : '🧾'}</span>
                       <span className="folder-name">
-                        {tx.amount != null
-                          ? <><Money minor={tx.amount} currency={tx.currency ?? 'USD'} />{tx.method ? ` · ${tx.method}` : ''}</>
-                          : <span className="mono">{tx.id.slice(0, 8)}</span>}
+                        {isCashout && g.wAmount != null
+                          ? <><Money minor={g.wAmount} currency={g.currency ?? 'USD'} /> cash-out</>
+                          : g.amount != null
+                          ? <><Money minor={g.amount} currency={g.currency ?? 'USD'} />{g.method ? ` · ${g.method}` : ''}</>
+                          : <span className="mono">{g.id.slice(0, 8)}</span>}
                       </span>
-                      <span className="folder-count">{tx.rows.length} · <Ago at={tx.when} /></span>
+                      {isCashout
+                        ? (done
+                            ? <span className="badge ok">✓ paid in full</span>
+                            : <span className="badge warn"><Money minor={paid} currency={g.currency ?? 'USD'} /> of <Money minor={total} currency={g.currency ?? 'USD'} /> paid</span>)
+                        : <DirBadge dir={g.dir} />}
+                      <span className="folder-count">{g.rows.length} receipt{g.rows.length > 1 ? 's' : ''} · <Ago at={g.when} /></span>
                     </summary>
                     <div className="receipt-grid">
-                      {tx.rows.map((r) => {
+                      {g.rows.map((r, i) => {
                         const viewable = !!r.url && /^https?:\/\//i.test(r.url);
                         return (
-                          <figure className="receipt-item" key={r.id}>
+                          <figure className="receipt-item" key={r.reference ?? i}>
                             {viewable ? (
                               <a href={r.url!} target="_blank" rel="noreferrer">
                                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -220,7 +294,8 @@ export default async function ReceiptsPage({
                       })}
                     </div>
                   </details>
-                ))}
+                  );
+                })}
               </div>
             </details>
           ))}
@@ -228,6 +303,14 @@ export default async function ReceiptsPage({
       )}
     </Shell>
   );
+}
+
+/** A little tag on each transaction saying which side of the money it was. */
+function DirBadge({ dir }: { dir: Dir }) {
+  if (dir === 'deposit') return <span className="badge ok">deposit</span>;
+  if (dir === 'received') return <span className="badge accent">received</span>;
+  if (dir === 'cashout') return <span className="badge accent">paid out</span>;
+  return null;
 }
 
 /** A small inline-SVG donut — no libraries, theme-aware track. */
