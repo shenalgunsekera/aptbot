@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { Fragment, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { createClub, updateClub } from '../../lib/actions';
 
 type Club = { id: string; platform_id: string; name: string; platform_club_id: string; enabled: boolean };
@@ -25,17 +26,28 @@ export function ClubsEditor({ clubs, platforms }: { clubs: Club[]; platforms: Pl
           </thead>
           <tbody>
             {clubs.map((c) => (
-              <tr key={c.id}>
-                <td><strong>{c.name}</strong></td>
-                <td>{platName(c.platform_id)}</td>
-                <td className="mono" style={{ fontSize: 11 }}>{c.platform_club_id}</td>
-                <td><span className={`badge ${c.enabled ? 'ok' : 'muted'}`}>{c.enabled ? 'on' : 'off'}</span></td>
-                <td>
-                  <button className="sm ghost" onClick={() => setEditing(editing === c.id ? null : c.id)}>
-                    {editing === c.id ? 'Close' : 'Edit'}
-                  </button>
-                </td>
-              </tr>
+              <Fragment key={c.id}>
+                <tr>
+                  <td><strong>{c.name}</strong></td>
+                  <td>{platName(c.platform_id)}</td>
+                  <td className="mono" style={{ fontSize: 11 }}>{c.platform_club_id}</td>
+                  <td><span className={`badge ${c.enabled ? 'ok' : 'muted'}`}>{c.enabled ? 'on' : 'off'}</span></td>
+                  <td>
+                    <button className="sm" onClick={() => setEditing(editing === c.id ? null : c.id)}>
+                      {editing === c.id ? 'Close' : 'Edit'}
+                    </button>
+                  </td>
+                </tr>
+                {editing === c.id && (
+                  <tr>
+                    <td colSpan={5} style={{ padding: 0, background: 'var(--surface-2)' }}>
+                      <div style={{ padding: 18 }}>
+                        <ClubForm club={c} platforms={platforms} onDone={() => setEditing(null)} />
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             ))}
             {clubs.length === 0 && (
               <tr><td colSpan={5} className="mono" style={{ color: 'var(--text-faint)' }}>No clubs yet.</td></tr>
@@ -44,10 +56,8 @@ export function ClubsEditor({ clubs, platforms }: { clubs: Club[]; platforms: Pl
         </table>
       </div>
 
-      {clubs.map((c) => (editing === c.id ? <ClubForm key={c.id} club={c} platforms={platforms} /> : null))}
-
       {editing === 'new' ? (
-        <ClubForm club={null} platforms={platforms} />
+        <ClubForm club={null} platforms={platforms} onDone={() => setEditing(null)} />
       ) : (
         <button onClick={() => setEditing('new')}>+ Add club</button>
       )}
@@ -55,9 +65,10 @@ export function ClubsEditor({ clubs, platforms }: { clubs: Club[]; platforms: Pl
   );
 }
 
-function ClubForm({ club, platforms }: { club: Club | null; platforms: Platform[] }) {
+function ClubForm({ club, platforms, onDone }: { club: Club | null; platforms: Platform[]; onDone?: () => void }) {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
+  const router = useRouter();
 
   return (
     <form
@@ -74,6 +85,7 @@ function ClubForm({ club, platforms }: { club: Club | null; platforms: Platform[
             ? await updateClub(club.id, name, platformClubId, fd.get('enabled') === 'on')
             : await createClub(String(fd.get('platform_id') ?? ''), name, platformClubId);
           setMsg(r.ok ? { ok: true, text: r.message ?? 'Saved.' } : { ok: false, text: r.error });
+          if (r.ok) { router.refresh(); onDone?.(); }
         });
       }}
     >
@@ -107,7 +119,10 @@ function ClubForm({ club, platforms }: { club: Club | null; platforms: Platform[
         </div>
       )}
       {msg && <div className={`alert ${msg.ok ? 'ok' : 'err'}`}>{msg.text}</div>}
-      <button type="submit" className="primary" disabled={pending}>{pending ? 'Saving…' : 'Save club'}</button>
+      <div className="btn-row">
+        <button type="submit" className="primary" disabled={pending}>{pending ? 'Saving…' : 'Save club'}</button>
+        {onDone && <button type="button" className="ghost" onClick={onDone}>Cancel</button>}
+      </div>
     </form>
   );
 }

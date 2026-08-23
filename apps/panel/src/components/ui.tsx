@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import type { Result } from '../lib/actions';
 
 /**
@@ -29,6 +30,7 @@ export function ActionButton({
 }) {
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<Result | null>(null);
+  const router = useRouter();
 
   return (
     <span>
@@ -38,7 +40,11 @@ export function ActionButton({
         onClick={() => {
           if (confirm && !window.confirm(confirm)) return;
           setMsg(null);
-          start(async () => setMsg(await action()));
+          start(async () => {
+            const r = await action();
+            setMsg(r);
+            if (r.ok) router.refresh();   // pull the new state in — no manual reload
+          });
         }}
       >
         {pending ? '…' : label}
@@ -72,6 +78,7 @@ export function PromptAction({
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<Result | null>(null);
+  const router = useRouter();
 
   if (!open) {
     return <button className={`${variant} sm`} onClick={() => setOpen(true)}>{label}</button>;
@@ -91,7 +98,7 @@ export function PromptAction({
           start(async () => {
             const r = await action(values);
             setMsg(r);
-            if (r.ok) setOpen(false);
+            if (r.ok) { setOpen(false); router.refresh(); }
           });
         }}
       >

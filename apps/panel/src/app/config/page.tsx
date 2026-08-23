@@ -28,7 +28,11 @@ export default async function ConfigPage() {
   const methods = await sql<any[]>`select * from payment_methods order by sort_order, name`;
   const platforms = await sql<any[]>`select * from platforms order by sort_order, name`;
   const clubs = await sql<any[]>`select id, platform_id, name, platform_club_id, enabled from clubs order by name`;
-  const admins = await sql<any[]>`select id, telegram_id, display_name, email, role, disabled from admins order by role desc, created_at`;
+  const admins = await sql<any[]>`
+    select a.id, a.telegram_id, da.discord_id, a.display_name, a.email, a.role, a.disabled
+      from admins a
+      left join discord_admins da on da.admin_id = a.id
+     order by a.disabled asc, a.role desc, a.created_at`;
 
   return (
     <Shell>

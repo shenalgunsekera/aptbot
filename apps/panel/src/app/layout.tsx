@@ -9,8 +9,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: 'Union Settlement',
-  description: 'ClubGG union settlement admin',
+  title: 'APT Bot Panel',
+  description: 'APT settlement admin',
   robots: 'noindex, nofollow',
 };
 

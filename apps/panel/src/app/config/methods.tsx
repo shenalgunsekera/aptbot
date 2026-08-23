@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { Fragment, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { upsertMethod, deleteMethod } from '../../lib/actions';
 
@@ -20,53 +20,64 @@ export function MethodsEditor({ methods }: { methods: any[] }) {
               <th style={{ width: 110 }}>Processor fee</th>
               <th>Backstop handle</th>
               <th style={{ width: 70 }}>On</th>
-              <th style={{ width: 60 }}></th>
+              <th style={{ width: 120 }}></th>
             </tr>
           </thead>
           <tbody>
             {methods.map((m) => (
-              <tr key={m.id}>
-                <td>
-                  <strong>{m.name}</strong>
-                  <div className="mono" style={{ fontSize: 10, color: 'var(--text-faint)' }}>{m.code}</div>
-                  <span className={`badge ${m.settlement === 'p2p' ? 'ok' : 'muted'}`} style={{ marginTop: 2 }}>
-                    {m.settlement === 'p2p' ? '👥 P2P' : '🏦 club'}
-                  </span>
-                </td>
-                <td className="mono">{m.currency}</td>
-                <td>
-                  <span className={`badge ${m.reversibility === 'irreversible' ? 'ok' : 'warn'}`}>
-                    {m.reversibility === 'irreversible' ? '⚡ instant' : '🕒 holds'}
-                  </span>
-                </td>
-                <td className="mono" style={{ fontSize: 11 }}>
-                  {m.min_amount ? (m.min_amount / 100).toFixed(2) : '—'} – {m.max_amount ? (m.max_amount / 100).toFixed(2) : '—'}
-                </td>
-                <td className="mono" style={{ fontSize: 11 }}>
-                  {(m.processor_fee_bps / 100).toFixed(2)}% + {(m.processor_fee_flat / 100).toFixed(2)}
-                </td>
-                <td className="mono" style={{ fontSize: 11 }}>
-                  {m.club_handle ?? <span className="badge muted">not set</span>}
-                </td>
-                <td>
-                  <span className={`badge ${m.enabled ? 'ok' : 'muted'}`}>{m.enabled ? 'on' : 'off'}</span>
-                </td>
-                <td style={{ display: 'flex', gap: 6 }}>
-                  <button className="sm ghost" onClick={() => setEditing(editing === m.id ? null : m.id)}>
-                    {editing === m.id ? 'Close' : 'Edit'}
-                  </button>
-                  <DeleteMethodButton id={m.id} name={m.name} />
-                </td>
-              </tr>
+              <Fragment key={m.id}>
+                <tr>
+                  <td>
+                    <strong>{m.name}</strong>
+                    <div className="mono" style={{ fontSize: 10, color: 'var(--text-faint)' }}>{m.code}</div>
+                    <span className={`badge ${m.settlement === 'p2p' ? 'ok' : 'muted'}`} style={{ marginTop: 2 }}>
+                      {m.settlement === 'p2p' ? '👥 P2P' : '🏦 club'}
+                    </span>
+                  </td>
+                  <td className="mono">{m.currency}</td>
+                  <td>
+                    <span className={`badge ${m.reversibility === 'irreversible' ? 'ok' : 'warn'}`}>
+                      {m.reversibility === 'irreversible' ? '⚡ instant' : '🕒 holds'}
+                    </span>
+                  </td>
+                  <td className="mono" style={{ fontSize: 11 }}>
+                    {m.min_amount ? (m.min_amount / 100).toFixed(2) : '—'} – {m.max_amount ? (m.max_amount / 100).toFixed(2) : '—'}
+                  </td>
+                  <td className="mono" style={{ fontSize: 11 }}>
+                    {(m.processor_fee_bps / 100).toFixed(2)}% + {(m.processor_fee_flat / 100).toFixed(2)}
+                  </td>
+                  <td className="mono" style={{ fontSize: 11 }}>
+                    {m.club_handle ?? <span className="badge muted">not set</span>}
+                  </td>
+                  <td>
+                    <span className={`badge ${m.enabled ? 'ok' : 'muted'}`}>{m.enabled ? 'on' : 'off'}</span>
+                  </td>
+                  <td>
+                    <div className="btn-row">
+                      <button className="sm" onClick={() => setEditing(editing === m.id ? null : m.id)}>
+                        {editing === m.id ? 'Close' : 'Edit'}
+                      </button>
+                      <DeleteMethodButton id={m.id} name={m.name} />
+                    </div>
+                  </td>
+                </tr>
+                {editing === m.id && (
+                  <tr>
+                    <td colSpan={8} style={{ padding: 0, background: 'var(--surface-2)' }}>
+                      <div style={{ padding: 18 }}>
+                        <MethodForm method={m} onDone={() => setEditing(null)} />
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             ))}
           </tbody>
         </table>
       </div>
 
-      {methods.map((m) => (editing === m.id ? <MethodForm key={m.id} method={m} /> : null))}
-
       {editing === 'new' ? (
-        <MethodForm method={null} />
+        <MethodForm method={null} onDone={() => setEditing(null)} />
       ) : (
         <button onClick={() => setEditing('new')}>+ Add payment method</button>
       )}
@@ -77,16 +88,18 @@ export function MethodsEditor({ methods }: { methods: any[] }) {
 function DeleteMethodButton({ id, name }: { id: string; name: string }) {
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
+  const router = useRouter();
   return (
     <>
       <button
-        className="sm ghost danger"
+        className="sm danger"
         disabled={pending}
         onClick={() => {
           if (!confirm(`Delete ${name}? If it has history it will be disabled instead.`)) return;
           start(async () => {
             const r = await deleteMethod(id);
             setMsg(r.ok ? (r.message ?? 'Done.') : r.error);
+            if (r.ok) router.refresh();
           });
         }}
       >
@@ -97,7 +110,7 @@ function DeleteMethodButton({ id, name }: { id: string; name: string }) {
   );
 }
 
-function MethodForm({ method }: { method: any | null }) {
+function MethodForm({ method, onDone }: { method: any | null; onDone?: () => void }) {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
   const router = useRouter();
@@ -122,7 +135,7 @@ function MethodForm({ method }: { method: any | null }) {
         start(async () => {
           const r = await upsertMethod(patch);
           setMsg(r.ok ? { ok: true, text: r.message ?? 'Saved.' } : { ok: false, text: r.error });
-          if (r.ok) router.refresh();   // pull the freshly-saved values back in
+          if (r.ok) { router.refresh(); onDone?.(); }   // pull new values in and close
         });
       }}
     >
@@ -252,9 +265,12 @@ function MethodForm({ method }: { method: any | null }) {
       </div>
 
       {msg && <div className={`alert ${msg.ok ? 'ok' : 'err'}`}>{msg.text}</div>}
-      <button type="submit" className="primary" disabled={pending}>
-        {pending ? 'Saving…' : 'Save method'}
-      </button>
+      <div className="btn-row">
+        <button type="submit" className="primary" disabled={pending}>
+          {pending ? 'Saving…' : 'Save method'}
+        </button>
+        {onDone && <button type="button" className="ghost" onClick={onDone}>Cancel</button>}
+      </div>
     </form>
   );
 }
@@ -334,7 +350,7 @@ function TiersEditor({ initial }: { initial: Array<{ up_to: number | null; handl
               )}
             </>
           )}
-          <button type="button" className="sm ghost danger" onClick={() => setTiers((ts) => ts.filter((_, j) => j !== i))}>✕</button>
+          <button type="button" className="sm ghost" onClick={() => setTiers((ts) => ts.filter((_, j) => j !== i))}>✕</button>
         </div>
       ))}
       <button type="button" className="sm" style={{ marginTop: 6 }}

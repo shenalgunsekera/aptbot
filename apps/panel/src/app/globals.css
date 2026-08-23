@@ -106,6 +106,10 @@ a:hover { color: var(--accent-deep); text-decoration: none; }
   background: linear-gradient(140deg, var(--accent-bright), var(--accent-deep));
   box-shadow: 0 4px 10px rgba(91, 91, 214, 0.35);
 }
+.brand-logo {
+  width: 32px; height: 32px; border-radius: 9px; flex-shrink: 0; object-fit: cover;
+  box-shadow: 0 4px 10px rgba(23, 24, 38, 0.18); border: 1px solid var(--border);
+}
 .brand small {
   display: block; font-weight: 450; color: var(--text-faint); font-size: 11px;
   letter-spacing: 0; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 170px;

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { Money } from '../../components/ui';
 import { resolveDispute } from '../../lib/actions';
 
@@ -21,6 +22,7 @@ export function DisputeCard({ row }: { row: any }) {
   const [flagWd, setFlagWd] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const router = useRouter();
 
   const submit = () => {
     const splitMinor = resolution === 'split' ? Math.round(parseFloat(split) * 100) : null;
@@ -41,6 +43,7 @@ export function DisputeCard({ row }: { row: any }) {
     start(async () => {
       const r = await resolveDispute(row.id, resolution, note, splitMinor, flagDep, flagWd);
       setMsg(r.ok ? null : r.error);
+      if (r.ok) router.refresh();
     });
   };
 
@@ -48,7 +51,7 @@ export function DisputeCard({ row }: { row: any }) {
     <div className="card">
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <div>
-          <span className="badge danger">DISPUTED</span>{' '}
+          <span className="badge red">DISPUTED</span>{' '}
           <strong style={{ fontSize: 17 }}><Money minor={row.amount} currency={row.currency} /></strong>{' '}
           <span className="badge muted">{row.method_name}</span>{' '}
           {row.reversibility === 'reversible' && <span className="badge warn">reversible</span>}
@@ -78,10 +81,10 @@ export function DisputeCard({ row }: { row: any }) {
           Look this reference up in {row.method_name} directly. If it does not exist, or the
           amount/recipient differ, the depositor is lying and this is a refund.
         </p>
-        {(row.receipts && row.receipts.length) && (
+        {Array.isArray(row.receipts) && row.receipts.length > 0 && (
           <p className="field-hint">
-            📎 A screenshot was attached (Telegram file <span className="mono">{(row.receipts && row.receipts.length).slice(0, 16)}…</span>).
-            Treat it as secondary — screenshots are trivially faked.
+            📎 {row.receipts.length} screenshot{row.receipts.length > 1 ? 's' : ''} attached — see the Receipts page.
+            Treat as secondary; screenshots are trivially faked.
           </p>
         )}
       </div>
@@ -94,14 +97,14 @@ export function DisputeCard({ row }: { row: any }) {
             <span className="mono" style={{ fontSize: 11 }}>{row.depositor_uid}</span>
           </div>
           {row.depositor_flags > 0 && (
-            <span className="badge danger" style={{ marginTop: 6 }}>{row.depositor_flags} risk flag(s)</span>
+            <span className="badge red" style={{ marginTop: 6 }}>{row.depositor_flags} risk flag(s)</span>
           )}
         </div>
         <div className="card" style={{ background: 'var(--surface-2)' }}>
           <div className="stat-label">Recipient (says nothing arrived)</div>
           <div style={{ marginTop: 4 }}>{row.payee_name ?? '—'}</div>
           {row.payee_flags > 0 && (
-            <span className="badge danger" style={{ marginTop: 6 }}>{row.payee_flags} risk flag(s)</span>
+            <span className="badge red" style={{ marginTop: 6 }}>{row.payee_flags} risk flag(s)</span>
           )}
         </div>
       </div>

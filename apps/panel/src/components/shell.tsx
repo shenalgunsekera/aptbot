@@ -49,9 +49,10 @@ export async function Shell({ children }: { children: React.ReactNode }) {
     <div className="shell">
       <nav className="sidebar">
         <div className="brand">
-          <span className="dot" />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img className="brand-logo" src="/logo.webp" alt="APT" />
           <span>
-            Union
+            APT Bot Panel
             <small>{session.admin.role === 'owner' ? 'Owner' : 'Admin'} · {session.email}</small>
           </span>
         </div>

@@ -1,11 +1,13 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { updateConfig } from '../../lib/actions';
 
 export function ConfigForm({ cfg }: { cfg: any }) {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
+  const router = useRouter();
 
   return (
     <form
@@ -26,6 +28,7 @@ export function ConfigForm({ cfg }: { cfg: any }) {
         start(async () => {
           const r = await updateConfig(patch);
           setMsg(r.ok ? { ok: true, text: r.message ?? 'Saved.' } : { ok: false, text: r.error });
+          if (r.ok) router.refresh();
         });
       }}
     >

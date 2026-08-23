@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { Fragment, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { upsertPlatform, deletePlatform } from '../../lib/actions';
 
 export function PlatformsEditor({ platforms }: { platforms: any[] }) {
@@ -15,34 +16,45 @@ export function PlatformsEditor({ platforms }: { platforms: any[] }) {
               <th>Platform</th>
               <th style={{ width: 90 }}>Sort</th>
               <th style={{ width: 70 }}>On</th>
-              <th style={{ width: 150 }}></th>
+              <th style={{ width: 120 }}></th>
             </tr>
           </thead>
           <tbody>
             {platforms.map((p) => (
-              <tr key={p.id}>
-                <td>
-                  <strong>{p.name}</strong>
-                  <div className="mono" style={{ fontSize: 10, color: 'var(--text-faint)' }}>{p.code}</div>
-                </td>
-                <td className="mono">{p.sort_order}</td>
-                <td><span className={`badge ${p.enabled ? 'ok' : 'muted'}`}>{p.enabled ? 'on' : 'off'}</span></td>
-                <td style={{ display: 'flex', gap: 6 }}>
-                  <button className="sm ghost" onClick={() => setEditing(editing === p.id ? null : p.id)}>
-                    {editing === p.id ? 'Close' : 'Edit'}
-                  </button>
-                  <DeleteButton id={p.id} name={p.name} />
-                </td>
-              </tr>
+              <Fragment key={p.id}>
+                <tr>
+                  <td>
+                    <strong>{p.name}</strong>
+                    <div className="mono" style={{ fontSize: 10, color: 'var(--text-faint)' }}>{p.code}</div>
+                  </td>
+                  <td className="mono">{p.sort_order}</td>
+                  <td><span className={`badge ${p.enabled ? 'ok' : 'muted'}`}>{p.enabled ? 'on' : 'off'}</span></td>
+                  <td>
+                    <div className="btn-row">
+                      <button className="sm" onClick={() => setEditing(editing === p.id ? null : p.id)}>
+                        {editing === p.id ? 'Close' : 'Edit'}
+                      </button>
+                      <DeleteButton id={p.id} name={p.name} />
+                    </div>
+                  </td>
+                </tr>
+                {editing === p.id && (
+                  <tr>
+                    <td colSpan={4} style={{ padding: 0, background: 'var(--surface-2)' }}>
+                      <div style={{ padding: 18 }}>
+                        <PlatformForm platform={p} onDone={() => setEditing(null)} />
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             ))}
           </tbody>
         </table>
       </div>
 
-      {platforms.map((p) => (editing === p.id ? <PlatformForm key={p.id} platform={p} /> : null))}
-
       {editing === 'new' ? (
-        <PlatformForm platform={null} />
+        <PlatformForm platform={null} onDone={() => setEditing(null)} />
       ) : (
         <button onClick={() => setEditing('new')}>+ Add platform</button>
       )}
@@ -53,16 +65,18 @@ export function PlatformsEditor({ platforms }: { platforms: any[] }) {
 function DeleteButton({ id, name }: { id: string; name: string }) {
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
+  const router = useRouter();
   return (
     <>
       <button
-        className="sm ghost danger"
+        className="sm danger"
         disabled={pending}
         onClick={() => {
           if (!confirm(`Delete ${name}? If it's in use it will be disabled instead.`)) return;
           start(async () => {
             const r = await deletePlatform(id);
             setMsg(r.ok ? (r.message ?? 'Done.') : r.error);
+            if (r.ok) router.refresh();
           });
         }}
       >
@@ -73,9 +87,10 @@ function DeleteButton({ id, name }: { id: string; name: string }) {
   );
 }
 
-function PlatformForm({ platform }: { platform: any | null }) {
+function PlatformForm({ platform, onDone }: { platform: any | null; onDone?: () => void }) {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
+  const router = useRouter();
 
   return (
     <form
@@ -93,6 +108,7 @@ function PlatformForm({ platform }: { platform: any | null }) {
         start(async () => {
           const r = await upsertPlatform(patch);
           setMsg(r.ok ? { ok: true, text: r.message ?? 'Saved.' } : { ok: false, text: r.error });
+          if (r.ok) { router.refresh(); onDone?.(); }
         });
       }}
     >
@@ -121,7 +137,10 @@ function PlatformForm({ platform }: { platform: any | null }) {
         </label>
       </div>
       {msg && <div className={`alert ${msg.ok ? 'ok' : 'err'}`}>{msg.text}</div>}
-      <button type="submit" className="primary" disabled={pending}>{pending ? 'Saving…' : 'Save platform'}</button>
+      <div className="btn-row">
+        <button type="submit" className="primary" disabled={pending}>{pending ? 'Saving…' : 'Save platform'}</button>
+        {onDone && <button type="button" className="ghost" onClick={onDone}>Cancel</button>}
+      </div>
     </form>
   );
 }
