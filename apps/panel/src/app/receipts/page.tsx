@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { db } from '@union/core';
 import { Shell } from '../../components/shell';
 import { getSession } from '../../lib/auth';
@@ -22,16 +23,22 @@ type Row = {
 export default async function ReceiptsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ q?: string; type?: string }>;
 }) {
   if (!(await getSession())) redirect('/login');
-  const { q } = await searchParams;
+  const { q, type } = await searchParams;
   const sql = db();
 
-  const where = q
-    ? sql`where r.player_name ilike ${'%' + q + '%'} or r.platform_uid ilike ${'%' + q + '%'}
-            or r.reference ilike ${'%' + q + '%'}`
-    : sql``;
+  // Deposit receipts = the player's proof of a payment they SENT (fill has a
+  // deposit). Cash-out receipts = proof of a payout to the player (fill has a
+  // withdrawal, no deposit).
+  const kind = type === 'deposits' ? 'deposits' : type === 'cashouts' ? 'cashouts' : 'all';
+  const searchF = q
+    ? sql`(r.player_name ilike ${'%' + q + '%'} or r.platform_uid ilike ${'%' + q + '%'} or r.reference ilike ${'%' + q + '%'})`
+    : sql`true`;
+  const typeF = kind === 'deposits' ? sql`f.deposit_id is not null`
+    : kind === 'cashouts' ? sql`(f.withdraw_id is not null and f.deposit_id is null)`
+    : sql`true`;
 
   const rows = await sql<Row[]>`
     select r.id, r.reference, r.player_name, r.platform_uid, r.url, r.content_type,
@@ -41,7 +48,7 @@ export default async function ReceiptsPage({
       left join platforms pf on pf.id = r.platform_id
       left join fills f on r.ref_type = 'fill' and f.id = r.ref_id
       left join payment_methods pm on pm.id = f.method_id
-      ${where}
+     where ${searchF} and ${typeF}
      order by r.player_name nulls last, r.created_at desc
      limit 800`;
 
@@ -76,7 +83,16 @@ export default async function ReceiptsPage({
           <h1>Receipts</h1>
           <p className="sub">Filed by player, then by transaction. Open a folder to see the screenshots.</p>
         </div>
-        <ReceiptSearch initial={q ?? ''} />
+        <ReceiptSearch initial={q ?? ''} type={kind} />
+      </div>
+
+      <div className="tabs" role="tablist" aria-label="Receipt type">
+        {([['all', 'All'], ['deposits', 'Deposits (sent)'], ['cashouts', 'Cash-outs (paid out)']] as const).map(([k, label]) => (
+          <Link key={k} role="tab" aria-selected={kind === k} className={`tab ${kind === k ? 'active' : ''}`}
+                href={`/receipts?type=${k}${q ? `&q=${encodeURIComponent(q)}` : ''}`}>
+            {label}
+          </Link>
+        ))}
       </div>
 
       {playerList.length === 0 ? (
