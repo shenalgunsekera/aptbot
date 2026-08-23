@@ -3,6 +3,7 @@ import { Shell } from '../../components/shell';
 import { getSession } from '../../lib/auth';
 import { redirect } from 'next/navigation';
 import { Money, Ago } from '../../components/ui';
+import { ReceiptSearch } from './search';
 
 export const dynamic = 'force-dynamic';
 
@@ -75,11 +76,7 @@ export default async function ReceiptsPage({
           <h1>Receipts</h1>
           <p className="sub">Filed by player, then by transaction. Open a folder to see the screenshots.</p>
         </div>
-        <form className="btn-row">
-          <input name="q" defaultValue={q ?? ''} placeholder="Search name, ID, or receipt code…" style={{ width: 240 }} />
-          <button type="submit">Search</button>
-          <a className="btn" href="/api/export?type=receipts">⬇ Excel</a>
-        </form>
+        <ReceiptSearch initial={q ?? ''} />
       </div>
 
       {playerList.length === 0 ? (
