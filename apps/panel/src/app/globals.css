@@ -184,7 +184,7 @@ td.num, th.num { text-align: right; font-family: var(--mono); white-space: nowra
 .empty { padding: 56px 16px; text-align: center; color: var(--text-faint); font-size: 14px; }
 
 /* ── Badges ─────────────────────────────────────────────────────────────── */
-.badge { display: inline-flex; align-items: center; padding: 3px 9px; border-radius: 100px; font-size: 11px; font-weight: 600; white-space: nowrap; line-height: 1.4; border: 1px solid transparent; }
+.badge { display: inline-flex; align-items: center; gap: 0.3em; padding: 3px 9px; border-radius: 100px; font-size: 11px; font-weight: 600; white-space: nowrap; line-height: 1.4; border: 1px solid transparent; }
 .badge.ok    { background: var(--ok-dim); color: var(--ok); }
 .badge.warn  { background: var(--warn-dim); color: var(--warn); }
 .badge.red   { background: var(--red-dim); color: var(--red); }

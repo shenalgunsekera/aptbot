@@ -70,7 +70,7 @@ export default async function ReceiptsPage({
 
   type Entry = {
     ownerId: string; ownerName: string; ownerAccount: string | null; platform: string | null; club: string | null;
-    dir: Dir; groupKind: 'withdraw' | 'txn'; groupId: string;
+    dir: Dir; groupKind: 'withdraw' | 'txn'; groupId: string; txnId: string; from: string | null;
     wAmount: number | null; wRemaining: number | null; wStatus: string | null;
     reference: string | null; url: string | null; content_type: string | null;
     created_at: string; amount: number | null; currency: string | null; method: string | null; method_code: string;
@@ -78,27 +78,30 @@ export default async function ReceiptsPage({
   const entries: Entry[] = [];
   for (const r of rows) {
     const baseDir: Dir = r.deposit_id ? 'deposit' : r.withdraw_id ? 'cashout' : 'other';
+    const txnId = r.ref_id ?? r.id;
     const shared = {
-      reference: r.reference, url: r.url, content_type: r.content_type, created_at: r.created_at,
+      txnId, reference: r.reference, url: r.url, content_type: r.content_type, created_at: r.created_at,
       amount: r.amount, currency: r.currency, method: r.method, method_code: r.method_code,
     };
     // A cash-out receipt (a paid slice or a p2p match) is grouped by the WHOLE
     // cash-out it belongs to, so a $1,500 cash-out paid in pieces reads as one
-    // folder. A deposit stays grouped by its own transaction.
+    // folder — and inside it, each payment (fill) is its own section. A deposit
+    // stays grouped by its own transaction.
     entries.push({
       ownerId: r.player_id, ownerName: r.player_name ?? 'Unknown', ownerAccount: r.platform_uid,
       platform: r.up_platform, club: null, dir: baseDir,
       groupKind: baseDir === 'cashout' ? 'withdraw' : 'txn',
       groupId: (baseDir === 'cashout' ? r.withdraw_id : r.ref_id) ?? r.id,
-      wAmount: r.w_amount, wRemaining: r.w_remaining, wStatus: r.w_status, ...shared,
+      from: null, wAmount: r.w_amount, wRemaining: r.w_remaining, wStatus: r.w_status, ...shared,
     });
     // Peer-to-peer: the sender's screenshot is also the payee's proof of receipt,
-    // so it shows in the payee's own cash-out folder as money RECEIVED.
+    // so it shows in the payee's own cash-out folder as money RECEIVED — labelled
+    // with who it came from.
     if (r.deposit_id && r.withdraw_id && r.payee_id) {
       entries.push({
         ownerId: r.payee_id, ownerName: r.payee_name ?? 'Unknown', ownerAccount: r.payee_account,
         platform: r.payee_platform, club: r.payee_club, dir: 'received',
-        groupKind: 'withdraw', groupId: r.withdraw_id,
+        groupKind: 'withdraw', groupId: r.withdraw_id, from: r.player_name,
         wAmount: r.w_amount, wRemaining: r.w_remaining, wStatus: r.w_status, ...shared,
       });
     }
@@ -169,6 +172,20 @@ export default async function ReceiptsPage({
   const playerList = [...players.values()]
     .map((pl) => ({ ...pl, groupList: [...pl.groups.values()].sort((a, b) => rank(a) - rank(b) || +new Date(b.when) - +new Date(a.when)) }))
     .sort((a, b) => +new Date(b.latest) - +new Date(a.latest));
+
+  // Split a cash-out's receipts into one folder per payment (fill), oldest first.
+  type Payment = { id: string; amount: number | null; currency: string | null; method: string | null; dir: Dir; from: string | null; when: string; rows: Entry[] };
+  const paymentsOf = (rows: Entry[]): Payment[] => {
+    const m = new Map<string, Payment>();
+    for (const e of rows) {
+      let p = m.get(e.txnId);
+      if (!p) { p = { id: e.txnId, amount: e.amount, currency: e.currency, method: e.method, dir: e.dir, from: e.from, when: e.created_at, rows: [] }; m.set(e.txnId, p); }
+      if (e.created_at > p.when) p.when = e.created_at;
+      p.rows.push(e);
+    }
+    return [...m.values()].sort((a, b) => +new Date(a.when) - +new Date(b.when));
+  };
+  const usd = (cents: number, cur: string | null) => (cents / 100).toLocaleString('en-US', { style: 'currency', currency: cur ?? 'USD' });
 
   // Build a URL keeping the other filters intact.
   const href = (over: { method?: string; type?: string }) => {
@@ -254,45 +271,55 @@ export default async function ReceiptsPage({
               <div className="folder-body">
                 {pl.groupList.map((g) => {
                   const isCashout = g.kind === 'withdraw';
+                  const cur = g.currency ?? 'USD';
                   const total = g.wAmount ?? 0;
                   const paid = total - (g.wRemaining ?? 0);
                   const done = isCashout && (g.wStatus === 'filled' || (g.wRemaining ?? 0) <= 0);
+                  const payments = isCashout ? paymentsOf(g.rows) : null;
                   return (
                   <details className="folder sub" key={g.id} open={pl.groupList.length <= 2}>
                     <summary>
                       <span className="folder-icon">{isCashout ? '💵' : '🧾'}</span>
                       <span className="folder-name">
                         {isCashout && g.wAmount != null
-                          ? <><Money minor={g.wAmount} currency={g.currency ?? 'USD'} /> cash-out</>
+                          ? <><Money minor={g.wAmount} currency={cur} /> cash-out</>
                           : g.amount != null
-                          ? <><Money minor={g.amount} currency={g.currency ?? 'USD'} />{g.method ? ` · ${g.method}` : ''}</>
+                          ? <><Money minor={g.amount} currency={cur} />{g.method ? ` · ${g.method}` : ''}</>
                           : <span className="mono">{g.id.slice(0, 8)}</span>}
                       </span>
                       {isCashout
                         ? (done
                             ? <span className="badge ok">✓ paid in full</span>
-                            : <span className="badge warn"><Money minor={paid} currency={g.currency ?? 'USD'} /> of <Money minor={total} currency={g.currency ?? 'USD'} /> paid</span>)
+                            : <span className="badge warn">{`${usd(paid, cur)} of ${usd(total, cur)} paid`}</span>)
                         : <DirBadge dir={g.dir} />}
-                      <span className="folder-count">{g.rows.length} receipt{g.rows.length > 1 ? 's' : ''} · <Ago at={g.when} /></span>
+                      <span className="folder-count">
+                        {isCashout
+                          ? `${payments!.length} payment${payments!.length > 1 ? 's' : ''}`
+                          : `${g.rows.length} receipt${g.rows.length > 1 ? 's' : ''}`} · <Ago at={g.when} />
+                      </span>
                     </summary>
-                    <div className="receipt-grid">
-                      {g.rows.map((r, i) => {
-                        const viewable = !!r.url && /^https?:\/\//i.test(r.url);
-                        return (
-                          <figure className="receipt-item" key={r.reference ?? i}>
-                            {viewable ? (
-                              <a href={r.url!} target="_blank" rel="noreferrer">
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img src={r.url!} alt={r.reference ?? 'receipt'} className="receipt-thumb lg" />
-                              </a>
-                            ) : (
-                              <div className="receipt-thumb lg receipt-nofile">no preview</div>
-                            )}
-                            <figcaption className="mono">{r.reference ?? '—'}</figcaption>
-                          </figure>
-                        );
-                      })}
-                    </div>
+                    {isCashout ? (
+                      <div className="folder-body">
+                        {payments!.map((p) => (
+                          <details className="folder sub" key={p.id} open={payments!.length <= 1}>
+                            <summary>
+                              <span className="folder-icon">🧾</span>
+                              <span className="folder-name">
+                                {p.amount != null
+                                  ? <><Money minor={p.amount} currency={p.currency ?? 'USD'} />{p.method ? ` · ${p.method}` : ''}</>
+                                  : <span className="mono">{p.id.slice(0, 8)}</span>}
+                              </span>
+                              <DirBadge dir={p.dir} />
+                              {p.from && <span className="badge muted">from {p.from}</span>}
+                              <span className="folder-count">{p.rows.length} · <Ago at={p.when} /></span>
+                            </summary>
+                            <ReceiptGrid rows={p.rows} />
+                          </details>
+                        ))}
+                      </div>
+                    ) : (
+                      <ReceiptGrid rows={g.rows} />
+                    )}
                   </details>
                   );
                 })}
@@ -302,6 +329,30 @@ export default async function ReceiptsPage({
         </div>
       )}
     </Shell>
+  );
+}
+
+/** The screenshots for one payment, as a thumbnail grid. */
+function ReceiptGrid({ rows }: { rows: { url: string | null; reference: string | null }[] }) {
+  return (
+    <div className="receipt-grid">
+      {rows.map((r, i) => {
+        const viewable = !!r.url && /^https?:\/\//i.test(r.url);
+        return (
+          <figure className="receipt-item" key={r.reference ?? i}>
+            {viewable ? (
+              <a href={r.url!} target="_blank" rel="noreferrer">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={r.url!} alt={r.reference ?? 'receipt'} className="receipt-thumb lg" />
+              </a>
+            ) : (
+              <div className="receipt-thumb lg receipt-nofile">no preview</div>
+            )}
+            <figcaption className="mono">{r.reference ?? '—'}</figcaption>
+          </figure>
+        );
+      })}
+    </div>
   );
 }
 
