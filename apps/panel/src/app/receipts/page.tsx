@@ -57,12 +57,22 @@ export default async function ReceiptsPage({
 
   const pickCount = (a: Agg) => (kind === 'deposits' ? a.deposits : kind === 'cashouts' ? a.cashouts : a.total);
   const methodTabs = agg.filter((a) => pickCount(a) > 0);
-  const totalDeposits = agg.reduce((s, a) => s + a.deposits, 0);
-  const totalCashouts = agg.reduce((s, a) => s + a.cashouts, 0);
-  const grandTotal = kind === 'deposits' ? totalDeposits : kind === 'cashouts' ? totalCashouts : totalDeposits + totalCashouts;
-  const pieData = methodTabs
-    .map((a, i) => ({ label: a.method, value: pickCount(a), color: PIE[i % PIE.length]! }))
-    .filter((d) => d.value > 0);
+  const selAgg = method && method !== 'all' ? agg.find((a) => a.method_code === method) ?? null : null;
+
+  // Tiles + donut reflect the selected method if one is chosen, else everything.
+  const tDep = selAgg ? selAgg.deposits : agg.reduce((s, a) => s + a.deposits, 0);
+  const tCash = selAgg ? selAgg.cashouts : agg.reduce((s, a) => s + a.cashouts, 0);
+  const tTotal = tDep + tCash;
+
+  // Donut: a method's deposit↔cash-out split when one is selected; otherwise the
+  // spread of receipts across methods.
+  const donutTitle = selAgg
+    ? `${selAgg.method} — deposits vs cash-outs`
+    : `${kind === 'deposits' ? 'Deposit' : kind === 'cashouts' ? 'Cash-out' : 'All'} receipts by method`;
+  const pieData = selAgg
+    ? [{ label: 'Deposits', value: selAgg.deposits, color: '#2f9e6b' },
+       { label: 'Cash-outs', value: selAgg.cashouts, color: '#5b5bd6' }].filter((d) => d.value > 0)
+    : methodTabs.map((a, i) => ({ label: a.method, value: pickCount(a), color: PIE[i % PIE.length]! })).filter((d) => d.value > 0);
 
   const rows = await sql<Row[]>`
     select r.id, r.reference, r.player_name, r.platform_uid, r.url, r.content_type,
@@ -122,36 +132,35 @@ export default async function ReceiptsPage({
         <ReceiptSearch initial={q ?? ''} type={kind} method={method ?? 'all'} />
       </div>
 
-      {/* Dashboard */}
-      <div className="grid cols-2" style={{ marginBottom: 20, alignItems: 'stretch' }}>
-        <div className="card" style={{ display: 'flex', gap: 20, alignItems: 'center' }}>
-          <Donut data={pieData} />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
-            <div className="stat-label">{kind === 'deposits' ? 'Deposit' : kind === 'cashouts' ? 'Cash-out' : 'All'} receipts by method</div>
+      {/* Dashboard — one compact row: donut + legend, then the headline numbers. */}
+      <div className="card receipts-dash">
+        <div className="dash-chart">
+          <Donut data={pieData} size={90} />
+          <div className="dash-legend">
+            <div className="stat-label">{donutTitle}</div>
             {pieData.length === 0 ? <div className="stat-note">Nothing yet.</div> : pieData.map((d) => (
-              <div key={d.label} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-                <span style={{ width: 10, height: 10, borderRadius: 3, background: d.color, flexShrink: 0 }} />
-                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.label}</span>
+              <div key={d.label} className="dash-legend-row">
+                <span className="dash-dot" style={{ background: d.color }} />
+                <span className="dash-legend-name">{d.label}</span>
                 <strong className="mono">{d.value}</strong>
               </div>
             ))}
           </div>
         </div>
-        <div className="grid cols-2" style={{ gap: 12 }}>
-          <div className="card"><div className="stat-label">Total receipts</div><div className="stat-value">{grandTotal}</div></div>
-          <div className="card"><div className="stat-label">Deposits (sent)</div><div className="stat-value pos">{totalDeposits}</div></div>
-          <div className="card"><div className="stat-label">Cash-outs (paid out)</div><div className="stat-value">{totalCashouts}</div></div>
-          <div className="card"><div className="stat-label">Methods</div><div className="stat-value">{methodTabs.length}</div></div>
+        <div className="dash-stats">
+          <div><div className="stat-label">{selAgg ? `${selAgg.method} receipts` : 'Total receipts'}</div><div className="stat-value">{tTotal}</div></div>
+          <div><div className="stat-label">Deposits (sent)</div><div className="stat-value pos">{tDep}</div></div>
+          <div><div className="stat-label">Cash-outs (paid out)</div><div className="stat-value">{tCash}</div></div>
         </div>
       </div>
 
       {/* Method tabs */}
       <div className="tabs" role="tablist" aria-label="Payment method">
-        <Link role="tab" aria-selected={!method || method === 'all'} className={`tab ${!method || method === 'all' ? 'active' : ''}`} href={href({ method: 'all' })}>
+        <Link scroll={false} role="tab" aria-selected={!method || method === 'all'} className={`tab ${!method || method === 'all' ? 'active' : ''}`} href={href({ method: 'all' })}>
           All <span style={{ opacity: 0.55 }}>{methodTabs.reduce((s, a) => s + pickCount(a), 0)}</span>
         </Link>
         {methodTabs.map((a) => (
-          <Link key={a.method_code} role="tab" aria-selected={method === a.method_code}
+          <Link scroll={false} key={a.method_code} role="tab" aria-selected={method === a.method_code}
                 className={`tab ${method === a.method_code ? 'active' : ''}`} href={href({ method: a.method_code })}>
             {a.method} <span style={{ opacity: 0.55 }}>{pickCount(a)}</span>
           </Link>
@@ -161,7 +170,7 @@ export default async function ReceiptsPage({
       {/* Deposit / cash-out tabs (within the method) */}
       <div className="tabs" role="tablist" aria-label="Receipt type" style={{ marginTop: -12 }}>
         {([['all', 'All'], ['deposits', 'Deposits'], ['cashouts', 'Cash-outs']] as const).map(([k, label]) => (
-          <Link key={k} role="tab" aria-selected={kind === k} className={`tab ${kind === k ? 'active' : ''}`} href={href({ type: k })}>
+          <Link scroll={false} key={k} role="tab" aria-selected={kind === k} className={`tab ${kind === k ? 'active' : ''}`} href={href({ type: k })}>
             {label}
           </Link>
         ))}
@@ -222,13 +231,13 @@ export default async function ReceiptsPage({
 }
 
 /** A small inline-SVG donut — no libraries, theme-aware track. */
-function Donut({ data }: { data: { label: string; value: number; color: string }[] }) {
+function Donut({ data, size = 118 }: { data: { label: string; value: number; color: string }[]; size?: number }) {
   const total = data.reduce((a, d) => a + d.value, 0) || 1;
   const R = 40;
   const C = 2 * Math.PI * R;
   let offset = 0;
   return (
-    <svg viewBox="0 0 100 100" width="118" height="118" role="img" aria-label="Receipts by method" style={{ transform: 'rotate(-90deg)', flexShrink: 0 }}>
+    <svg viewBox="0 0 100 100" width={size} height={size} role="img" aria-label="Receipts by method" style={{ transform: 'rotate(-90deg)', flexShrink: 0 }}>
       <circle cx="50" cy="50" r={R} fill="none" stroke="var(--surface-2)" strokeWidth="15" />
       {data.map((d, i) => {
         const len = (d.value / total) * C;

@@ -144,6 +144,20 @@ h2 { font-size: 12px; font-weight: 650; margin: 32px 0 13px; color: var(--text-f
 .stat-value.pos { color: var(--ok); }
 .stat-value.neg { color: var(--red); }
 
+/* ── Receipts dashboard (compact single row) ────────────────────────────── */
+.receipts-dash { display: flex; align-items: center; gap: 32px; padding: 16px 20px; margin-bottom: 16px; flex-wrap: wrap; }
+.receipts-dash .stat-value { font-size: 24px; margin-top: 2px; }
+.dash-chart { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.dash-legend { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.dash-legend-row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.dash-legend-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+.dash-stats { display: flex; gap: 32px; margin-left: auto; flex-wrap: wrap; }
+@media (max-width: 640px) {
+  .receipts-dash { gap: 16px; }
+  .dash-stats { margin-left: 0; gap: 20px; }
+}
+
 /* ── Tables ─────────────────────────────────────────────────────────────── */
 .table-wrap { border: 1px solid var(--border); border-radius: var(--radius-lg); overflow-x: auto; background: var(--surface); box-shadow: var(--shadow-sm); }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
