@@ -69,7 +69,7 @@ export default async function AuditPage({
                     {r.email ? (
                       <>
                         {r.email}
-                        {r.role === 'owner' && <span className="badge info" style={{ marginLeft: 4 }}>owner</span>}
+                        {r.role === 'owner' && <span className="badge accent" style={{ marginLeft: 4 }}>owner</span>}
                       </>
                     ) : (
                       // Automated actions are logged too: "nobody did it, the
@@ -77,7 +77,9 @@ export default async function AuditPage({
                       <span className="badge muted">system</span>
                     )}
                   </td>
-                  <td className="mono" style={{ fontSize: 11 }}>{r.action}</td>
+                  <td title={r.action}>
+                    <span style={{ fontWeight: 600 }}>{actionLabel(r.action)}</span>
+                  </td>
                   <td>
                     <details className="row-detail">
                       <summary>{summarise(r)}</summary>
@@ -96,19 +98,57 @@ export default async function AuditPage({
   );
 }
 
+/** Plain-English name for each logged action code. */
+const ACTION_LABELS: Record<string, string> = {
+  'fill.release': 'Released money', 'fill.admin_verify': 'Verified a payment',
+  'fill.fast_path_confirm': 'Verified a payment', 'fill.discard': 'Discarded a payment',
+  'fill.reversal': 'Reversed a payment', 'fill.escalated': 'Escalated a payment',
+  'fill.payee_confirmed': 'Payee confirmed', 'fill.lock_expired': 'Payment window expired',
+  'loader.claim': 'Claimed a job', 'loader.done': 'Completed a job',
+  'loader.fail': 'Failed a job', 'loader.release': 'Put a job back',
+  'withdraw.club_payout': 'Paid a cash-out', 'withdraw.owner_payout': 'Paid a cash-out from float',
+  'withdraw.pause': 'Paused a cash-out', 'withdraw.resume': 'Resumed a cash-out',
+  'withdraw.adjust': 'Adjusted a cash-out', 'withdraw.reduce': 'Reduced a cash-out',
+  'withdraw.cancel': 'Cancelled a cash-out', 'deposit.cancel': 'Cancelled a deposit',
+  'dispute.open': 'Opened a dispute', 'dispute.resolve': 'Resolved a dispute',
+  'player.link': 'Linked a player account', 'player.rename': 'Renamed a player',
+  'player.set_club': 'Assigned a club', 'player.set_status': 'Changed player status',
+  'player.flag': 'Flagged a player', 'player.delete': 'Deleted a player',
+  'player.edit_account': 'Edited a player account',
+  'admin.adjust': 'Manual adjustment', 'admin.upsert': 'Added / updated an admin',
+  'admin.sign_in': 'Signed in', 'admin.firebase_bound': 'Linked panel login',
+  'config.update': 'Changed settings', 'config.admin_group_set': 'Set the admin group',
+  'config.payments_channel_set': 'Set the payments channel', 'config.discord_channel_set': 'Set a Discord channel',
+  'method.backstop': 'Set a backstop handle', 'method.disable': 'Disabled a method',
+  'method.delete': 'Removed a method', 'platform.disable': 'Disabled a platform',
+  'platform.delete': 'Removed a platform', 'club.create': 'Added a club', 'club.update': 'Updated a club',
+  'stripe.discard': 'Discarded a card payment',
+};
+function actionLabel(action: string): string {
+  return ACTION_LABELS[action] ?? action.replace(/[._]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** One-line, human-readable detail — pulls the fields that matter, in plain words. */
 function summarise(r: any): string {
   const d = r.detail ?? {};
-  const money = (v: unknown) => `$${(Number(v ?? 0) / 100).toFixed(2)}`;
+  const money = (v: unknown) => `$${(Math.abs(Number(v ?? 0)) / 100).toFixed(2)}`;
+  const who = d.player_name ?? d.name ?? d.account ?? null;
+
   switch (r.action) {
-    case 'fill.release': return `${money(d.amount)} released — ${d.reason}`;
-    case 'fill.fast_path_confirm': return `verified ref ${d.payment_ref} — ${money(d.amount)}`;
-    case 'fill.reversal': return `⚠️ ${money(d.amount)} reversed — ${d.reason}`;
-    case 'dispute.resolve': return `${d.resolution}${d.flagged_depositor ? ' + flagged depositor' : ''}`;
-    case 'player.link': return `linked ClubGG ${d.clubgg_id}${d.overridden ? ' (corrected)' : ''}`;
-    case 'chip_order.done': return `${Number(d.ordered) > 0 ? 'loaded' : 'unloaded'} ${money(Math.abs(Number(d.actual)))}`;
-    case 'withdraw.owner_payout': return `paid ${money(d.amount)} from float`;
-    case 'admin.adjust': return `${money(d.amount)} → ${d.kind} — ${d.reason}`;
-    case 'config.update': return `changed: ${(d.changed ?? []).join(', ')}`;
-    default: return Object.keys(d).length ? `${Object.keys(d).slice(0, 3).join(', ')}…` : '—';
+    case 'dispute.resolve': return `${d.resolution ?? 'resolved'}${d.flagged_depositor ? ' + flagged depositor' : ''}`;
+    case 'player.link': return `linked ClubGG ${d.clubgg_id ?? d.uid ?? ''}${d.overridden ? ' (corrected)' : ''}`;
+    case 'config.update': return (d.changed?.length) ? `changed: ${(d.changed as string[]).join(', ')}` : 'settings changed';
+    case 'loader.done': return `${Number(d.actual ?? d.delta ?? 0) >= 0 ? 'added' : 'took off'} ${money(d.actual ?? d.delta)}${who ? ` · ${who}` : ''}`;
+    case 'loader.claim': return `${money(d.delta)}${who ? ` · ${who}` : ''}`;
+    case 'loader.fail': return `${who ? who + ' — ' : ''}${d.reason ?? 'failed'}`;
   }
+
+  // Generic: amount / who / reference / reason, whichever are present.
+  const parts: string[] = [];
+  if (d.amount != null) parts.push(money(d.amount));
+  else if (d.delta != null) parts.push(`${Number(d.delta) >= 0 ? '+' : '−'}${money(d.delta)}`);
+  if (who) parts.push(`· ${who}`);
+  if (d.payment_ref) parts.push(`ref ${d.payment_ref}`);
+  if (d.reason && !/^[a-z_]+$/.test(String(d.reason))) parts.push(`— ${d.reason}`);
+  return parts.length ? parts.join(' ') : '—';
 }

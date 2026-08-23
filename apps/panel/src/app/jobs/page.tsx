@@ -22,8 +22,8 @@ export default async function JobsPage() {
            lo.claimed_by, a.email as claimed_by_email, lo.claimed_at, lo.created_at,
            (lo.status='claimed' and lo.claimed_at < now() - interval '15 minutes') as stale
       from loader_orders lo
-      join platforms pf on pf.id = lo.platform_id
-      join clubs c on c.id = lo.club_id
+      left join platforms pf on pf.id = lo.platform_id
+      left join clubs c on c.id = lo.club_id
       left join admins a on a.id = lo.claimed_by
      where lo.status in ('pending','claimed')
      order by lo.created_at limit 100`;
@@ -33,7 +33,7 @@ export default async function JobsPage() {
            '' as club_name, coalesce(lo.actual_delta, lo.delta) as delta,
            lo.currency, lo.reason, lo.status, null as claimed_by, null as claimed_by_email,
            null as claimed_at, lo.created_at, false as stale
-      from loader_orders lo join platforms pf on pf.id = lo.platform_id
+      from loader_orders lo left join platforms pf on pf.id = lo.platform_id
      where lo.status in ('done','failed','cancelled')
      order by lo.done_at desc nulls last limit 20`;
 

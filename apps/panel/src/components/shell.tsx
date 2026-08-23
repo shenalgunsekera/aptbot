@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { db } from '@union/core';
 import { getSession } from '../lib/auth';
 import { SignOutButton } from './signout';
+import { AutoRefresh } from './auto-refresh';
 
 /**
  * The authenticated shell. Every page renders inside this, and it re-checks the
@@ -71,6 +72,7 @@ export async function Shell({ children }: { children: React.ReactNode }) {
         <SignOutButton />
       </nav>
       <main className="main">{children}</main>
+      <AutoRefresh seconds={20} />
     </div>
   );
 }
