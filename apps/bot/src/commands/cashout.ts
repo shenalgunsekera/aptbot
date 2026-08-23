@@ -79,8 +79,14 @@ export async function cashoutPickClub(ctx: Ctx, platformId: string, clubId: stri
 
 async function askAmount(ctx: Ctx, platform: Platform): Promise<void> {
   const sql = db();
+  // The payout method is picked AFTER the amount, so use the widest range across
+  // enabled payout methods (lowest min, highest max); withdraw_create enforces the
+  // chosen method's exact minimum when the method is known.
   const [cfg] = await sql<{ min_amount: number; max_amount: number; amount_step: number }[]>`
-    select min_amount, max_amount, amount_step from config where id`;
+    select c.amount_step,
+      coalesce((select min(coalesce(m.min_amount, c.min_amount)) from payment_methods m where m.enabled and m.payout_enabled), c.min_amount) as min_amount,
+      coalesce((select max(coalesce(m.max_amount, c.max_amount)) from payment_methods m where m.enabled and m.payout_enabled), c.max_amount) as max_amount
+      from config c`;
   ctx.session.step = { name: 'out:amount', platformId: platform.id };
   await ask(ctx,
     `How much do you want to cash-out from *${platform.name}*?\n\n` +
@@ -112,7 +118,10 @@ export async function cashoutAmount(ctx: Ctx, platformId: string, text: string):
   }
   const sql0 = db();
   const [cfg0] = await sql0<{ min_amount: number; max_amount: number; amount_step: number }[]>`
-    select min_amount, max_amount, amount_step from config where id`;
+    select c.amount_step,
+      coalesce((select min(coalesce(m.min_amount, c.min_amount)) from payment_methods m where m.enabled and m.payout_enabled), c.min_amount) as min_amount,
+      coalesce((select max(coalesce(m.max_amount, c.max_amount)) from payment_methods m where m.enabled and m.payout_enabled), c.max_amount) as max_amount
+      from config c`;
   const problem = amountProblem(amount, { min: cfg0.min_amount, max: cfg0.max_amount, step: cfg0.amount_step });
   if (problem) {
     await ctx.reply(problem);

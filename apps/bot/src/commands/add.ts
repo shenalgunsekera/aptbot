@@ -85,7 +85,9 @@ export async function addPickClub(ctx: Ctx, platformId: string, clubId: string):
 async function askAmount(ctx: Ctx, platformId: string, methodId: string): Promise<void> {
   const sql = db();
   const [cfg] = await sql<{ min_amount: number; max_amount: number; amount_step: number }[]>`
-    select min_amount, max_amount, amount_step from config where id`;
+    select coalesce(m.min_amount, c.min_amount) as min_amount,
+           coalesce(m.max_amount, c.max_amount) as max_amount, c.amount_step
+      from config c cross join payment_methods m where m.id = ${methodId}`;
   const [pf] = await sql<{ name: string }[]>`select name from platforms where id = ${platformId}`;
   ctx.session.step = { name: 'add:amount', platformId, methodId };
   await ask(ctx,
@@ -107,7 +109,9 @@ export async function addAmount(ctx: Ctx, platformId: string, methodId: string, 
   }
   const sql0 = db();
   const [cfg0] = await sql0<{ min_amount: number; max_amount: number; amount_step: number }[]>`
-    select min_amount, max_amount, amount_step from config where id`;
+    select coalesce(m.min_amount, c.min_amount) as min_amount,
+           coalesce(m.max_amount, c.max_amount) as max_amount, c.amount_step
+      from config c cross join payment_methods m where m.id = ${methodId}`;
   const problem = amountProblem(amount, { min: cfg0.min_amount, max: cfg0.max_amount, step: cfg0.amount_step });
   if (problem) {
     await ctx.reply(problem);
