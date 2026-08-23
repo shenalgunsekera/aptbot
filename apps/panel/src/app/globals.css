@@ -216,6 +216,20 @@ textarea { min-height: 68px; resize: vertical; }
 .login-wrap { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
 .login-card { width: 100%; max-width: 360px; box-shadow: var(--shadow); padding: 28px; }
 
+/* ── Tabs (Settings sections) ───────────────────────────────────────────── */
+.tabs {
+  display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 24px;
+  padding: 4px; border-radius: var(--radius); background: var(--surface-2);
+  border: 1px solid var(--border); width: fit-content; max-width: 100%;
+}
+.tab {
+  border: none; background: transparent; color: var(--text-dim);
+  font-weight: 600; font-size: 13px; padding: 7px 15px; border-radius: 8px;
+  cursor: pointer; transition: background 0.12s, color 0.12s; white-space: nowrap;
+}
+.tab:hover { background: var(--surface); color: var(--text); }
+.tab.active { background: var(--surface); color: var(--accent); box-shadow: var(--shadow-sm); }
+
 /* ── Detail / receipts ──────────────────────────────────────────────────── */
 details.row-detail summary { cursor: pointer; list-style: none; color: var(--accent); font-size: 12px; font-weight: 600; }
 details.row-detail summary::-webkit-details-marker { display: none; }
