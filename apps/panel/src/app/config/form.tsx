@@ -35,8 +35,8 @@ export function ConfigForm({ cfg }: { cfg: any }) {
       <div className="grid cols-2">
         <div className="card">
           <h2 style={{ marginTop: 0 }}>Matching</h2>
-          <Field name="match_timeout_seconds" label="Payment window (seconds)" def={cfg.match_timeout_seconds}
-                 hint="How long a depositor has to pay before their slice returns to the queue. This is the countdown the bot shows players. Default 1800 (30 min)." />
+          <TimeField name="match_timeout_seconds" label="Payment window" def={cfg.match_timeout_seconds}
+                     hint="How long a depositor has to pay before their slice returns to the queue. This is the countdown the bot shows players." />
           <Field name="handle_reveals_per_hour" label="Handle reveals per hour, per player" def={cfg.handle_reveals_per_hour}
                  hint="Stops someone opening deposits in a loop just to harvest everyone's payout handles." />
           <Field name="max_open_deposits_per_player" label="Max open deposits per player" def={cfg.max_open_deposits_per_player} />
@@ -44,50 +44,27 @@ export function ConfigForm({ cfg }: { cfg: any }) {
         </div>
 
         <div className="card">
-          <h2 style={{ marginTop: 0 }}>Reversibility & holds</h2>
+          <h2 style={{ marginTop: 0 }}>Reversibility &amp; holds</h2>
           <Check name="allow_reversible" label="Allow reversible methods (card, PayPal, bank)" def={cfg.allow_reversible}
                  hint="Turn off to accept crypto/cash only — the strongest chargeback defence there is." />
-          <Field name="reversible_hold_seconds" label="Hold window (seconds)" def={cfg.reversible_hold_seconds}
-                 hint="How long a reversible payment sits before chips release. 259200 = 72h. Irreversible methods never hold." />
+          <TimeField name="reversible_hold_seconds" label="Hold window" def={cfg.reversible_hold_seconds}
+                     hint="How long a reversible payment sits before chips release. Irreversible methods never hold." />
           <Check name="auto_release_on_expiry" label="Auto-release when the hold expires" def={cfg.auto_release_on_expiry}
                  hint="ON: silence means consent once the money can no longer be clawed back. OFF: an admin decides. OFF is safer and slower." />
-          <Field name="confirm_escalation_seconds" label="Escalate to admin after (seconds)" def={cfg.confirm_escalation_seconds}
-                 hint="If the withdrawer never answers — offline, blocked the bot — the fill escalates rather than stalling forever. 86400 = 24h." />
-        </div>
-
-        <div className="card">
-          <h2 style={{ marginTop: 0 }}>Rake &amp; fees</h2>
-          <div className="field-row">
-            <Field name="rake_deposit_bps" label="Deposit rake (bps)" def={cfg.rake_deposit_bps} hint="100 bps = 1%" />
-            <Field name="rake_deposit_flat" label="Deposit rake flat (cents)" def={cfg.rake_deposit_flat} />
-          </div>
-          <div className="field-row">
-            <Field name="rake_withdraw_bps" label="Withdraw rake (bps)" def={cfg.rake_withdraw_bps} />
-            <Field name="rake_withdraw_flat" label="Withdraw rake flat (cents)" def={cfg.rake_withdraw_flat} />
-          </div>
-          <div className="field">
-            <label htmlFor="fee_bearer">Processor fee bearer</label>
-            <select id="fee_bearer" name="fee_bearer" defaultValue={cfg.fee_bearer}>
-              <option value="depositor">Depositor pays — they send gross so the withdrawer nets their ask</option>
-              <option value="withdrawer">Withdrawer pays — depositor sends the ask, withdrawer eats the cut</option>
-            </select>
-            <div className="field-hint">
-              The processor's cut never touches the ledger — it's taken outside our perimeter.
-              This only changes the number we quote the depositor.
-            </div>
-          </div>
+          <TimeField name="confirm_escalation_seconds" label="Escalate to an admin after" def={cfg.confirm_escalation_seconds}
+                     hint="If the withdrawer never answers — offline, blocked the bot — the payment escalates rather than stalling forever." />
         </div>
 
         <div className="card">
           <h2 style={{ marginTop: 0 }}>Limits</h2>
           <div className="field-row">
-            <Field name="min_amount" label="Min per transaction (cents)" def={cfg.min_amount} />
-            <Field name="max_amount" label="Max per transaction (cents)" def={cfg.max_amount} />
+            <DollarField name="min_amount" label="Min per transaction" def={cfg.min_amount} />
+            <DollarField name="max_amount" label="Max per transaction" def={cfg.max_amount} />
           </div>
-          <Field name="daily_cap_per_player" label="Daily cap per player (cents, blank = none)" def={cfg.daily_cap_per_player} />
-          <Field name="owner_approval_threshold" label="Owner sign-off threshold (cents, blank = none)"
-                 def={cfg.owner_approval_threshold}
-                 hint="At or above this, a plain admin cannot fast-path, pay out, or resolve a dispute alone." />
+          <DollarField name="daily_cap_per_player" label="Daily cap per player (blank = none)" def={cfg.daily_cap_per_player} />
+          <DollarField name="owner_approval_threshold" label="Owner sign-off threshold (blank = none)"
+                       def={cfg.owner_approval_threshold}
+                       hint="At or above this, a plain admin cannot fast-path, pay out, or resolve a dispute alone." />
         </div>
 
         <div className="card">
@@ -95,21 +72,12 @@ export function ConfigForm({ cfg }: { cfg: any }) {
           <Check name="dev_notice_enabled" label="Show the “still in development” notice after setup" def={cfg.dev_notice_enabled}
                  hint="ON: players who finish setup are told not to deposit/cash-out yet, the bot is still in development. Turn OFF the moment you go live." />
         </div>
-
-        <div className="card">
-          <h2 style={{ marginTop: 0 }}>ClubGG balance check</h2>
-          <Check name="require_live_chip_check" label="Require a live ClubGG balance before a withdrawal" def={cfg.require_live_chip_check}
-                 hint="Needs a chip adapter that can read balances. Without one, leave OFF — there is nothing to read, and every withdrawal would be refused." />
-          <Field name="live_chip_check_max_age_seconds" label="Max reading age (seconds)" def={cfg.live_chip_check_max_age_seconds}
-                 hint="A player can lose a stack in one hand, so keep this in seconds, not minutes." />
-          <Field name="reconcile_cron" label="Reconciliation schedule (cron)" def={cfg.reconcile_cron} type="text" />
-        </div>
       </div>
 
       {msg && <div className={`alert ${msg.ok ? 'ok' : 'err'}`} style={{ marginTop: 12 }}>{msg.text}</div>}
 
       <button type="submit" className="primary" style={{ marginTop: 12 }} disabled={pending}>
-        {pending ? 'Saving…' : 'Save config'}
+        {pending ? 'Saving…' : 'Save settings'}
       </button>
     </form>
   );
@@ -121,6 +89,48 @@ function Field({ name, label, def, hint, type = 'number' }: any) {
       <label htmlFor={name}>{label}</label>
       <input id={name} name={name} type={type} defaultValue={def ?? ''} />
       {hint && <div className="field-hint">{hint}</div>}
+    </div>
+  );
+}
+
+/** A money amount shown in DOLLARS but stored in cents — a $-prefixed number that
+ *  submits cents via a hidden input, so the database and every rule are unchanged. */
+function DollarField({ name, label, def, hint }: { name: string; label: string; def: number | null; hint?: string }) {
+  const [val, setVal] = useState<string>(def != null ? String(Number(def) / 100) : '');
+  const cents = val.trim() === '' ? '' : String(Math.round(parseFloat(val) * 100));
+  return (
+    <div className="field">
+      <label htmlFor={name}>{label}</label>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ color: 'var(--text-faint)', fontWeight: 600 }}>$</span>
+        <input id={name} type="number" min="0" step="0.01" value={val} onChange={(e) => setVal(e.target.value)} style={{ flex: 1 }} />
+      </div>
+      <input type="hidden" name={name} value={cents} />
+      {hint && <div className="field-hint">{hint}</div>}
+    </div>
+  );
+}
+
+/** A duration in minutes/hours instead of raw seconds — a number plus a unit,
+ *  submitting the value in seconds via a hidden input so nothing else changes. */
+function TimeField({ name, label, def, hint }: { name: string; label: string; def: number | null; hint?: string }) {
+  const sec = Number(def ?? 0);
+  const initUnit: 'min' | 'hour' = sec >= 3600 && sec % 3600 === 0 ? 'hour' : 'min';
+  const [unit, setUnit] = useState<'min' | 'hour'>(initUnit);
+  const [val, setVal] = useState<string>(sec ? String(initUnit === 'hour' ? sec / 3600 : sec / 60) : '');
+  const seconds = val.trim() === '' ? '' : String(Math.round(parseFloat(val) * (unit === 'hour' ? 3600 : 60)));
+  return (
+    <div className="field">
+      <label htmlFor={name}>{label}</label>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input id={name} type="number" min="0" value={val} onChange={(e) => setVal(e.target.value)} style={{ flex: 1 }} />
+        <select value={unit} onChange={(e) => setUnit(e.target.value as 'min' | 'hour')} style={{ width: 120 }}>
+          <option value="min">minutes</option>
+          <option value="hour">hours</option>
+        </select>
+      </div>
+      <input type="hidden" name={name} value={seconds} />
+      {hint && <div className="field-hint">{hint}{seconds ? ` (= ${seconds}s)` : ''}</div>}
     </div>
   );
 }
@@ -137,11 +147,12 @@ function Check({ name, label, def, hint }: any) {
   );
 }
 
+// Rake/fees and the ClubGG-balance card are intentionally NOT rendered (hidden per
+// request). Their fields are also left out of these sets, so saving the form never
+// touches them — they keep whatever value they already have in the database.
 const NUMERIC = new Set([
   'match_timeout_seconds', 'reversible_hold_seconds', 'confirm_escalation_seconds',
-  'rake_deposit_bps', 'rake_deposit_flat', 'rake_withdraw_bps', 'rake_withdraw_flat',
   'min_amount', 'max_amount', 'daily_cap_per_player', 'max_open_deposits_per_player',
   'max_open_withdraws_per_player', 'handle_reveals_per_hour', 'owner_approval_threshold',
-  'live_chip_check_max_age_seconds',
 ]);
-const BOOL = new Set(['allow_reversible', 'auto_release_on_expiry', 'require_live_chip_check', 'dev_notice_enabled']);
+const BOOL = new Set(['allow_reversible', 'auto_release_on_expiry', 'dev_notice_enabled']);
