@@ -46,8 +46,9 @@
   --sans: var(--font-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
+/* Light by default, always — the panel does not follow the OS dark setting.
+   Dark is available only when the <html> is explicitly set to data-theme="dark". */
+:root[data-theme="dark"] {
     --bg: #0e0f15;
     --surface: #171821;
     --surface-2: #1e1f2b;
@@ -76,7 +77,6 @@
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
     --shadow: 0 2px 4px rgba(0, 0, 0, 0.25), 0 8px 24px rgba(0, 0, 0, 0.35);
     --ring: 0 0 0 3px rgba(124, 122, 240, 0.35);
-  }
 }
 
 * { box-sizing: border-box; }
