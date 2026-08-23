@@ -16,7 +16,8 @@ export default async function QueuePage({
   const all = await sql<any[]>`
     select q.*,
            coalesce(case when pf.code = 'clubgg' then pp.platform_username else pp.platform_uid end, q.display_name) as account,
-           cl.name as club, pf.code as platform_code, wr.min_override
+           cl.name as club, pf.code as platform_code, wr.min_override,
+           coalesce((select sum(f.amount) from fills f where f.withdraw_id = q.id and f.status = 'released'), 0) as paid
       from v_withdraw_queue q
       left join withdraw_requests wr on wr.id = q.id
       left join platforms pf on pf.id = wr.platform_id
@@ -79,7 +80,12 @@ export default async function QueuePage({
             </thead>
             <tbody>
               {rows.map((r) => {
-                const pct = Math.round(((r.amount - r.amount_remaining) / r.amount) * 100);
+                // Base "owed" and progress on money actually PAID (released), never
+                // on amount_remaining — a slice that's merely locked by a depositor
+                // (and may expire) must not make the number jump around on refresh.
+                const paid = Number(r.paid ?? 0);
+                const owed = r.amount - paid;
+                const pct = Math.round((paid / r.amount) * 100);
                 // Someone at the front of the queue for hours means the queue is
                 // not clearing — that's the owner's cue to backstop.
                 const stale = r.waiting_seconds > 3600 * 6;
@@ -100,12 +106,12 @@ export default async function QueuePage({
                     </td>
                     <td><span className="badge muted">{r.method_name}</span></td>
                     <td className="num"><Money minor={r.amount} currency={r.currency} /></td>
-                    <td className="num"><strong><Money minor={r.amount_remaining} currency={r.currency} /></strong></td>
+                    <td className="num"><strong><Money minor={owed} currency={r.currency} /></strong></td>
                     <td>
                       <div style={{ background: 'var(--surface-2)', borderRadius: 100, height: 6, overflow: 'hidden' }}>
                         <div style={{ width: `${pct}%`, height: '100%', background: 'var(--ok)' }} />
                       </div>
-                      <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>{pct}% filled</span>
+                      <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>{pct}% paid</span>
                     </td>
                     <td className="mono" style={{ fontSize: 11 }}>{r.payout_handle}</td>
                     <td>
