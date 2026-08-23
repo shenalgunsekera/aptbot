@@ -76,7 +76,7 @@ export default async function QueuePage({
                 <th style={{ width: 120 }}>Progress</th>
                 <th>Payout handle</th>
                 <th style={{ width: 80 }}>Waiting</th>
-                <th style={{ width: 180 }}></th>
+                <th style={{ width: 200 }}></th>
               </tr>
             </thead>
             <tbody>

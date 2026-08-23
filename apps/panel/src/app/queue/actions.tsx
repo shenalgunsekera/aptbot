@@ -11,7 +11,7 @@ export function QueueActions({
   const amt = (w.remaining / 100).toFixed(2);
 
   return (
-    <div className="btn-row">
+    <div className="queue-actions">
       <PromptAction
         label="Pay from float"
         title="Clear this withdrawal yourself"

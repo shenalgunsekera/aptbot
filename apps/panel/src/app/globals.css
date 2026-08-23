@@ -144,6 +144,14 @@ h2 { font-size: 12px; font-weight: 650; margin: 32px 0 13px; color: var(--text-f
 .stat-value.pos { color: var(--ok); }
 .stat-value.neg { color: var(--red); }
 
+/* ── Queue row actions (compact 2-up grid, not a tall stack) ────────────── */
+.queue-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; align-items: start; }
+.queue-actions > button { width: 100%; margin: 0; white-space: nowrap; }
+/* The primary "Pay from float" spans the full width on its own row; when any
+   action is open it becomes an inline form card — let that span too. */
+.queue-actions > button:first-child,
+.queue-actions > .card { grid-column: 1 / -1; }
+
 /* ── Receipts dashboard (compact single row) ────────────────────────────── */
 .receipts-dash { display: flex; align-items: center; gap: 32px; padding: 16px 20px; margin-bottom: 16px; flex-wrap: wrap; }
 .receipts-dash .stat-value { font-size: 24px; margin-top: 2px; }
