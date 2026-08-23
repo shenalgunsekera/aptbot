@@ -249,6 +249,16 @@ export async function setWithdrawMin(withdrawId: string, cents: number | null): 
   }, ['/queue']);
 }
 
+/** Move a cash-out up/down one place in its queue. Swaps with the neighbour and
+ *  audits it (withdraw.reorder, with the admin). */
+export async function moveWithdraw(withdrawId: string, dir: 'up' | 'down'): Promise<Result> {
+  return run(async () => {
+    const s = await requireAdmin();
+    await db()`select withdraw_move(${withdrawId}::uuid, ${dir}, ${s.admin.id}::uuid)`;
+    return `Moved ${dir}.`;
+  }, ['/queue']);
+}
+
 // ─── Config (owner only) ─────────────────────────────────────────────────────
 
 export async function updateConfig(patch: Record<string, unknown>): Promise<Result> {

@@ -110,6 +110,7 @@ const ACTION_LABELS: Record<string, string> = {
   'withdraw.pause': 'Paused a cash-out', 'withdraw.resume': 'Resumed a cash-out',
   'withdraw.adjust': 'Adjusted a cash-out', 'withdraw.reduce': 'Reduced a cash-out',
   'withdraw.cancel': 'Cancelled a cash-out', 'deposit.cancel': 'Cancelled a deposit',
+  'withdraw.reorder': 'Moved a cash-out in the queue', 'withdraw.set_min': 'Set a cash-out minimum',
   'dispute.open': 'Opened a dispute', 'dispute.resolve': 'Resolved a dispute',
   'player.link': 'Linked a player account', 'player.rename': 'Renamed a player',
   'player.set_club': 'Assigned a club', 'player.set_status': 'Changed player status',
@@ -141,6 +142,8 @@ function summarise(r: any): string {
     case 'loader.done': return `${Number(d.actual ?? d.delta ?? 0) >= 0 ? 'added' : 'took off'} ${money(d.actual ?? d.delta)}${who ? ` · ${who}` : ''}`;
     case 'loader.claim': return `${money(d.delta)}${who ? ` · ${who}` : ''}`;
     case 'loader.fail': return `${who ? who + ' — ' : ''}${d.reason ?? 'failed'}`;
+    case 'withdraw.reorder': return d.direction === 'up' ? 'moved up one place' : 'moved down one place';
+    case 'withdraw.set_min': return d.min ? `minimum raised to ${money(d.min)}` : 'minimum reset to default';
   }
 
   // Generic: amount / who / reference / reason, whichever are present.

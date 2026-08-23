@@ -1,7 +1,7 @@
 'use client';
 
 import { PromptAction } from '../../components/ui';
-import { payFromClub, cancelCashout, setWithdrawMin } from '../../lib/actions';
+import { payFromClub, cancelCashout, setWithdrawMin, moveWithdraw } from '../../lib/actions';
 
 export function QueueActions({
   w,
@@ -72,6 +72,25 @@ export function QueueActions({
             return { ok: false as const, error: 'Enter a dollar amount, or leave blank to reset.' };
           }
           return setWithdrawMin(w.id, cents);
+        }}
+      />
+
+      <PromptAction
+        label="↑ Up"
+        title={`Move ${w.name} UP one place in the queue`}
+        fields={[{ name: 'confirm', label: 'Type "confirm" to move it up (this changes who gets paid first).', placeholder: 'confirm', required: true }]}
+        action={async (v) => {
+          if ((v.confirm ?? '').trim().toLowerCase() !== 'confirm') return { ok: false as const, error: 'Type "confirm" to proceed.' };
+          return moveWithdraw(w.id, 'up');
+        }}
+      />
+      <PromptAction
+        label="↓ Down"
+        title={`Move ${w.name} DOWN one place in the queue`}
+        fields={[{ name: 'confirm', label: 'Type "confirm" to move it down (this changes who gets paid first).', placeholder: 'confirm', required: true }]}
+        action={async (v) => {
+          if ((v.confirm ?? '').trim().toLowerCase() !== 'confirm') return { ok: false as const, error: 'Type "confirm" to proceed.' };
+          return moveWithdraw(w.id, 'down');
         }}
       />
     </div>
