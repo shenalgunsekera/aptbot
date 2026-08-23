@@ -600,23 +600,35 @@ export async function addReceipt(ctx: Ctx, fillId: string): Promise<void> {
     }
   }
 
-  // WHY WE MUST NOT FINALIZE ON AN ALBUM'S FIRST FRAME.
-  // Two screenshots sent together are ONE album = two separate Telegram updates.
-  // On the production webhook, Telegram delivers the SECOND update only after the
-  // first returns — so if the first frame sent the admin card and reset the step,
-  // the second would land on an idle session and be dropped (exactly the "only one
-  // shows" bug). So: a lone photo (no media_group_id) finalizes at once; an album
-  // waits, keeping the step alive, and finalizes when its second frame makes two.
-  // sendReceiptsToReviewer claims atomically, so a concurrent delivery (both frames
-  // at once) still yields exactly one card with both images.
+  // COLLECT UP TO TWO — never drop the second screenshot.
+  // Two screenshots can arrive two ways, both as separate Telegram updates:
+  //   • one ALBUM (shared media_group_id) — the webhook delivers frame 2 only after
+  //     frame 1 returns; and
+  //   • two SEPARATE messages — the player sends one, then another.
+  // Either way we must stay in receipt mode after the FIRST image so the second
+  // isn't dropped onto an idle session (the "only one is stored" bug). We finalize
+  // (send the admin card, leave receipt mode) only once BOTH are in, or when the
+  // player taps /done. sendReceiptsToReviewer claims atomically, so a concurrent
+  // album delivery still yields exactly one card with both images.
   const [rc] = await sql<{ n: number }[]>`
     select count(*)::int n from receipts where ref_type='fill' and ref_id=${fillId}`;
   const have = rc?.n ?? 1;
-  if (mediaGroup && have < 2) return;   // album's first frame — keep collecting, keep the step
 
-  const sent = await sendReceiptsToReviewer(fillId);
-  ctx.session.step = { name: 'idle' };
-  if (sent) await ctx.reply(finishedMessage());
+  if (have >= 2) {
+    const sent = await sendReceiptsToReviewer(fillId);
+    ctx.session.step = { name: 'idle' };
+    await ctx.reply(sent ? finishedMessage() : '✅ Got your second screenshot too.');
+    return;
+  }
+
+  // Only one so far. Keep collecting a possible second — but still send the admin
+  // card now so a lone-photo deposit is never left unseen (proof is already
+  // submitted above, so it's visible either way). Stay in receipt mode.
+  if (!mediaGroup) {
+    await sendReceiptsToReviewer(fillId);
+    await ctx.reply('✅ Got your screenshot. Send a *second* one now if you have it — or /done.', { parse_mode: 'Markdown' });
+  }
+  // (album's first frame: stay silent, its second frame will finalize)
 }
 
 /** /canceldeposit — drop the player's latest un-paid deposit. */
