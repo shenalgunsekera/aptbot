@@ -66,7 +66,7 @@ export default async function ReceiptsPage({
     }
     tx.rows.push(r);
   }
-  const playerList = [...players.values()].sort((a, b) => b.latest.localeCompare(a.latest));
+  const playerList = [...players.values()].sort((a, b) => +new Date(b.latest) - +new Date(a.latest));
 
   return (
     <Shell>
