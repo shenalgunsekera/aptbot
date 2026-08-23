@@ -13,7 +13,16 @@ export default async function QueuePage({
 }) {
   const { method } = await searchParams;
   const sql = db();
-  const all = await sql<any[]>`select * from v_withdraw_queue order by method_name, queue_position`;
+  const all = await sql<any[]>`
+    select q.*,
+           coalesce(case when pf.code = 'clubgg' then pp.platform_username else pp.platform_uid end, q.display_name) as account,
+           cl.name as club, pf.code as platform_code
+      from v_withdraw_queue q
+      left join withdraw_requests wr on wr.id = q.id
+      left join platforms pf on pf.id = wr.platform_id
+      left join player_platforms pp on pp.player_id = q.player_id and pp.platform_id = wr.platform_id
+      left join clubs cl on cl.id = pp.club_id
+     order by q.method_name, q.queue_position`;
 
   // Filter tabs by payment method — one clean list at a time instead of every
   // method mixed together. Counts come from the full queue.
@@ -77,7 +86,15 @@ export default async function QueuePage({
                 return (
                   <tr key={r.id} style={stale ? { background: 'var(--warn-dim)' } : undefined}>
                     <td className="mono">{r.queue_position}</td>
-                    <td>{r.display_name ?? '—'}</td>
+                    <td>
+                      <strong>{r.account ?? r.display_name ?? '—'}</strong>
+                      {[r.platform, r.club].filter(Boolean).length > 0 && (
+                        <span className="badge muted" style={{ marginLeft: 6 }}>{[r.platform, r.club].filter(Boolean).join(' · ')}</span>
+                      )}
+                      {r.account && r.account !== r.display_name && (
+                        <div style={{ fontSize: 10, color: 'var(--text-faint)' }}>{r.display_name}</div>
+                      )}
+                    </td>
                     <td><span className="badge muted">{r.method_name}</span></td>
                     <td className="num"><Money minor={r.amount} currency={r.currency} /></td>
                     <td className="num"><strong><Money minor={r.amount_remaining} currency={r.currency} /></strong></td>

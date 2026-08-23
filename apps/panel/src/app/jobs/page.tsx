@@ -7,9 +7,24 @@ export const dynamic = 'force-dynamic';
 
 interface Job {
   id: string; player_id: string; player_name: string; platform_uid: string;
-  platform: string; club_name: string; delta: number; currency: string;
+  platform: string; club_name: string | null; account: string | null; delta: number; currency: string;
   reason: string; status: string; claimed_by: string | null;
   claimed_by_email: string | null; claimed_at: string | null; created_at: string; stale: boolean;
+}
+
+/** "account [platform · club]" — the ClubGG/Sportsbook account, its platform, and
+ *  club, exactly like the bot cards. */
+function PlayerCell({ j }: { j: Job }) {
+  const tag = [j.platform, j.club_name].filter(Boolean).join(' · ');
+  return (
+    <div>
+      <strong>{j.account ?? j.player_name}</strong>
+      {tag && <span className="badge muted" style={{ marginLeft: 6 }}>{tag}</span>}
+      {j.account && j.account !== j.player_name && (
+        <div style={{ fontSize: 10, color: 'var(--text-faint)' }}>{j.player_name}</div>
+      )}
+    </div>
+  );
 }
 
 export default async function JobsPage() {
@@ -18,12 +33,14 @@ export default async function JobsPage() {
   const jobs = await sql<Job[]>`
     select lo.id, lo.player_id, lo.player_name, lo.platform_uid,
            pf.name as platform, c.name as club_name,
+           coalesce(case when pf.code = 'clubgg' then pp.platform_username else pp.platform_uid end, lo.player_name) as account,
            lo.delta, lo.currency, lo.reason, lo.status,
            lo.claimed_by, a.email as claimed_by_email, lo.claimed_at, lo.created_at,
            (lo.status='claimed' and lo.claimed_at < now() - interval '15 minutes') as stale
       from loader_orders lo
       left join platforms pf on pf.id = lo.platform_id
       left join clubs c on c.id = lo.club_id
+      left join player_platforms pp on pp.player_id = lo.player_id and pp.platform_id = lo.platform_id
       left join admins a on a.id = lo.claimed_by
      where lo.status in ('pending','claimed')
      order by lo.created_at limit 100`;
@@ -81,7 +98,7 @@ export default async function JobsPage() {
                     </span>
                   </td>
                   <td className="num"><Money minor={Math.abs(j.delta)} currency={j.currency} /></td>
-                  <td className="name">{j.player_name}</td>
+                  <td><PlayerCell j={j} /></td>
                   <td className="mono"><strong>{j.platform_uid}</strong></td>
                   <td>{j.platform}</td>
                   <td>
