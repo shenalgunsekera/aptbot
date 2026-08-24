@@ -54,23 +54,20 @@ export function FlowChart({ buckets, unit }: { buckets: Bucket[]; unit: 'hour' |
   );
 }
 
-/** The three headline numbers for the selected range — stack on a phone. */
+/** The headline numbers for the selected range, as cards. */
 export function FlowStats({ received, paid, currency = 'USD' }: { received: number; paid: number; currency?: string }) {
-  const net = received - paid;
   return (
-    <div className="flow-stats">
-      <div className="flow-stat">
+    <>
+      <div className="card">
         <div className="stat-label"><span className="dash-dot" style={{ background: '#2f9e6b' }} /> Received</div>
         <div className="stat-value pos"><Money minor={received} currency={currency} /></div>
+        <div className="stat-note">deposits in this range</div>
       </div>
-      <div className="flow-stat">
+      <div className="card">
         <div className="stat-label"><span className="dash-dot" style={{ background: '#5b5bd6' }} /> Paid out</div>
         <div className="stat-value"><Money minor={paid} currency={currency} /></div>
+        <div className="stat-note">cash-outs in this range</div>
       </div>
-      <div className="flow-stat">
-        <div className="stat-label">Net</div>
-        <div className={`stat-value ${net >= 0 ? 'pos' : 'neg'}`}><Money minor={net} currency={currency} /></div>
-      </div>
-    </div>
+    </>
   );
 }

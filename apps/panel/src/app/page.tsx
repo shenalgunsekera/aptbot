@@ -140,11 +140,11 @@ export default async function Overview({
       ))}
 
       {/* Cash flow */}
-      <section className="card" style={{ marginBottom: 22 }}>
+      <section style={{ marginBottom: 22 }}>
         <div className="flow-head">
           <div>
-            <div className="stat-label" style={{ fontSize: 14 }}>Cash flow</div>
-            <div className="stat-note">Money received (deposits) vs paid out (cash-outs).</div>
+            <h2 style={{ margin: 0 }}>Cash flow</h2>
+            <p className="sub">Money received (deposits) vs paid out (cash-outs).</p>
           </div>
           <div className="flow-controls">
             <div className="tabs" role="tablist" aria-label="Range">
@@ -161,12 +161,16 @@ export default async function Overview({
             </form>
           </div>
         </div>
-        <FlowStats received={flowReceived} paid={flowPaid} currency={floats[0]?.currency ?? 'USD'} />
-        {flowReceived === 0 && flowPaid === 0 ? (
-          <div className="empty" style={{ border: 'none' }}>No money moved in this range.</div>
-        ) : (
-          <FlowChart buckets={buckets} unit={unit} />
-        )}
+        <div className="grid cols-2" style={{ marginBottom: 16 }}>
+          <FlowStats received={flowReceived} paid={flowPaid} currency={floats[0]?.currency ?? 'USD'} />
+        </div>
+        <div className="card">
+          {flowReceived === 0 && flowPaid === 0 ? (
+            <div className="empty" style={{ border: 'none' }}>No money moved in this range.</div>
+          ) : (
+            <FlowChart buckets={buckets} unit={unit} />
+          )}
+        </div>
       </section>
 
       <h2>Waiting on a person</h2>

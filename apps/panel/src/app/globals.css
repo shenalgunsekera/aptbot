@@ -151,13 +151,8 @@ h2 { font-size: 12px; font-weight: 650; margin: 32px 0 13px; color: var(--text-f
 .flow-dates { display: flex; align-items: center; gap: 6px; }
 .flow-dates input[type="date"] { width: auto; padding: 5px 8px; font-size: 12px; }
 .flow-dash { color: var(--text-faint); }
-/* Headline numbers — three across on desktop, stacked on a phone. */
-.flow-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
-.flow-stat { padding: 12px 14px; background: var(--surface-2); border-radius: var(--radius); }
-.flow-stat .stat-label { display: flex; align-items: center; gap: 6px; }
-.flow-stat .stat-value { font-size: 22px; margin-top: 4px; }
+.stat-label .dash-dot { display: inline-block; vertical-align: middle; margin-right: 3px; }
 @media (max-width: 560px) {
-  .flow-stats { grid-template-columns: 1fr; }
   .flow-controls { width: 100%; }
   .flow-dates { width: 100%; }
   .flow-dates input[type="date"] { flex: 1; min-width: 0; }
