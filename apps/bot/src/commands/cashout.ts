@@ -84,7 +84,7 @@ async function askAmount(ctx: Ctx, platform: Platform): Promise<void> {
   // chosen method's exact minimum when the method is known.
   const [cfg] = await sql<{ min_amount: number; max_amount: number; amount_step: number }[]>`
     select c.amount_step,
-      coalesce((select min(coalesce(m.min_amount, c.min_amount)) from payment_methods m where m.enabled and m.payout_enabled), c.min_amount) as min_amount,
+      greatest(coalesce((select min(coalesce(m.min_amount, c.min_amount)) from payment_methods m where m.enabled and m.payout_enabled), c.min_amount), c.min_amount) as min_amount,
       coalesce((select max(coalesce(m.max_amount, c.max_amount)) from payment_methods m where m.enabled and m.payout_enabled), c.max_amount) as max_amount
       from config c`;
   ctx.session.step = { name: 'out:amount', platformId: platform.id };
@@ -119,7 +119,7 @@ export async function cashoutAmount(ctx: Ctx, platformId: string, text: string):
   const sql0 = db();
   const [cfg0] = await sql0<{ min_amount: number; max_amount: number; amount_step: number }[]>`
     select c.amount_step,
-      coalesce((select min(coalesce(m.min_amount, c.min_amount)) from payment_methods m where m.enabled and m.payout_enabled), c.min_amount) as min_amount,
+      greatest(coalesce((select min(coalesce(m.min_amount, c.min_amount)) from payment_methods m where m.enabled and m.payout_enabled), c.min_amount), c.min_amount) as min_amount,
       coalesce((select max(coalesce(m.max_amount, c.max_amount)) from payment_methods m where m.enabled and m.payout_enabled), c.max_amount) as max_amount
       from config c`;
   const problem = amountProblem(amount, { min: cfg0.min_amount, max: cfg0.max_amount, step: cfg0.amount_step });
