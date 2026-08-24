@@ -152,6 +152,14 @@ h2 { font-size: 12px; font-weight: 650; margin: 32px 0 13px; color: var(--text-f
 .flow-dates input[type="date"] { width: auto; padding: 5px 8px; font-size: 12px; }
 .flow-dash { color: var(--text-faint); }
 .stat-label .dash-dot { display: inline-block; vertical-align: middle; margin-right: 3px; }
+/* Interactive overlay (hover / touch) */
+.flow-wrap { position: relative; cursor: crosshair; }
+.flow-guide { position: absolute; width: 0; border-left: 1px dashed var(--text-faint); transform: translateX(-0.5px); pointer-events: none; }
+.flow-dot { position: absolute; width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--surface); transform: translate(-50%, -50%); pointer-events: none; box-shadow: 0 0 0 1px rgba(0,0,0,0.06); }
+.flow-tip { position: absolute; top: 4px; transform: translateX(-50%); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-md, 0 4px 16px rgba(0,0,0,0.12)); padding: 8px 10px; font-size: 12px; white-space: nowrap; pointer-events: none; z-index: 2; }
+.flow-tip-date { font-weight: 650; margin-bottom: 4px; }
+.flow-tip-row { display: flex; align-items: center; gap: 6px; color: var(--text-dim); }
+.flow-tip-row strong { color: var(--text); margin-left: auto; padding-left: 10px; }
 @media (max-width: 560px) {
   .flow-controls { width: 100%; }
   .flow-dates { width: 100%; }
