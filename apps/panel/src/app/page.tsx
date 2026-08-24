@@ -4,7 +4,7 @@ import { db } from '@union/core';
 import { Shell } from '../components/shell';
 import { getSession } from '../lib/auth';
 import { Money, Ago } from '../components/ui';
-import { FlowChart, FlowLegend, type Bucket } from '../components/flow-chart';
+import { FlowChart, FlowStats, type Bucket } from '../components/flow-chart';
 
 export const dynamic = 'force-dynamic';
 
@@ -161,11 +161,11 @@ export default async function Overview({
             </form>
           </div>
         </div>
-        <FlowLegend received={flowReceived} paid={flowPaid} currency={floats[0]?.currency ?? 'USD'} />
+        <FlowStats received={flowReceived} paid={flowPaid} currency={floats[0]?.currency ?? 'USD'} />
         {flowReceived === 0 && flowPaid === 0 ? (
           <div className="empty" style={{ border: 'none' }}>No money moved in this range.</div>
         ) : (
-          <FlowChart buckets={buckets} unit={unit} currency={floats[0]?.currency ?? 'USD'} />
+          <FlowChart buckets={buckets} unit={unit} />
         )}
       </section>
 
