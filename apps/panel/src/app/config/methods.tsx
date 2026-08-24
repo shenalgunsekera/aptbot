@@ -186,14 +186,8 @@ function MethodForm({ method, onDone }: { method: any | null; onDone?: () => voi
       </div>
 
       <div className="field-row">
-        <div className="field">
-          <label htmlFor="min_amount">Min (cents)</label>
-          <input id="min_amount" name="min_amount" type="number" defaultValue={method?.min_amount ?? ''} />
-        </div>
-        <div className="field">
-          <label htmlFor="max_amount">Max (cents)</label>
-          <input id="max_amount" name="max_amount" type="number" defaultValue={method?.max_amount ?? ''} />
-        </div>
+        <DollarField name="min_amount" label="Min ($)" def={method?.min_amount ?? null} />
+        <DollarField name="max_amount" label="Max ($)" def={method?.max_amount ?? null} />
         <div className="field">
           <label htmlFor="hold_seconds">Hold override (secs)</label>
           <input id="hold_seconds" name="hold_seconds" type="number" defaultValue={method?.hold_seconds ?? ''} />
@@ -207,11 +201,7 @@ function MethodForm({ method, onDone }: { method: any | null; onDone?: () => voi
                  defaultValue={method?.processor_fee_bps ?? 0} />
           <div className="field-hint">PayPal ≈ 349 (3.49%)</div>
         </div>
-        <div className="field">
-          <label htmlFor="processor_fee_flat">Processor fee flat (cents)</label>
-          <input id="processor_fee_flat" name="processor_fee_flat" type="number"
-                 defaultValue={method?.processor_fee_flat ?? 0} />
-        </div>
+        <DollarField name="processor_fee_flat" label="Processor fee flat ($)" def={method?.processor_fee_flat ?? 0} />
       </div>
 
       <div className="field">
@@ -363,3 +353,21 @@ function TiersEditor({ initial }: { initial: Array<{ up_to: number | null; handl
 }
 
 const NUM = new Set(['min_amount', 'max_amount', 'hold_seconds', 'processor_fee_bps', 'processor_fee_flat', 'sort_order']);
+
+/** A money field shown in DOLLARS but submitted (via a hidden input) in cents,
+ *  so nothing downstream changes — the name stays in NUM and reads the cents. */
+function DollarField({ name, label, def, hint }: { name: string; label: string; def: number | null; hint?: string }) {
+  const [val, setVal] = useState<string>(def != null ? String(Number(def) / 100) : '');
+  const cents = val.trim() === '' ? '' : String(Math.round(parseFloat(val) * 100));
+  return (
+    <div className="field">
+      <label htmlFor={name}>{label}</label>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ color: 'var(--text-faint)', fontWeight: 600 }}>$</span>
+        <input id={name} type="number" min="0" step="0.01" value={val} onChange={(e) => setVal(e.target.value)} style={{ flex: 1 }} />
+      </div>
+      <input type="hidden" name={name} value={cents} />
+      {hint && <div className="field-hint">{hint}</div>}
+    </div>
+  );
+}
