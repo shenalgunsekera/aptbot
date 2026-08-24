@@ -4,6 +4,7 @@ import { db } from '@union/core';
 import { Shell } from '../components/shell';
 import { getSession } from '../lib/auth';
 import { Money, Ago } from '../components/ui';
+import { FlowChart, FlowLegend, type Bucket } from '../components/flow-chart';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,7 +22,11 @@ interface Float {
 }
 interface InboxRow { kind: string; ref_id: string; created_at: string; detail: Record<string, any>; priority: number; }
 
-export default async function Overview() {
+export default async function Overview({
+  searchParams,
+}: {
+  searchParams: Promise<{ flow?: string; from?: string; to?: string }>;
+}) {
   // Check auth BEFORE any DB query — an unauthenticated hit should land on
   // /login, not run queries (and not crash if the DB is unreachable).
   const session = await getSession();
@@ -31,6 +36,58 @@ export default async function Overview() {
   const floats = await sql<Float[]>`select * from v_float_position`;
   const inbox = await sql<InboxRow[]>`select * from v_admin_inbox order by priority, created_at limit 30`;
   const problems = await sql<{ problem: string; detail: any }[]>`select * from ledger_verify()`;
+
+  // ── Cash flow: money received (deposits) vs paid out (cash-outs) over time ──
+  // Session TZ is GMT, so date_trunc aligns to UTC boundaries; we bucket to match.
+  const { flow: flowParam, from, to } = await searchParams;
+  const validDate = (s?: string) => (s && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null);
+  const cFrom = validDate(from), cTo = validDate(to);
+  const now = new Date();
+  const DAY = 86400000, HOUR = 3600000;
+  const today0 = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+
+  let preset: '24h' | '7d' | '30d' | 'custom';
+  let unit: 'hour' | 'day';
+  let start: Date, seriesEnd: Date, end: Date;
+  if (cFrom && cTo) {
+    preset = 'custom'; unit = 'day';
+    start = new Date(cFrom + 'T00:00:00Z');
+    seriesEnd = new Date(cTo + 'T00:00:00Z');
+    end = new Date(seriesEnd.getTime() + DAY);
+  } else {
+    preset = flowParam === '24h' ? '24h' : flowParam === '30d' ? '30d' : '7d';
+    end = now;
+    if (preset === '24h') {
+      unit = 'hour';
+      const thisHour = Math.floor(now.getTime() / HOUR) * HOUR;
+      start = new Date(thisHour - 23 * HOUR);
+      seriesEnd = new Date(thisHour);
+    } else {
+      unit = 'day';
+      const days = preset === '30d' ? 29 : 6;
+      start = new Date(today0 - days * DAY);
+      seriesEnd = new Date(today0);
+    }
+  }
+  const step = unit === 'hour' ? '1 hour' : '1 day';
+  const buckets = await sql<Bucket[]>`
+    with b as (
+      select generate_series(${start}::timestamptz, ${seriesEnd}::timestamptz, ${step}::interval) as t
+    ),
+    fl as (
+      select date_trunc(${unit}, released_at) as t,
+             coalesce(sum(amount) filter (where deposit_id is not null), 0) as received,
+             coalesce(sum(amount) filter (where withdraw_id is not null), 0) as paid
+        from fills
+       where status = 'released' and released_at >= ${start} and released_at < ${end}
+       group by 1
+    )
+    select b.t, coalesce(fl.received, 0)::bigint as received, coalesce(fl.paid, 0)::bigint as paid
+      from b left join fl on fl.t = b.t
+     order by b.t`;
+  const flowReceived = buckets.reduce((s, b) => s + Number(b.received), 0);
+  const flowPaid = buckets.reduce((s, b) => s + Number(b.paid), 0);
+  const flowHref = (f: string) => `/?flow=${f}`;
 
   return (
     <Shell>
@@ -81,6 +138,36 @@ export default async function Overview() {
           </div>
         </section>
       ))}
+
+      {/* Cash flow */}
+      <section className="card" style={{ marginBottom: 22 }}>
+        <div className="flow-head">
+          <div>
+            <div className="stat-label" style={{ fontSize: 14 }}>Cash flow</div>
+            <div className="stat-note">Money received (deposits) vs paid out (cash-outs).</div>
+          </div>
+          <div className="flow-controls">
+            <div className="tabs" role="tablist" aria-label="Range">
+              {([['24h', '24 hours'], ['7d', '7 days'], ['30d', '30 days']] as const).map(([k, lbl]) => (
+                <Link key={k} href={flowHref(k)} role="tab" aria-selected={preset === k}
+                      className={`tab ${preset === k ? 'active' : ''}`}>{lbl}</Link>
+              ))}
+            </div>
+            <form className="flow-dates" method="get">
+              <input type="date" name="from" defaultValue={cFrom ?? ''} aria-label="From date" />
+              <span className="flow-dash">→</span>
+              <input type="date" name="to" defaultValue={cTo ?? ''} aria-label="To date" />
+              <button type="submit" className="sm">Apply</button>
+            </form>
+          </div>
+        </div>
+        <FlowLegend received={flowReceived} paid={flowPaid} currency={floats[0]?.currency ?? 'USD'} />
+        {flowReceived === 0 && flowPaid === 0 ? (
+          <div className="empty" style={{ border: 'none' }}>No money moved in this range.</div>
+        ) : (
+          <FlowChart buckets={buckets} unit={unit} currency={floats[0]?.currency ?? 'USD'} />
+        )}
+      </section>
 
       <h2>Waiting on a person</h2>
       <div className="table-wrap">

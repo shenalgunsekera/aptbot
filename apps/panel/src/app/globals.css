@@ -144,6 +144,19 @@ h2 { font-size: 12px; font-weight: 650; margin: 32px 0 13px; color: var(--text-f
 .stat-value.pos { color: var(--ok); }
 .stat-value.neg { color: var(--red); }
 
+/* ── Cash-flow chart (Overview) ─────────────────────────────────────────── */
+.flow-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+.flow-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.flow-controls .tabs { margin: 0; }
+.flow-dates { display: flex; align-items: center; gap: 6px; }
+.flow-dates input[type="date"] { width: auto; padding: 5px 8px; font-size: 12px; }
+.flow-dash { color: var(--text-faint); }
+.flow-legend { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 10px; font-size: 13px; color: var(--text-dim); }
+.flow-key { display: inline-flex; align-items: center; gap: 6px; }
+.flow-key strong { color: var(--text); }
+.flow-key .pos { color: var(--ok); }
+.flow-key .neg { color: var(--red); }
+
 /* ── Queue row actions (compact 2-up grid, not a tall stack) ────────────── */
 .queue-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; align-items: start; }
 .queue-actions > button { width: 100%; margin: 0; white-space: nowrap; }
