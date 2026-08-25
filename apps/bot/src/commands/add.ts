@@ -698,11 +698,13 @@ export async function stripeReceipt(ctx: Ctx, platformId: string, amount?: numbe
     console.error('stripe receipt upload failed:', err);
   }
 
-  // Match the webhook payment if one arrived (it's the ACTUAL amount) — else fall
-  // back to the amount the player chose in the bot. Either way an amount is always
-  // on file, so the admin gets a one-tap Verify / Discard, never "enter amount".
+  // The admin loads the amount the PLAYER ENTERED in the bot (a validated figure),
+  // NOT whatever they happened to type on Stripe's open page. We still autolink so
+  // the actual Stripe payment is tied to this claim for the record — we just don't
+  // let its amount win. Falls back to the linked Stripe amount only when there is
+  // no in-bot amount on file (e.g. a raw payment-link payment with no bot deposit).
   await sql`select stripe_claim_autolink(${claim!.id}::uuid) as amt`;
-  await sql`update stripe_claims set amount = coalesce(amount, ${amount ?? null}::bigint) where id = ${claim!.id}`;
+  await sql`update stripe_claims set amount = coalesce(${amount ?? null}::bigint, amount) where id = ${claim!.id}`;
   const [cur] = await sql<{ amount: number | null }[]>`select amount from stripe_claims where id = ${claim!.id}`;
 
   await sql`select notify_admins('stripe.claim', 'stripe_claim', ${claim!.id}::uuid, ${sql.json({
