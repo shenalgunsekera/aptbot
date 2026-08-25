@@ -534,6 +534,26 @@ export async function peerpayBackup(ctx: Ctx, fillId: string): Promise<void> {
 
 /** Player sent a receipt photo. Upload it, submit proof on the first, allow a
  *  second, then finish. No transaction ID anywhere. */
+// Group screenshots into ONE admin card even when sent as separate messages:
+// after the first, wait a short window for a possible second before posting. A
+// second photo (or /done) finalizes immediately and cancels the timer.
+// sendReceiptsToReviewer claims atomically, so it posts EXACTLY ONE verification
+// no matter how many of these race — never two cards.
+const RECEIPT_GROUP_MS = 10_000;
+const finalizeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+function scheduleFinalize(fillId: string): void {
+  const existing = finalizeTimers.get(fillId);
+  if (existing) clearTimeout(existing);
+  finalizeTimers.set(fillId, setTimeout(() => {
+    finalizeTimers.delete(fillId);
+    sendReceiptsToReviewer(fillId).catch((e) => console.error('[receipt] debounced finalize failed', e));
+  }, RECEIPT_GROUP_MS));
+}
+function cancelFinalize(fillId: string): void {
+  const t = finalizeTimers.get(fillId);
+  if (t) { clearTimeout(t); finalizeTimers.delete(fillId); }
+}
+
 export async function addReceipt(ctx: Ctx, fillId: string): Promise<void> {
   const sql = db();
   const p = await requireActive(ctx);
@@ -619,20 +639,23 @@ export async function addReceipt(ctx: Ctx, fillId: string): Promise<void> {
   const have = rc?.n ?? 1;
 
   if (have >= 2) {
+    cancelFinalize(fillId);
     const sent = await sendReceiptsToReviewer(fillId);
     ctx.session.step = { name: 'idle' };
     await ctx.reply(sent ? finishedMessage() : '✅ Got your second screenshot too.');
     return;
   }
 
-  // Only one so far. Keep collecting a possible second — but still send the admin
-  // card now so a lone-photo deposit is never left unseen (proof is already
-  // submitted above, so it's visible either way). Stay in receipt mode.
+  // Only one so far. DON'T post the admin card yet — wait a short window so a
+  // SECOND screenshot (an album frame, or a separately-sent message) lands on the
+  // SAME card instead of being stranded. If none arrives, the timer finalizes the
+  // single one; a 2nd photo or /done finalizes immediately. Exactly one card
+  // either way (the atomic claim guarantees it).
+  scheduleFinalize(fillId);
   if (!mediaGroup) {
-    await sendReceiptsToReviewer(fillId);
     await ctx.reply('✅ Got your screenshot. Send a *second* one now if you have it — or /done.', { parse_mode: 'Markdown' });
   }
-  // (album's first frame: stay silent, its second frame will finalize)
+  // (album's first frame: stay silent; its second frame finalizes immediately)
 }
 
 /** /canceldeposit — drop the player's latest un-paid deposit. */
@@ -724,6 +747,7 @@ export async function stripeReceipt(ctx: Ctx, platformId: string, amount?: numbe
  *  were attached to admins as one album; if none, submits proof with an alert so
  *  the payment isn't stranded. */
 export async function addDone(ctx: Ctx, fillId: string): Promise<void> {
+  cancelFinalize(fillId);   // finalize now; don't let the grouping timer double up
   const sql = db();
   const [f] = await sql<{ deposit_id: string | null }[]>`select deposit_id from fills where id = ${fillId}`;
   const [rc] = await sql<{ n: number }[]>`
