@@ -89,9 +89,13 @@ export default async function Overview({
   const flowPaid = buckets.reduce((s, b) => s + Number(b.paid), 0);
   const flowHref = (f: string) => `/?flow=${f}`;
 
-  // Money in / out per platform (ClubGG, Sportsbook, …), all-time.
-  const totals = await platformTotals();
+  // Money in / out per platform (ClubGG, Sportsbook, …) — same range as the chart.
+  const totals = await platformTotals(start, end);
   const totalsCur = floats[0]?.currency ?? 'USD';
+  const rangeLabel = preset === '24h' ? 'last 24 hours'
+    : preset === '30d' ? 'last 30 days'
+    : preset === 'custom' ? `${cFrom} → ${cTo}`
+    : 'last 7 days';
   const grandIn = totals.reduce((s, t) => s + Number(t.deposited), 0);
   const grandOut = totals.reduce((s, t) => s + Number(t.withdrawn), 0);
 
@@ -184,7 +188,7 @@ export default async function Overview({
         <div className="flow-head">
           <div>
             <h2 style={{ margin: 0 }}>By platform</h2>
-            <p className="sub">All-time money in (deposits) and out (cash-outs) per platform.</p>
+            <p className="sub">Money in (deposits) and out (cash-outs) per platform · {rangeLabel}.</p>
           </div>
         </div>
         <div className="table-wrap">
