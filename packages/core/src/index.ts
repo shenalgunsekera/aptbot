@@ -3,4 +3,4 @@ export { formatMinor, parseMinor, bare, symbolFor } from './money.js';
 export * from './types.js';
 export { uploadReceipt, deleteReceipt, storageConfigured, type StoredReceipt } from './storage.js';
 export { peerpayCheckout, peerpayConfigured } from './peerpay.js';
-export { platformTotals, type PlatformTotals } from './stats.js';
+export { platformTotals, clubTotals, type PlatformTotals, type ClubTotals } from './stats.js';
