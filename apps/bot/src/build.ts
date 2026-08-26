@@ -1,6 +1,6 @@
 export { renderNotification, sendRendered, editCardFor } from './notifier.js';
 import { Bot, session, GrammyError, HttpError } from 'grammy';
-import { db, closeDb } from '@union/core';
+import { db, closeDb, platformTotals, formatMinor } from '@union/core';
 import { type Ctx, type SessionData, initialSession } from './session.js';
 import { currentPlayer } from './player.js';
 import { dmOnly, playerOnly, isAdminGroup } from './guards.js';
@@ -70,6 +70,7 @@ export const GROUP_COMMANDS = [
   { command: 'paymentchannel', description: 'Make this the payments feed (admins only)' },
   { command: 'setadmin', description: 'Add an admin (owner only)' },
   { command: 'p2p', description: 'Venmo/Zelle backstop handle (admins)' },
+  { command: 'totals', description: 'Deposited & cashed-out totals per platform (admins)' },
 ];
 
 /** Push the menus to Telegram for every scope. Safe to call repeatedly. */
@@ -235,6 +236,26 @@ export function buildBot(token: string): Bot<Ctx> {
     await ctx.reply(row?.admin_group_claim
       ? '✅ This group is now the admin group (adjustments, verifications, and everything except the payments feed).'
       : '⛔ Only an admin can do that.', { parse_mode: 'Markdown' });
+  });
+
+  // Money in / out per platform. Admin-group only — it's the club's books.
+  bot.command('totals', async (ctx) => {
+    if (!(await isAdminGroup(ctx))) {
+      await ctx.reply('Run this inside your admin group.');
+      return;
+    }
+    const rows = await platformTotals();
+    if (rows.length === 0) return void (await ctx.reply('No platforms set up yet.'));
+    let din = 0, dout = 0;
+    const lines = rows.map((t) => {
+      din += Number(t.deposited); dout += Number(t.withdrawn);
+      const net = Number(t.deposited) - Number(t.withdrawn);
+      return `*${t.name}*\n  ⬇︎ Deposited in: ${formatMinor(Number(t.deposited))}\n  ⬆︎ Cashed out: ${formatMinor(Number(t.withdrawn))}\n  ⚖︎ Net: ${formatMinor(net)}`;
+    });
+    await ctx.reply(
+      `📊 *Totals by platform* (all-time)\n\n${lines.join('\n\n')}\n\n————\n*All platforms* — in ${formatMinor(din)} · out ${formatMinor(dout)} · net ${formatMinor(din - dout)}`,
+      { parse_mode: 'Markdown' },
+    );
   });
 
   // Owner adds admins by tagging them. Works in the group or a DM.

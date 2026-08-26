@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { db } from '@union/core';
+import { db, platformTotals } from '@union/core';
 import { Shell } from '../components/shell';
 import { getSession } from '../lib/auth';
 import { Money, Ago } from '../components/ui';
@@ -89,6 +89,12 @@ export default async function Overview({
   const flowPaid = buckets.reduce((s, b) => s + Number(b.paid), 0);
   const flowHref = (f: string) => `/?flow=${f}`;
 
+  // Money in / out per platform (ClubGG, Sportsbook, …), all-time.
+  const totals = await platformTotals();
+  const totalsCur = floats[0]?.currency ?? 'USD';
+  const grandIn = totals.reduce((s, t) => s + Number(t.deposited), 0);
+  const grandOut = totals.reduce((s, t) => s + Number(t.withdrawn), 0);
+
   return (
     <Shell>
       <div className="page-head">
@@ -170,6 +176,53 @@ export default async function Overview({
           ) : (
             <FlowChart buckets={buckets} unit={unit} />
           )}
+        </div>
+      </section>
+
+      {/* Per-platform totals */}
+      <section style={{ marginBottom: 22 }}>
+        <div className="flow-head">
+          <div>
+            <h2 style={{ margin: 0 }}>By platform</h2>
+            <p className="sub">All-time money in (deposits) and out (cash-outs) per platform.</p>
+          </div>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Platform</th>
+                <th style={{ textAlign: 'right' }}>Deposited in</th>
+                <th style={{ textAlign: 'right' }}>Cashed out</th>
+                <th style={{ textAlign: 'right' }}>Net</th>
+              </tr>
+            </thead>
+            <tbody>
+              {totals.length === 0 ? (
+                <tr><td colSpan={4}><div className="empty" style={{ border: 'none' }}>No platforms yet.</div></td></tr>
+              ) : totals.map((t) => {
+                const net = Number(t.deposited) - Number(t.withdrawn);
+                return (
+                  <tr key={t.id}>
+                    <td style={{ fontWeight: 600 }}>{t.name}</td>
+                    <td className="mono" style={{ textAlign: 'right' }}><Money minor={Number(t.deposited)} currency={totalsCur} /></td>
+                    <td className="mono" style={{ textAlign: 'right' }}><Money minor={Number(t.withdrawn)} currency={totalsCur} /></td>
+                    <td className="mono" style={{ textAlign: 'right', fontWeight: 600, color: net >= 0 ? 'var(--ok)' : 'var(--red)' }}><Money minor={net} currency={totalsCur} /></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            {totals.length > 0 && (
+              <tfoot>
+                <tr style={{ borderTop: '2px solid var(--border)' }}>
+                  <td style={{ fontWeight: 700 }}>All platforms</td>
+                  <td className="mono" style={{ textAlign: 'right', fontWeight: 700 }}><Money minor={grandIn} currency={totalsCur} /></td>
+                  <td className="mono" style={{ textAlign: 'right', fontWeight: 700 }}><Money minor={grandOut} currency={totalsCur} /></td>
+                  <td className="mono" style={{ textAlign: 'right', fontWeight: 700, color: grandIn - grandOut >= 0 ? 'var(--ok)' : 'var(--red)' }}><Money minor={grandIn - grandOut} currency={totalsCur} /></td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
         </div>
       </section>
 
