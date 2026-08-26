@@ -10,6 +10,14 @@ interface Job {
   platform: string; club_name: string | null; account: string | null; delta: number; currency: string;
   reason: string; status: string; claimed_by: string | null;
   claimed_by_email: string | null; claimed_at: string | null; created_at: string; stale: boolean;
+  is_discord: boolean;
+}
+interface PayJob { id: string; name: string | null; amount: number; currency: string; platform: string; method: string; handle: string | null; created_at: string; is_discord: boolean; }
+interface VerifyJob { id: string; name: string | null; amount: number; currency: string; method: string; money_in: boolean; created_at: string; is_discord: boolean; }
+
+/** Which bot the player is on: a discord_players row means Discord, else Telegram. */
+function Via({ discord }: { discord: boolean }) {
+  return <span className="badge muted">{discord ? '💬 Discord' : '📱 Telegram'}</span>;
 }
 
 /** "account [platform · club]" — the ClubGG/Sportsbook account, its platform, and
@@ -36,7 +44,8 @@ export default async function JobsPage() {
            coalesce(case when pf.code = 'clubgg' then pp.platform_username else pp.platform_uid end, lo.player_name) as account,
            lo.delta, lo.currency, lo.reason, lo.status,
            lo.claimed_by, a.email as claimed_by_email, lo.claimed_at, lo.created_at,
-           (lo.status='claimed' and lo.claimed_at < now() - interval '15 minutes') as stale
+           (lo.status='claimed' and lo.claimed_at < now() - interval '15 minutes') as stale,
+           exists(select 1 from discord_players x where x.player_id = lo.player_id) as is_discord
       from loader_orders lo
       left join platforms pf on pf.id = lo.platform_id
       left join clubs c on c.id = lo.club_id
@@ -54,7 +63,28 @@ export default async function JobsPage() {
      where lo.status in ('done','failed','cancelled')
      order by lo.done_at desc nulls last limit 20`;
 
+  // Cash-outs waiting to be paid (the "cash-out to pay" cards in the bots).
+  const toPay = await sql<PayJob[]>`
+    select q.id, q.display_name as name, q.amount_remaining as amount, q.currency,
+           q.platform, q.method_name as method, q.payout_handle as handle, q.created_at,
+           exists(select 1 from discord_players x where x.player_id = q.player_id) as is_discord
+      from v_withdraw_queue q order by q.created_at limit 100`;
+
+  // Payments waiting to be verified (the "payment to verify — Verify/Discard" cards).
+  const toVerify = await sql<VerifyJob[]>`
+    select f.id, coalesce(dp.display_name, wp.display_name) as name, f.amount, f.currency,
+           pm.name as method, (f.withdraw_id is null) as money_in, f.submitted_at as created_at,
+           exists(select 1 from discord_players x where x.player_id = coalesce(d.player_id, w.player_id)) as is_discord
+      from fills f
+      join payment_methods pm on pm.id = f.method_id
+      left join deposit_requests d on d.id = f.deposit_id
+      left join players dp on dp.id = d.player_id
+      left join withdraw_requests w on w.id = f.withdraw_id
+      left join players wp on wp.id = w.player_id
+     where f.status = 'awaiting_confirmation' order by f.submitted_at limit 100`;
+
   const stale = jobs.filter((j) => j.stale).length;
+  const nothing = jobs.length === 0 && toPay.length === 0 && toVerify.length === 0;
 
   return (
     <Shell>
@@ -72,10 +102,67 @@ export default async function JobsPage() {
         </div>
       )}
 
-      <div className="table-wrap">
-        {jobs.length === 0 ? (
-          <div className="empty">Nothing to do right now. 🎉</div>
-        ) : (
+      {nothing && <div className="table-wrap"><div className="empty">Nothing to do right now. 🎉</div></div>}
+
+      {toPay.length > 0 && (
+        <>
+          <h2>Cash-outs to pay ({toPay.length})</h2>
+          <div className="table-wrap">
+            <table>
+              <thead><tr>
+                <th className="num" style={{ width: 110 }}>Amount</th><th>Player</th>
+                <th style={{ width: 90 }}>Platform</th><th>Method</th><th>Send to</th>
+                <th style={{ width: 120 }}>Via</th><th style={{ width: 70 }}>Age</th>
+              </tr></thead>
+              <tbody>
+                {toPay.map((j) => (
+                  <tr key={j.id}>
+                    <td className="num"><Money minor={j.amount} currency={j.currency} /></td>
+                    <td><strong>{j.name ?? '—'}</strong></td>
+                    <td>{j.platform}</td>
+                    <td><span className="badge muted">{j.method}</span></td>
+                    <td className="mono" style={{ fontSize: 11 }}>{j.handle ?? '—'}</td>
+                    <td><Via discord={j.is_discord} /></td>
+                    <td><Ago at={j.created_at} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {toVerify.length > 0 && (
+        <>
+          <h2>Payments to verify ({toVerify.length})</h2>
+          <div className="table-wrap">
+            <table>
+              <thead><tr>
+                <th className="num" style={{ width: 110 }}>Amount</th><th>Player</th>
+                <th>Method</th><th style={{ width: 120 }}>Direction</th>
+                <th style={{ width: 120 }}>Via</th><th style={{ width: 70 }}>Age</th>
+              </tr></thead>
+              <tbody>
+                {toVerify.map((j) => (
+                  <tr key={j.id}>
+                    <td className="num"><Money minor={j.amount} currency={j.currency} /></td>
+                    <td><strong>{j.name ?? '—'}</strong></td>
+                    <td><span className="badge muted">{j.method}</span></td>
+                    <td><span className={`badge ${j.money_in ? 'ok' : 'warn'}`}>{j.money_in ? 'money in' : 'cash-out'}</span></td>
+                    <td><Via discord={j.is_discord} /></td>
+                    <td><Ago at={j.created_at} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {jobs.length > 0 && (
+        <>
+          <h2>Add / take off chips ({jobs.length})</h2>
+          <div className="table-wrap">
           <table>
             <thead>
               <tr>
@@ -84,6 +171,7 @@ export default async function JobsPage() {
                 <th>Player</th>
                 <th>ID</th>
                 <th style={{ width: 90 }}>Where</th>
+                <th style={{ width: 120 }}>Via</th>
                 <th style={{ width: 100 }}>Status</th>
                 <th style={{ width: 70 }}>Age</th>
                 <th style={{ width: 260 }} />
@@ -101,6 +189,7 @@ export default async function JobsPage() {
                   <td><PlayerCell j={j} /></td>
                   <td className="mono"><strong>{j.platform_uid}</strong></td>
                   <td>{j.platform}</td>
+                  <td><Via discord={j.is_discord} /></td>
                   <td>
                     {j.status === 'pending'
                       ? <span className="badge muted">open</span>
@@ -115,8 +204,9 @@ export default async function JobsPage() {
               ))}
             </tbody>
           </table>
-        )}
-      </div>
+          </div>
+        </>
+      )}
 
       <h2>Recently done</h2>
       <div className="table-wrap">
