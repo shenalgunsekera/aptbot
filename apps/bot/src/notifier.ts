@@ -273,8 +273,15 @@ export function renderNotification(n: Notification): Rendered | null {
       // (e.g. the payer was on Discord). Text-only if there's no image.
       const imgs: string[] = (Array.isArray(p.file_ids) && p.file_ids.length ? p.file_ids
         : Array.isArray(p.urls) ? p.urls : []).filter(Boolean);
-      const text = `✅ *${m(p.amount, p.currency)} — that part of your cash-out is done.*` +
-        (imgs.length ? `\n\nHere ${imgs.length > 1 ? 'are the screenshots' : 'is the screenshot'} of your payment.` : '');
+      const shot = imgs.length ? `\n\nHere ${imgs.length > 1 ? 'are the screenshots' : 'is the screenshot'} of your payment.` : '';
+      // total = the whole cash-out, remaining = still to be sent (0076/0102 payload).
+      // Older outbox rows lack them → fall back to the previous wording.
+      const head = p.total != null && p.remaining != null
+        ? (Number(p.remaining) > 0
+            ? `✅ *${m(p.amount, p.currency)} has been sent.* ${m(p.remaining, p.currency)}/${m(p.total, p.currency)} to be sent.`
+            : `✅ *${m(p.amount, p.currency)} has been sent — your cash-out is complete.* 🎉`)
+        : `✅ *${m(p.amount, p.currency)} — that part of your cash-out is done.*`;
+      const text = head + shot;
       return imgs.length > 1 ? { photos: imgs, text } : imgs.length === 1 ? { photo: imgs[0], text } : { text };
     }
     case 'fill.confirmed_pending_hold':
