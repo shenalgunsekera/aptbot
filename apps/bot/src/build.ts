@@ -18,7 +18,7 @@ import {
   addReceipt, addDone, stripeReceipt, cancelDeposit, peerpayBackup, handleStaffReply,
   staffProvided, staffWaitReceipt,
 } from './commands/add.js';
-import { pauseWithdraw, resumeWithdraw, adjustCommand, adjustPayReply, reversePayment } from './commands/adjust.js';
+import { pauseWithdraw, resumeWithdraw, adjustCommand, adjustPayReply, reversePayment, reversePaymentPick } from './commands/adjust.js';
 import {
   cashoutStart, cashoutPickPlatform, cashoutPickClub, cashoutAmount, cashoutPickMethod,
   cashoutSavedHandle, cashoutSavedMethod, cashoutHandle, cashoutRetract, cashoutCancel,
@@ -191,6 +191,7 @@ export function buildBot(token: string): Bot<Ctx> {
   // payment made. A photo-caption `/adjust -50` is handled in the photo handler.
   bot.command('adjust', (ctx) => adjustCommand(ctx, typeof ctx.match === 'string' ? ctx.match : ''));
   bot.command('reversepayment', reversePayment);
+  bot.callbackQuery(/^rvp:(.+)$/, (ctx) => reversePaymentPick(ctx, ctx.match![1]!));
   bot.command('canceldeposit', dmOnly(cancelDeposit));
   bot.command(['withdraw', 'cashout'], dmOnly(cashoutStart));
   bot.command(['cancelwithdraw', 'cancelcashout'], dmOnly(cashoutCancel));

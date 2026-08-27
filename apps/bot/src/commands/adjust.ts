@@ -1,3 +1,4 @@
+import { InlineKeyboard } from 'grammy';
 import { db, isUserError, userMessage, uploadReceipt, storageConfigured } from '@union/core';
 import type { Ctx } from '../session.js';
 import { isAdminGroup } from '../guards.js';
@@ -137,17 +138,41 @@ export async function reversePayment(ctx: Ctx): Promise<void> {
     [pl] = await sql<{ id: string; display_name: string | null }[]>`select id, display_name from players where chat_id = ${ctx.chat!.id}`;
     if (!pl) return void (await ctx.reply("Reply to the player's message so I know who you mean — no player is linked to this chat."));
   }
-  const [f] = await sql<{ id: string; amount: number }[]>`
-    select f.id, f.amount from fills f join withdraw_requests w on w.id = f.withdraw_id
+  // List the recent SENT payments so the admin picks the fake one — it may not be
+  // the most recent (could be the 2nd or 3rd back).
+  const fills = await sql<{ id: string; amount: number; released_at: string | null; from_name: string | null }[]>`
+    select f.id, f.amount, f.released_at, dp.display_name as from_name
+      from fills f join withdraw_requests w on w.id = f.withdraw_id
+      left join deposit_requests d on d.id = f.deposit_id
+      left join players dp on dp.id = d.player_id
      where w.player_id = ${pl.id} and f.status = 'released'
-     order by f.released_at desc nulls last, f.created_at desc limit 1`;
-  if (!f) return void (await ctx.reply(`${pl.display_name ?? 'This player'} has no sent payment to reverse.`));
+     order by f.released_at desc nulls last, f.created_at desc limit 10`;
+  if (fills.length === 0) return void (await ctx.reply(`${pl.display_name ?? 'This player'} has no sent payment to reverse.`));
+  const kb = new InlineKeyboard();
+  for (const f of fills) {
+    const day = f.released_at ? ' · ' + new Date(f.released_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+    kb.text(`↩️ ${money(f.amount)}${day}${f.from_name ? ' · from ' + f.from_name : ' · club'}`, `rvp:${f.id}`).row();
+  }
+  await ctx.reply(`Which payment to *${pl.display_name ?? 'this player'}* should I reverse? Tap the fake one:`, { parse_mode: 'Markdown', reply_markup: kb });
+}
+
+/** The admin tapped a specific payment to reverse (callback rvp:<fill_id>). */
+export async function reversePaymentPick(ctx: Ctx, fillId: string): Promise<void> {
+  const admin = await adminFor(ctx);
+  if (!admin) return void (await ctx.answerCallbackQuery({ text: 'Admins only.' }));
+  const [pre] = await db()<{ amount: number }[]>`select amount from fills where id = ${fillId}`;
   try {
-    await sql`select fill_reverse(${f.id}::uuid, ${admin.id}::uuid, 'admin reversal')`;
-  } catch (err) { if (isUserError(err)) return void (await ctx.reply(`❌ ${userMessage(err)}`)); throw err; }
-  const [w] = await sql<{ amount: number; amount_remaining: number }[]>`
-    select w.amount, w.amount_remaining from withdraw_requests w join fills f on f.withdraw_id = w.id where f.id = ${f.id}`;
-  await ctx.reply(`↩️ Reversed the *${money(f.amount)}* payment to ${pl.display_name ?? 'this player'} — it's back on their cash-out (now ${money(w.amount_remaining)}/${money(w.amount)} to be sent). The club absorbed it and they've been told.`, { parse_mode: 'Markdown' });
+    await db()`select fill_reverse(${fillId}::uuid, ${admin.id}::uuid, 'admin reversal')`;
+  } catch (err) {
+    if (isUserError(err)) return void (await ctx.answerCallbackQuery({ text: userMessage(err), show_alert: true }));
+    throw err;
+  }
+  const [w] = await db()<{ amount: number; amount_remaining: number; name: string | null }[]>`
+    select w.amount, w.amount_remaining, p.display_name as name
+      from withdraw_requests w join fills fl on fl.withdraw_id = w.id join players p on p.id = w.player_id
+     where fl.id = ${fillId}`;
+  await ctx.answerCallbackQuery({ text: 'Reversed ✓' });
+  await ctx.reply(`↩️ Reversed the *${money(pre?.amount ?? 0)}* payment to ${w?.name ?? 'the player'} — it's back on their cash-out (now ${money(w?.amount_remaining ?? 0)}/${money(w?.amount ?? 0)} to be sent). The club absorbed it; they've been told.`, { parse_mode: 'Markdown' });
 }
 
 /** "+50" / "-50" / "50" → signed cents (default +). */
