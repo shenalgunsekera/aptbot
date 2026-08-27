@@ -284,6 +284,9 @@ export function renderNotification(n: Notification): Rendered | null {
       const text = head + shot;
       return imgs.length > 1 ? { photos: imgs, text } : imgs.length === 1 ? { photo: imgs[0], text } : { text };
     }
+    case 'fill.reversed':
+      return { text: `↩️ *A ${m(p.amount, p.currency)} payment on your cash-out was reversed* — it didn't clear, so it's back on your balance.` +
+        (Number(p.remaining) > 0 ? ` ${m(p.remaining, p.currency)}/${m(p.total, p.currency)} still to be sent.` : '') };
     case 'fill.confirmed_pending_hold':
       return { text: `✅ Confirmed! Their money releases after a short hold.` };
     case 'fill.lock_expired':

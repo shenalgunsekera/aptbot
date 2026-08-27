@@ -117,6 +117,39 @@ export async function resumeWithdraw(ctx: Ctx): Promise<void> {
   await ctx.reply(`▶️ Resumed ${r.player.name}'s cash-out — it's back in the queue at its original place.`);
 }
 
+/**
+ * /reversepayment — a payment we ALREADY sent turned out fake. Un-sends it: the
+ * amount goes back onto what the player is owed (numerator down, total unchanged),
+ * re-opening the cash-out even if this was the final payment. The club absorbs it.
+ * Targets the player's most recent released payment (on any cash-out, incl. one
+ * that this fake payment just completed — so target()'s in-progress filter is not
+ * enough here; we resolve the player, then find the sent fill directly).
+ */
+export async function reversePayment(ctx: Ctx): Promise<void> {
+  const admin = await adminFor(ctx);
+  if (!admin) return;
+  const sql = db();
+  let pl: { id: string; display_name: string | null } | undefined;
+  const fromReply = await playerFromReply(ctx);
+  if (fromReply) pl = fromReply;
+  else if (await isAdminGroup(ctx)) return void (await ctx.reply("Reply to the player's message (or their card) with this command, so I know who you mean."));
+  else {
+    [pl] = await sql<{ id: string; display_name: string | null }[]>`select id, display_name from players where chat_id = ${ctx.chat!.id}`;
+    if (!pl) return void (await ctx.reply("Reply to the player's message so I know who you mean — no player is linked to this chat."));
+  }
+  const [f] = await sql<{ id: string; amount: number }[]>`
+    select f.id, f.amount from fills f join withdraw_requests w on w.id = f.withdraw_id
+     where w.player_id = ${pl.id} and f.status = 'released'
+     order by f.released_at desc nulls last, f.created_at desc limit 1`;
+  if (!f) return void (await ctx.reply(`${pl.display_name ?? 'This player'} has no sent payment to reverse.`));
+  try {
+    await sql`select fill_reverse(${f.id}::uuid, ${admin.id}::uuid, 'admin reversal')`;
+  } catch (err) { if (isUserError(err)) return void (await ctx.reply(`❌ ${userMessage(err)}`)); throw err; }
+  const [w] = await sql<{ amount: number; amount_remaining: number }[]>`
+    select w.amount, w.amount_remaining from withdraw_requests w join fills f on f.withdraw_id = w.id where f.id = ${f.id}`;
+  await ctx.reply(`↩️ Reversed the *${money(f.amount)}* payment to ${pl.display_name ?? 'this player'} — it's back on their cash-out (now ${money(w.amount_remaining)}/${money(w.amount)} to be sent). The club absorbed it and they've been told.`, { parse_mode: 'Markdown' });
+}
+
 /** "+50" / "-50" / "50" → signed cents (default +). */
 function parseSigned(raw: string): number | null {
   const s = raw.trim();

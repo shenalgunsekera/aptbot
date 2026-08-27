@@ -18,7 +18,7 @@ import {
   addReceipt, addDone, stripeReceipt, cancelDeposit, peerpayBackup, handleStaffReply,
   staffProvided, staffWaitReceipt,
 } from './commands/add.js';
-import { pauseWithdraw, resumeWithdraw, adjustCommand, adjustPayReply } from './commands/adjust.js';
+import { pauseWithdraw, resumeWithdraw, adjustCommand, adjustPayReply, reversePayment } from './commands/adjust.js';
 import {
   cashoutStart, cashoutPickPlatform, cashoutPickClub, cashoutAmount, cashoutPickMethod,
   cashoutSavedHandle, cashoutSavedMethod, cashoutHandle, cashoutRetract, cashoutCancel,
@@ -66,6 +66,7 @@ export const GROUP_COMMANDS = [
   { command: 'pausewithdraw', description: 'Pause this player\'s cash-out (admins)' },
   { command: 'resumewithdraw', description: 'Resume this player\'s cash-out (admins)' },
   { command: 'adjust', description: '+amount grows a cash-out; -amount records a payment (admins)' },
+  { command: 'reversepayment', description: 'Undo a sent payment that turned out fake (admins)' },
   { command: 'setadmingroup', description: 'Make this the admin group (admins only)' },
   { command: 'paymentchannel', description: 'Make this the payments feed (admins only)' },
   { command: 'setadmin', description: 'Add an admin (owner only)' },
@@ -189,6 +190,7 @@ export function buildBot(token: string): Bot<Ctx> {
   // /adjust +50  → grow the cash-out;  /adjust -50 (with a screenshot) → record a
   // payment made. A photo-caption `/adjust -50` is handled in the photo handler.
   bot.command('adjust', (ctx) => adjustCommand(ctx, typeof ctx.match === 'string' ? ctx.match : ''));
+  bot.command('reversepayment', reversePayment);
   bot.command('canceldeposit', dmOnly(cancelDeposit));
   bot.command(['withdraw', 'cashout'], dmOnly(cashoutStart));
   bot.command(['cancelwithdraw', 'cancelcashout'], dmOnly(cashoutCancel));
