@@ -139,14 +139,15 @@ export async function reversePayment(ctx: Ctx): Promise<void> {
     if (!pl) return void (await ctx.reply("Reply to the player's message so I know who you mean — no player is linked to this chat."));
   }
   // List the recent SENT payments so the admin picks the fake one — it may not be
-  // the most recent (could be the 2nd or 3rd back).
+  // the most recent. "/reversepayment 5" shows the last 5 (default 10, max 20).
+  const n = Math.min(20, Math.max(1, parseInt(String(ctx.match ?? '').trim(), 10) || 10));
   const fills = await sql<{ id: string; amount: number; released_at: string | null; from_name: string | null }[]>`
     select f.id, f.amount, f.released_at, dp.display_name as from_name
       from fills f join withdraw_requests w on w.id = f.withdraw_id
       left join deposit_requests d on d.id = f.deposit_id
       left join players dp on dp.id = d.player_id
      where w.player_id = ${pl.id} and f.status = 'released'
-     order by f.released_at desc nulls last, f.created_at desc limit 10`;
+     order by f.released_at desc nulls last, f.created_at desc limit ${n}`;
   if (fills.length === 0) return void (await ctx.reply(`${pl.display_name ?? 'This player'} has no sent payment to reverse.`));
   const kb = new InlineKeyboard();
   for (const f of fills) {
