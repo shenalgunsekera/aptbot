@@ -579,8 +579,16 @@ export async function addReceipt(ctx: Ctx, fillId: string): Promise<void> {
     return;
   }
 
-  const [f] = await sql<{ deposit_id: string | null }[]>`
-    select deposit_id from fills where id = ${fillId}`;
+  const [f] = await sql<{ deposit_id: string | null; status: string }[]>`
+    select deposit_id, status from fills where id = ${fillId}`;
+  // The deposit already timed out / was cancelled while the player was still in
+  // receipt mode. Don't accept or acknowledge a late screenshot — just drop out of
+  // receipt mode. They already got the "Time's up — /deposit to start again" note,
+  // so the right move is a fresh deposit, not saving proof onto a dead slice.
+  if (!f || (f.status !== 'locked' && f.status !== 'awaiting_confirmation')) {
+    ctx.session.step = { name: 'idle' };
+    return;
+  }
   const platformId = f?.deposit_id
     ? (await sql<{ platform_id: string }[]>`select platform_id from deposit_requests where id = ${f.deposit_id}`)[0]?.platform_id
     : null;
