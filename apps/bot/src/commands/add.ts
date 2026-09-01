@@ -734,7 +734,7 @@ export async function stripeReceipt(ctx: Ctx, platformId: string, amount?: numbe
   // the actual Stripe payment is tied to this claim for the record — we just don't
   // let its amount win. Falls back to the linked Stripe amount only when there is
   // no in-bot amount on file (e.g. a raw payment-link payment with no bot deposit).
-  await sql`select stripe_claim_autolink(${claim!.id}::uuid) as amt`;
+  await sql`select stripe_claim_autolink(${claim!.id}::uuid, ${amount ?? null}::bigint) as amt`;
   await sql`update stripe_claims set amount = coalesce(${amount ?? null}::bigint, amount) where id = ${claim!.id}`;
   const [cur] = await sql<{ amount: number | null }[]>`select amount from stripe_claims where id = ${claim!.id}`;
 
