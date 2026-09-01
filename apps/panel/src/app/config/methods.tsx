@@ -188,6 +188,10 @@ function MethodForm({ method, onDone }: { method: any | null; onDone?: () => voi
       <div className="field-row">
         <DollarField name="min_amount" label="Min ($)" def={method?.min_amount ?? null} />
         <DollarField name="max_amount" label="Max ($)" def={method?.max_amount ?? null} />
+        <DollarField name="amount_step" label="Step ($)" def={method?.amount_step ?? null}
+                     hint="Amounts must be whole multiples of this. Blank = use the global step." />
+      </div>
+      <div className="field-row">
         <div className="field">
           <label htmlFor="hold_seconds">Hold override (secs)</label>
           <input id="hold_seconds" name="hold_seconds" type="number" defaultValue={method?.hold_seconds ?? ''} />
@@ -352,7 +356,7 @@ function TiersEditor({ initial }: { initial: Array<{ up_to: number | null; handl
   );
 }
 
-const NUM = new Set(['min_amount', 'max_amount', 'hold_seconds', 'processor_fee_bps', 'processor_fee_flat', 'sort_order']);
+const NUM = new Set(['min_amount', 'max_amount', 'amount_step', 'hold_seconds', 'processor_fee_bps', 'processor_fee_flat', 'sort_order']);
 
 /** A money field shown in DOLLARS but submitted (via a hidden input) in cents,
  *  so nothing downstream changes — the name stays in NUM and reads the cents. */

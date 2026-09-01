@@ -293,7 +293,7 @@ export async function upsertMethod(patch: Record<string, unknown>): Promise<Resu
     const sql = db();
     const allowed = new Set([
       'code', 'name', 'currency', 'reversibility', 'settlement', 'enabled',
-      'min_amount', 'max_amount', 'club_handle', 'hold_seconds',
+      'min_amount', 'max_amount', 'amount_step', 'club_handle', 'hold_seconds',
       'processor_fee_bps', 'processor_fee_flat', 'handle_hint', 'handle_pattern', 'sort_order',
       'withdraw_payout_mode',
     ]);

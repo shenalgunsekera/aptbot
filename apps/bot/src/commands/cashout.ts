@@ -83,7 +83,7 @@ async function askAmount(ctx: Ctx, platform: Platform): Promise<void> {
   // enabled payout methods (lowest min, highest max); withdraw_create enforces the
   // chosen method's exact minimum when the method is known.
   const [cfg] = await sql<{ min_amount: number; max_amount: number; amount_step: number }[]>`
-    select c.amount_step,
+    select coalesce((select min(coalesce(m.amount_step, c.amount_step)) from payment_methods m where m.enabled and m.payout_enabled), c.amount_step) as amount_step,
       greatest(coalesce((select min(coalesce(m.min_amount, c.min_amount)) from payment_methods m where m.enabled and m.payout_enabled), c.min_amount), c.min_amount) as min_amount,
       coalesce((select max(coalesce(m.max_amount, c.max_amount)) from payment_methods m where m.enabled and m.payout_enabled), c.max_amount) as max_amount
       from config c`;
@@ -118,7 +118,7 @@ export async function cashoutAmount(ctx: Ctx, platformId: string, text: string):
   }
   const sql0 = db();
   const [cfg0] = await sql0<{ min_amount: number; max_amount: number; amount_step: number }[]>`
-    select c.amount_step,
+    select coalesce((select min(coalesce(m.amount_step, c.amount_step)) from payment_methods m where m.enabled and m.payout_enabled), c.amount_step) as amount_step,
       greatest(coalesce((select min(coalesce(m.min_amount, c.min_amount)) from payment_methods m where m.enabled and m.payout_enabled), c.min_amount), c.min_amount) as min_amount,
       coalesce((select max(coalesce(m.max_amount, c.max_amount)) from payment_methods m where m.enabled and m.payout_enabled), c.max_amount) as max_amount
       from config c`;
@@ -468,13 +468,13 @@ async function doCancel(ctx: Ctx, withdrawId: string, amount: number): Promise<v
  */
 // A live cash-out plus how much of it is ALREADY PAID (released fills). What's
 // still owed to the player is (amount - paid) — that's the number an add-on grows.
-type TopupOut = { id: string; amount: number | null; paid: number; currency: string; method: string };
+type TopupOut = { id: string; amount: number | null; paid: number; currency: string; method: string; step: number };
 
 export async function addToWithdrawStart(ctx: Ctx): Promise<void> {
   const p = await requireActive(ctx);
   if (!p) return;
   const outs = await db()<TopupOut[]>`
-    select w.id, w.amount, w.currency, pm.name as method,
+    select w.id, w.amount, w.currency, pm.name as method, coalesce(pm.amount_step, (select amount_step from config where id)) as step,
            coalesce((select sum(f.amount) from fills f where f.withdraw_id = w.id and f.status = 'released'), 0) as paid
       from withdraw_requests w join payment_methods pm on pm.id = w.method_id
      where w.player_id = ${p.id} and w.status in ('queued','partially_filled')
@@ -504,7 +504,7 @@ export async function addToWithdrawPick(ctx: Ctx, withdrawId: string): Promise<v
   const p = await requireActive(ctx);
   if (!p) return;
   const [w] = await db()<TopupOut[]>`
-    select w.id, w.amount, w.currency, pm.name as method,
+    select w.id, w.amount, w.currency, pm.name as method, coalesce(pm.amount_step, (select amount_step from config where id)) as step,
            coalesce((select sum(f.amount) from fills f where f.withdraw_id = w.id and f.status = 'released'), 0) as paid
       from withdraw_requests w join payment_methods pm on pm.id = w.method_id
      where w.id = ${withdrawId} and w.player_id = ${p.id}
@@ -516,7 +516,7 @@ export async function addToWithdrawPick(ctx: Ctx, withdrawId: string): Promise<v
 }
 
 async function askTopupAmount(ctx: Ctx, w: TopupOut): Promise<void> {
-  const [cfg] = await db()<{ amount_step: number }[]>`select amount_step from config where id`;
+  const cfg = { amount_step: Number(w.step) };   // the cash-out's method step
   ctx.session.step = { name: 'out:topup_amount', withdrawId: w.id };
   // Be accurate about a partially-PAID cash-out: what's already paid (released)
   // vs. what's still owed. An add-on grows the "still to pay" — so $20 left + $20
@@ -544,8 +544,10 @@ export async function addToWithdrawAmount(ctx: Ctx, withdrawId: string, text: st
   if (amount === null || amount <= 0) {
     return void (await ctx.reply("That doesn't look like an amount. Try `20`.", { parse_mode: 'Markdown' }));
   }
-  const [cfg] = await db()<{ amount_step: number }[]>`select amount_step from config where id`;
-  if (cfg.amount_step > 0 && amount % cfg.amount_step !== 0) {
+  const [cfg] = await db()<{ amount_step: number }[]>`
+    select coalesce(pm.amount_step, (select amount_step from config where id)) as amount_step
+      from withdraw_requests w join payment_methods pm on pm.id = w.method_id where w.id = ${withdrawId}`;
+  if (cfg && cfg.amount_step > 0 && amount % cfg.amount_step !== 0) {
     return void (await ctx.reply(`Please add in whole multiples of ${whole(cfg.amount_step)} — no cents.`));
   }
 
