@@ -211,6 +211,7 @@ td.num, th.num { text-align: right; font-family: var(--mono); white-space: nowra
 .badge.warn  { background: var(--warn-dim); color: var(--warn); }
 .badge.red   { background: var(--red-dim); color: var(--red); }
 .badge.muted { background: var(--surface-2); color: var(--text-dim); border-color: var(--border); }
+.badge.accent { background: var(--accent-dim); color: var(--accent); }
 
 /* ── Buttons ────────────────────────────────────────────────────────────── */
 button, .btn {
@@ -318,6 +319,46 @@ dl.kv dd { margin: 0; font-family: var(--mono); word-break: break-all; }
 .ledger-leg { display: flex; justify-content: space-between; gap: 12px; font-family: var(--mono); font-size: 11px; padding: 2px 0; }
 .ledger-leg .amt.pos { color: var(--ok); }
 .ledger-leg .amt.neg { color: var(--red); }
+
+/* ── Jobs: collapsible sections with a count "ping" ─────────────────────────
+   The Jobs page groups every kind of pending task; each group is a dropdown so
+   the page reads as a short list of headers, each carrying a live count, rather
+   than one long scroll. */
+.job-sec {
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: var(--surface); box-shadow: var(--shadow-sm);
+  margin-bottom: 12px; overflow: hidden;
+}
+.job-sec > summary {
+  list-style: none; cursor: pointer; user-select: none;
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 16px; font-weight: 650; font-size: 15px;
+}
+.job-sec > summary::-webkit-details-marker { display: none; }
+.job-sec > summary::before {
+  content: '▸'; color: var(--text-faint); font-size: 12px;
+  transition: transform 0.15s ease; flex-shrink: 0;
+}
+.job-sec[open] > summary::before { transform: rotate(90deg); }
+.job-sec > summary:hover { background: var(--surface-2); }
+.job-sec-title { flex: 1; }
+.job-sec-sub { font-weight: 400; font-size: 12px; color: var(--text-faint); }
+.job-sec-body { padding: 0 16px 16px; }
+.job-sec-body .table-wrap { border: none; box-shadow: none; border-radius: var(--radius); }
+.job-sec-empty { padding: 4px 0 8px; color: var(--text-faint); font-size: 13px; }
+
+/* The count "ping" — a pill badge on each section header. Neutral by default;
+   a tone lights it up when the group needs attention. */
+.ping {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 22px; height: 22px; padding: 0 7px; border-radius: 100px;
+  font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
+  background: var(--surface-2); color: var(--text-dim); border: 1px solid var(--border);
+}
+.ping.accent { background: var(--accent); color: #fff; border-color: transparent; }
+.ping.warn   { background: var(--warn);   color: #fff; border-color: transparent; }
+.ping.red    { background: var(--red);    color: #fff; border-color: transparent; }
+.ping.ok     { background: var(--ok);     color: #fff; border-color: transparent; }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
