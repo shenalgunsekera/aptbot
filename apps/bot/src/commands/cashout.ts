@@ -552,8 +552,9 @@ export async function addToWithdrawAmount(ctx: Ctx, withdrawId: string, text: st
   }
 
   try {
-    // The DB does the full check (still queued, not cancelling, one add-on at a
-    // time, method cap, daily cap) and raises the extra take-off card for admins.
+    // The DB does the full check (still queued, not cancelling, method cap,
+    // daily cap — including any add-ons already in flight) and raises the extra
+    // take-off card for admins. Multiple add-ons may be in flight at once (0110).
     await db()`select withdraw_topup(${withdrawId}::uuid, ${amount}::bigint)`;
   } catch (err) {
     ctx.session.step = { name: 'idle' };
