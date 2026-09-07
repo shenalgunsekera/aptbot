@@ -172,7 +172,7 @@ export default async function JobsPage() {
   }
 
   for (const p of toPay) {
-    if (p.amount < 5000 && olderThan(p.created_at, 2)) {
+    if (p.amount < 2000 && olderThan(p.created_at, 2)) {
       reminders.push({
         key: `sm-${p.id}`, tone: 'muted', type: 'Small cash-out waiting',
         what: `${usd(p.amount, p.currency)} via ${p.method} still unpaid — a small leftover the queue isn't clearing. Pay it from the float to close it out.`,
