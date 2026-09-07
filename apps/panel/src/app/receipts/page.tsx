@@ -19,6 +19,7 @@ type Raw = {
   amount: number | null; currency: string | null; deposit_id: string | null; withdraw_id: string | null;
   method: string | null; method_code: string;
   payee_id: string | null; payee_name: string | null; payee_account: string | null; payee_platform: string | null; payee_club: string | null;
+  payee_is_house: boolean | null; w_handle: string | null; w_created: string | null;
   w_amount: number | null; w_remaining: number | null; w_status: string | null;
 };
 type Dir = 'deposit' | 'cashout' | 'received' | 'other';
@@ -54,6 +55,7 @@ export default async function ReceiptsPage({
            w.player_id as payee_id, wp.display_name as payee_name,
            coalesce(case when wpf.code = 'clubgg' then wpp.platform_username else wpp.platform_uid end, wp.display_name) as payee_account,
            wpf.name as payee_platform, wcl.name as payee_club,
+           wp.is_house as payee_is_house, w.payout_handle as w_handle, w.created_at as w_created,
            w.amount as w_amount, w.amount_remaining as w_remaining, w.status as w_status
       from receipts r
       left join platforms upf on upf.id = r.platform_id
@@ -74,6 +76,7 @@ export default async function ReceiptsPage({
     wAmount: number | null; wRemaining: number | null; wStatus: string | null;
     reference: string | null; url: string | null; content_type: string | null;
     created_at: string; amount: number | null; currency: string | null; method: string | null; method_code: string;
+    isClub?: boolean; handle?: string | null; wCreated?: string | null;
   };
   const entries: Entry[] = [];
   for (const r of rows) {
@@ -98,11 +101,16 @@ export default async function ReceiptsPage({
     // so it shows in the payee's own cash-out folder as money RECEIVED — labelled
     // with who it came from.
     if (r.deposit_id && r.withdraw_id && r.payee_id) {
+      const isClub = !!r.payee_is_house;
       entries.push({
-        ownerId: r.payee_id, ownerName: r.payee_name ?? 'Unknown', ownerAccount: r.payee_account,
-        platform: r.payee_platform, club: r.payee_club, dir: 'received',
+        // Club-funded queue payouts all live under one "Club Folder", filed by the
+        // tag they paid (with the date) rather than a player name.
+        ownerId: r.payee_id, ownerName: isClub ? 'Club Folder' : (r.payee_name ?? 'Unknown'),
+        ownerAccount: isClub ? null : r.payee_account,
+        platform: isClub ? null : r.payee_platform, club: isClub ? null : r.payee_club, dir: 'received',
         groupKind: 'withdraw', groupId: r.withdraw_id, from: r.player_name,
-        wAmount: r.w_amount, wRemaining: r.w_remaining, wStatus: r.w_status, ...shared,
+        wAmount: r.w_amount, wRemaining: r.w_remaining, wStatus: r.w_status,
+        isClub, handle: r.w_handle, wCreated: r.w_created, ...shared,
       });
     }
   }
@@ -141,6 +149,7 @@ export default async function ReceiptsPage({
     id: string; kind: 'withdraw' | 'txn'; dir: Dir; when: string; rows: Entry[];
     amount: number | null; currency: string | null; method: string | null;
     wAmount: number | null; wRemaining: number | null; wStatus: string | null;
+    isClub?: boolean; handle?: string | null; wCreated?: string | null;
   };
   const shown = entries.filter((e) => (!method || method === 'all' || e.method_code === method) && inKind(e.dir));
   const players = new Map<string, {
@@ -161,7 +170,8 @@ export default async function ReceiptsPage({
     if (!g) {
       g = { id: e.groupId, kind: e.groupKind, dir: e.dir, when: e.created_at, rows: [],
             amount: e.amount, currency: e.currency, method: e.method,
-            wAmount: e.wAmount, wRemaining: e.wRemaining, wStatus: e.wStatus };
+            wAmount: e.wAmount, wRemaining: e.wRemaining, wStatus: e.wStatus,
+            isClub: e.isClub, handle: e.handle, wCreated: e.wCreated };
       pl.groups.set(e.groupId, g);
     }
     if (e.created_at > g.when) g.when = e.created_at;
@@ -281,7 +291,9 @@ export default async function ReceiptsPage({
                     <summary>
                       <span className="folder-icon">{isCashout ? '💵' : '🧾'}</span>
                       <span className="folder-name">
-                        {isCashout && g.wAmount != null
+                        {g.isClub
+                          ? <>{g.wCreated ? new Date(g.wCreated).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) + ' · ' : ''}<span className="mono">{g.handle ?? 'payout'}</span></>
+                          : isCashout && g.wAmount != null
                           ? <><Money minor={g.wAmount} currency={cur} /> cash-out</>
                           : g.amount != null
                           ? <><Money minor={g.amount} currency={cur} />{g.method ? ` · ${g.method}` : ''}</>
