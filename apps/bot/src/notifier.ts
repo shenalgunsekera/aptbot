@@ -316,7 +316,9 @@ export function renderNotification(n: Notification): Rendered | null {
       return { text: `✅ *Cancellation confirmed.* ${m(p.amount, p.currency)} has been put back on your table.` };
     case 'withdraw.paid': {
       const caption = `💸 *You've been paid ${m(p.amount, p.currency)}!*` + (p.payment_ref ? `\nReference: \`${p.payment_ref}\`` : '');
-      return p.receipt ? { photo: p.receipt, text: caption } : { text: caption };
+      // Up to two receipts (new `receipts` array), falling back to the single `receipt`.
+      const imgs: string[] = (Array.isArray(p.receipts) && p.receipts.length ? p.receipts : (p.receipt ? [p.receipt] : [])).filter(Boolean);
+      return imgs.length > 1 ? { photos: imgs, text: caption } : imgs.length === 1 ? { photo: imgs[0], text: caption } : { text: caption };
     }
     case 'withdraw.nothing_available':
       return { text: `We couldn't find anything on your table to cash-out right now. Nothing was taken.` };

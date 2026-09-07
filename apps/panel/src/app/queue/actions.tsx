@@ -1,9 +1,78 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { ActionButton, PromptAction } from '../../components/ui';
-import { payFromClub, cancelCashout, setWithdrawMin, moveWithdraw, addQueuePayout } from '../../lib/actions';
+import { payFromClub, cancelCashout, setWithdrawMin, moveWithdraw, addQueuePayout, pausePayout, resumePayout, unpauseWithPayment } from '../../lib/actions';
+
+/** Unpause a paused cash-out: either just put it back, or record a payment you
+ *  made (amount + up to 2 receipts) which notifies the payee, then unpause. */
+export function UnpauseDialog({ id, name, remaining }: { id: string; name: string; remaining: number }) {
+  const dlg = useRef<HTMLDialogElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const [mode, setMode] = useState<'choose' | 'adjust'>('choose');
+  const [err, setErr] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  const router = useRouter();
+  const amt = (remaining / 100).toFixed(2);
+
+  const open = () => { setMode('choose'); setErr(null); dlg.current?.showModal(); };
+  const close = () => dlg.current?.close();
+  const justUnpause = () => start(async () => {
+    setErr(null);
+    const r = await resumePayout(id);
+    if (r.ok) { close(); router.refresh(); } else setErr(r.error);
+  });
+  const submitAdjust = () => {
+    setErr(null);
+    const fd = new FormData(formRef.current!);
+    fd.set('id', id);
+    const a = String(fd.get('amount') ?? '').trim();
+    if (!a || !(parseFloat(a) > 0)) { setErr('Enter the amount you paid.'); return; }
+    start(async () => {
+      const r = await unpauseWithPayment(fd);
+      if (r.ok) { close(); router.refresh(); } else setErr(r.error);
+    });
+  };
+
+  return (
+    <>
+      <button className="sm primary" onClick={open}>▶️ Unpause</button>
+      <dialog ref={dlg} onClick={(e) => { if (e.target === dlg.current) close(); }}
+              style={{ border: 'none', borderRadius: 14, padding: 0, width: 'min(380px, 92vw)', background: 'transparent' }}>
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12, textAlign: 'left' }}>
+          <strong>Unpause {name}</strong>
+          {mode === 'choose' ? (
+            <>
+              <p className="sub" style={{ margin: 0 }}>Put it back in the queue — record a payment you made, or just unpause.</p>
+              <button className="primary" onClick={() => { setErr(null); setMode('adjust'); }}>💵 Adjust & unpause (a payment was made)</button>
+              <button onClick={justUnpause} disabled={pending}>{pending ? '…' : '▶️ No adjust — just unpause'}</button>
+            </>
+          ) : (
+            <form ref={formRef} style={{ display: 'flex', flexDirection: 'column', gap: 10 }} onSubmit={(e) => e.preventDefault()}>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>Amount paid ($)
+                <input name="amount" inputMode="decimal" placeholder={amt} required style={{ width: '100%', marginTop: 4 }} />
+              </label>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>Reference / txn ID (optional)
+                <input name="ref" style={{ width: '100%', marginTop: 4 }} />
+              </label>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>Receipt 1 (optional)
+                <input type="file" name="r1" accept="image/*" style={{ width: '100%', marginTop: 4 }} />
+              </label>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>Receipt 2 (optional)
+                <input type="file" name="r2" accept="image/*" style={{ width: '100%', marginTop: 4 }} />
+              </label>
+              <p className="sub" style={{ margin: 0 }}>The payee gets the normal “you’ve been paid” message with these receipts.</p>
+              <button type="button" className="primary" onClick={submitAdjust} disabled={pending}>{pending ? 'Saving…' : 'Record payment & unpause'}</button>
+            </form>
+          )}
+          {err && <div className="alert err">{err}</div>}
+          <button type="button" className="sm" onClick={close}>Cancel</button>
+        </div>
+      </dialog>
+    </>
+  );
+}
 
 /** Admin: drop a Venmo/Zelle tag into the cash-out queue, funded by the club's
  *  float. Any P2P deposit of that method fills it — fillable from any platform. */
@@ -126,6 +195,9 @@ export function QueueActions({
         }}
       />
       )}
+
+      {/* Take it out of the queue to handle it manually; unpause from the Paused list. */}
+      <ActionButton small label="⏸ Pause" action={() => pausePayout(w.id)} />
 
       {/* One-click reorder — no more typing "confirm" every move. */}
       <ActionButton small label="↑ Up" action={() => moveWithdraw(w.id, 'up')} />

@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { db, isUserError, userMessage } from '@union/core';
+import { db, isUserError, userMessage, uploadReceipt } from '@union/core';
 import { requireAdmin, requireOwner } from './auth';
 
 /**
@@ -241,6 +241,57 @@ export async function cancelCashout(withdrawId: string, reason: string): Promise
     else await db()`select withdraw_cancel(${withdrawId}::uuid, ${s.admin.id}::uuid, ${reason})`;
     return 'Cancelled.';
   }, ['/queue']);
+}
+
+/** Take a cash-out / club payout out of the queue while you handle it manually. */
+export async function pausePayout(withdrawId: string): Promise<Result> {
+  return run(async () => {
+    const s = await requireAdmin();
+    await db()`select withdraw_pause(${withdrawId}::uuid, ${s.admin.id}::uuid)`;
+    return 'Paused — out of the queue.';
+  }, ['/queue', '/']);
+}
+
+/** Just put it back in the queue (the "No adjust" unpause). */
+export async function resumePayout(withdrawId: string): Promise<Result> {
+  return run(async () => {
+    const s = await requireAdmin();
+    await db()`select withdraw_resume(${withdrawId}::uuid, ${s.admin.id}::uuid)`;
+    return 'Back in the queue.';
+  }, ['/queue', '/']);
+}
+
+/** Unpause WITH an adjustment: record a payment you made directly (amount + up to
+ *  two receipt screenshots), notify the payee like a normal payment, then put any
+ *  remainder back in the queue. Receipts upload to the same Firebase store the
+ *  bots use, and withdraw_club_payout books it against the float and messages the
+ *  payee with both images. */
+export async function unpauseWithPayment(form: FormData): Promise<Result> {
+  return run(async () => {
+    const s = await requireAdmin();
+    const withdrawId = String(form.get('id') ?? '');
+    const amountStr = String(form.get('amount') ?? '').trim();
+    const ref = String(form.get('ref') ?? '').trim();
+    const cents = amountStr ? Math.round(parseFloat(amountStr) * 100) : NaN;
+    if (!withdrawId || !Number.isFinite(cents) || cents <= 0) {
+      // Surfaces as a clean message via run()'s isUserError path.
+      throw Object.assign(new Error('Enter the amount you paid.'), { code: '23514' });
+    }
+    const urls: (string | null)[] = [null, null];
+    const files = [form.get('r1'), form.get('r2')];
+    for (let i = 0; i < 2; i++) {
+      const f = files[i];
+      if (f instanceof File && f.size > 0) {
+        const buf = Buffer.from(await f.arrayBuffer());
+        const st = await uploadReceipt(buf, f.type || 'image/jpeg', 'withdraw', withdrawId);
+        urls[i] = st.url;
+      }
+    }
+    await db()`select withdraw_club_payout(${withdrawId}::uuid, ${s.admin.id}::uuid, ${cents}::bigint, ${ref || null}, null, ${urls[0]}, ${urls[1]})`;
+    // Put whatever's still owed back in the queue (no-op if it's now fully paid).
+    try { await db()`select withdraw_resume(${withdrawId}::uuid, ${s.admin.id}::uuid)`; } catch { /* completed or not paused */ }
+    return 'Payment recorded, the payee was notified, and it’s unpaused.';
+  }, ['/queue', '/']);
 }
 
 /** Admin drops a Venmo/Zelle tag straight into the cash-out queue, funded by the

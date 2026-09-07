@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { db } from '@union/core';
 import { Shell } from '../../components/shell';
 import { Money, Ago } from '../../components/ui';
-import { QueueActions, AddQueuePayout } from './actions';
+import { QueueActions, AddQueuePayout, UnpauseDialog } from './actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,6 +28,23 @@ export default async function QueuePage({
       left join player_platforms pp on pp.player_id = q.player_id and pp.platform_id = wr.platform_id
       left join clubs cl on cl.id = pp.club_id
      order by q.method_name, q.queue_position`;
+
+  // Paused cash-outs / club payouts — hidden from the live queue (v_withdraw_queue
+  // excludes paused_at), shown in their own section so they can be unpaused.
+  const paused = await sql<any[]>`
+    select w.id, w.amount_remaining, w.payout_handle, w.currency, pm.name as method_name,
+           pl.display_name,
+           coalesce(case when pf.code = 'clubgg' then pp.platform_username else pp.platform_uid end, pl.display_name) as account,
+           coalesce((w.terms->>'club_payout')::boolean, false) as is_club,
+           pf.name as platform, cl.name as club
+      from withdraw_requests w
+      join players pl on pl.id = w.player_id
+      left join payment_methods pm on pm.id = w.method_id
+      left join platforms pf on pf.id = w.platform_id
+      left join player_platforms pp on pp.player_id = w.player_id and pp.platform_id = w.platform_id
+      left join clubs cl on cl.id = pp.club_id
+     where w.paused_at is not null and w.status in ('queued', 'partially_filled')
+     order by w.created_at`;
 
   // Filter tabs by payment method — one clean list at a time instead of every
   // method mixed together. Counts come from the full queue.
@@ -157,6 +174,36 @@ export default async function QueuePage({
           </table>
         )}
       </div>
+
+      {paused.length > 0 && (
+        <>
+          <h2 style={{ marginTop: 24 }}>⏸ Paused ({paused.length})</h2>
+          <p className="sub" style={{ marginTop: -4 }}>Out of the queue while you handle them. Unpause to put back — with or without recording a payment.</p>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Payee</th><th style={{ width: 110 }}>Method</th><th className="num" style={{ width: 100 }}>Still owed</th><th>Payout handle</th><th style={{ width: 140 }} /></tr>
+              </thead>
+              <tbody>
+                {paused.map((r) => (
+                  <tr key={r.id}>
+                    <td>
+                      <strong>{r.is_club ? 'Club payout' : (r.account ?? r.display_name ?? '—')}</strong>
+                      {[r.platform, r.club].filter(Boolean).length > 0 && (
+                        <span className="badge muted" style={{ marginLeft: 6 }}>{[r.platform, r.club].filter(Boolean).join(' · ')}</span>
+                      )}
+                    </td>
+                    <td><span className="badge muted">{r.method_name}</span></td>
+                    <td className="num"><Money minor={r.amount_remaining} currency={r.currency} /></td>
+                    <td className="mono" style={{ fontSize: 11 }}>{r.payout_handle}</td>
+                    <td><UnpauseDialog id={r.id} name={r.is_club ? 'club payout' : (r.display_name ?? 'player')} remaining={r.amount_remaining} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
     </Shell>
   );
 }
