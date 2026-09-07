@@ -66,7 +66,7 @@ export async function POST(req: Request) {
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'strict',
     path: '/',
-    maxAge: 60 * 60 * 8,
+    maxAge: 60 * 60 * 24 * 14, // 14 days — match the session-cookie lifetime so owners stay logged in
   });
 
   await sql`select audit(${admin.id}::uuid, 'admin.sign_in', 'admin', ${admin.id}::uuid,

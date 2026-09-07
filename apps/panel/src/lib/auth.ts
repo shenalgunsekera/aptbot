@@ -98,7 +98,7 @@ export async function requireOwner(): Promise<Session> {
 }
 
 export async function createSessionCookie(idToken: string): Promise<string> {
-  const expiresIn = 60 * 60 * 8 * 1000; // 8h — a working shift, not a month
+  const expiresIn = 60 * 60 * 24 * 14 * 1000; // 14 days — Firebase's max, so owners stay logged in
   return getAuth(adminApp()).createSessionCookie(idToken, { expiresIn });
 }
 
