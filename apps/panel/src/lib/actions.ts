@@ -234,9 +234,26 @@ export async function payFromClub(
 export async function cancelCashout(withdrawId: string, reason: string): Promise<Result> {
   return run(async () => {
     const s = await requireAdmin();
-    await db()`select withdraw_cancel(${withdrawId}::uuid, ${s.admin.id}::uuid, ${reason})`;
+    // A club-funded queue payout returns its escrow to the float, not to a player.
+    const [w] = await db()<{ club: boolean }[]>`
+      select coalesce((terms->>'club_payout')::boolean, false) as club from withdraw_requests where id = ${withdrawId}`;
+    if (w?.club) await db()`select withdraw_club_cancel(${withdrawId}::uuid, ${s.admin.id}::uuid)`;
+    else await db()`select withdraw_cancel(${withdrawId}::uuid, ${s.admin.id}::uuid, ${reason})`;
     return 'Cancelled.';
   }, ['/queue']);
+}
+
+/** Admin drops a Venmo/Zelle tag straight into the cash-out queue, funded by the
+ *  club's float. Any P2P deposit of that method fills it (see withdraw_create_club). */
+export async function addQueuePayout(methodId: string, amountCents: number, handle: string): Promise<Result> {
+  return run(async () => {
+    const s = await requireAdmin();
+    if (!Number.isFinite(amountCents) || amountCents <= 0) return; // client already validates; guard anyway
+    const [pf] = await db()<{ id: string }[]>`select id from platforms where enabled order by sort_order, name limit 1`;
+    if (!pf) throw new Error('No platform is set up to queue a payout on.');
+    await db()`select withdraw_create_club(${methodId}::uuid, ${pf.id}::uuid, ${amountCents}::bigint, ${handle}, ${s.admin.id}::uuid)`;
+    return 'Payout added to the queue.';
+  }, ['/queue', '/']);
 }
 
 /** Raise (or clear) the minimum on one cash-out. cents=null clears the override.

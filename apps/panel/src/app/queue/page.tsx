@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { db } from '@union/core';
 import { Shell } from '../../components/shell';
 import { Money, Ago } from '../../components/ui';
-import { QueueActions } from './actions';
+import { QueueActions, AddQueuePayout } from './actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,10 +13,13 @@ export default async function QueuePage({
 }) {
   const { method } = await searchParams;
   const sql = db();
+  const p2pMethods = await sql<{ id: string; name: string }[]>`
+    select id, name from payment_methods where enabled and settlement = 'p2p' order by sort_order, name`;
   const all = await sql<any[]>`
     select q.*,
            coalesce(case when pf.code = 'clubgg' then pp.platform_username else pp.platform_uid end, q.display_name) as account,
            cl.name as club, pf.code as platform_code, wr.min_override,
+           coalesce((wr.terms->>'club_payout')::boolean, false) as is_club,
            coalesce((select sum(f.amount) from fills f where f.withdraw_id = q.id and f.status = 'released'), 0) as paid,
            coalesce((select sum(f.amount) from fills f where f.withdraw_id = q.id and f.status in ('locked', 'awaiting_confirmation')), 0) as locked
       from v_withdraw_queue q
@@ -44,7 +47,10 @@ export default async function QueuePage({
             one directly from the float.
           </p>
         </div>
-        <a className="btn" href="/api/export?type=cashouts">⬇ Excel</a>
+        <div className="btn-row">
+          <AddQueuePayout methods={p2pMethods} />
+          <a className="btn" href="/api/export?type=cashouts">⬇ Excel</a>
+        </div>
       </div>
 
       {methodTabs.length > 0 && (
@@ -138,8 +144,9 @@ export default async function QueuePage({
                           remaining: r.amount_remaining,
                           currency: r.currency,
                           handle: r.payout_handle,
-                          name: r.display_name ?? 'player',
+                          name: r.is_club ? 'club payout' : (r.display_name ?? 'player'),
                           minOverride: r.min_override ?? null,
+                          isClub: !!r.is_club,
                         }}
                       />
                     </td>
