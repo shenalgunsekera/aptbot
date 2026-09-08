@@ -27,12 +27,17 @@ export async function getBot(): Promise<BotT> {
   // The bot's wiring is exported from @union/bot as a factory so it can be
   // driven by either polling (local) or webhook (Vercel) without duplication.
   const { buildBot, syncCommands } = await import('@union/bot/build');
-  _bot = buildBot(token);
-  await _bot.init();
+  // Build into a LOCAL first and only cache once init() succeeds. If init throws
+  // (a transient getMe hiccup on a cold start), we must NOT leave a half-built,
+  // uninitialised bot in `_bot` — that would poison every later request on this
+  // warm instance (they'd short-circuit on `if (_bot)` and skip init forever).
+  const bot = buildBot(token);
+  await bot.init();
+  _bot = bot;
   // Push the "/" command menu to Telegram once per cold start — the webhook
   // runtime never runs index.ts, so this is where a renamed/added command
   // actually reaches Telegram after a deploy. Fire-and-forget; never block.
-  void syncCommands(_bot).catch((e) => console.error('[bot] syncCommands failed:', e));
+  void syncCommands(bot).catch((e) => console.error('[bot] syncCommands failed:', e));
   return _bot;
 }
 
@@ -44,7 +49,19 @@ export async function telegramWebhook(req: Request): Promise<Response> {
   if (secret && req.headers.get('x-telegram-bot-api-secret-token') !== secret) {
     return new Response('unauthorized', { status: 401 });
   }
-  const handler = webhookCallback(bot, 'std/http');
+  // grammY's webhook aborts the handler after 10s by DEFAULT and (onTimeout
+  // 'throw') throws — on Vercel that means a cold start landing on a suspended
+  // Neon compute (scale-to-zero takes a few seconds to wake) can blow the 10s
+  // budget on the very first request, the handler is aborted, and the reply is
+  // silently lost while Telegram still gets a 200 (so nothing shows as pending
+  // or errored — exactly the "bot didn't respond, then it's fine again" symptom).
+  // Give the handler real headroom (Vercel maxDuration here is 30s) so the first
+  // request after idle actually finishes and replies, and 'return' cleanly on the
+  // rare genuine timeout instead of throwing.
+  const handler = webhookCallback(bot, 'std/http', {
+    timeoutMilliseconds: 25_000,
+    onTimeout: 'return',
+  });
   const res = await handler(req);
 
   // Drain the notification outbox right here, so messages queued by whatever the
