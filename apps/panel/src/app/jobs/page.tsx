@@ -150,6 +150,21 @@ export default async function JobsPage() {
     if (heldOrderIds.has(j.id)) continue;  // already shown as a held-open cash-out
     const isReload = (j.reason || '').includes('reload');
     const who = j.account ?? j.player_name;
+    // A 'fill.release' order is the "add the chips to their table" step that a
+    // verified payment creates and auto-assigns to whoever verified it. So the
+    // instant you verify, it reads as "claimed" — that's NOT a person grabbing a
+    // job and stalling, it's just the final "Done — added" tap still pending. Give
+    // it its own honest label so it never looks like the stuck-claim glitch. Only
+    // once it's lingered (stale = >15 min) — a fresh verify is likely mid-finish.
+    if (j.reason === 'fill.release' && j.status === 'claimed') {
+      if (!j.stale) continue;
+      reminders.push({
+        key: `dl-${j.id}`, tone: 'warn', type: 'Chips to load',
+        what: `Payment verified — tap "✅ Done — added" on that card once ${usd(Math.abs(j.delta), j.currency)} is on ${who}'s table (or "Failed" if it couldn't be loaded).`,
+        amount: Math.abs(j.delta), currency: j.currency, who, at: j.claimed_at ?? j.created_at, via: j.is_discord,
+      });
+      continue;
+    }
     if (j.stale) {
       reminders.push({
         key: `sc-${j.id}`, tone: 'red', type: 'Claimed, not finished',
