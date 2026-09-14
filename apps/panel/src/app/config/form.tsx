@@ -72,6 +72,12 @@ export function ConfigForm({ cfg }: { cfg: any }) {
           <Check name="dev_notice_enabled" label="Show the “still in development” notice after setup" def={cfg.dev_notice_enabled}
                  hint="ON: players who finish setup are told not to deposit/cash-out yet, the bot is still in development. Turn OFF the moment you go live." />
         </div>
+
+        <div className="card">
+          <h2 style={{ marginTop: 0 }}>Split cash-outs</h2>
+          <Check name="split_cashout_enabled" label="Enable /withdraw2 — split a cash-out across two methods" def={cfg.split_cashout_enabled}
+                 hint="ON: players can run /withdraw2 to cash out across two split-eligible methods (set which per method in the Methods tab). One shared total, filled by whoever deposits first — never overpaid. OFF: the command tells them it's unavailable." />
+        </div>
       </div>
 
       {msg && <div className={`alert ${msg.ok ? 'ok' : 'err'}`} style={{ marginTop: 12 }}>{msg.text}</div>}
@@ -155,4 +161,4 @@ const NUMERIC = new Set([
   'min_amount', 'max_amount', 'daily_cap_per_player', 'max_open_deposits_per_player',
   'max_open_withdraws_per_player', 'handle_reveals_per_hour', 'owner_approval_threshold',
 ]);
-const BOOL = new Set(['allow_reversible', 'auto_release_on_expiry', 'dev_notice_enabled']);
+const BOOL = new Set(['allow_reversible', 'auto_release_on_expiry', 'dev_notice_enabled', 'split_cashout_enabled']);

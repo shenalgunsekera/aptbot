@@ -33,6 +33,7 @@ export function MethodsEditor({ methods }: { methods: any[] }) {
                     <span className={`badge ${m.settlement === 'p2p' ? 'ok' : 'muted'}`} style={{ marginTop: 2 }}>
                       {m.settlement === 'p2p' ? '👥 P2P' : '🏦 club'}
                     </span>
+                    {m.split_eligible && <span className="badge accent" style={{ marginTop: 2, marginLeft: 4 }}>🔀 split</span>}
                   </td>
                   <td className="mono">{m.currency}</td>
                   <td>
@@ -126,10 +127,11 @@ function MethodForm({ method, onDone }: { method: any | null; onDone?: () => voi
         for (const [k, v] of fd.entries()) {
           const s = String(v);
           if (NUM.has(k)) patch[k] = s === '' ? null : Number(s);
-          else if (k === 'enabled') patch[k] = s === 'on';
+          else if (k === 'enabled' || k === 'split_eligible') patch[k] = s === 'on';
           else patch[k] = s === '' ? null : s;
         }
         if (!fd.has('enabled')) patch.enabled = false;
+        if (!fd.has('split_eligible')) patch.split_eligible = false;
 
         setMsg(null);
         start(async () => {
@@ -256,6 +258,17 @@ function MethodForm({ method, onDone }: { method: any | null; onDone?: () => voi
           <input type="checkbox" name="enabled" defaultChecked={method?.enabled ?? true} />
           Enabled — shown to players
         </label>
+      </div>
+
+      <div className="field">
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input type="checkbox" name="split_eligible" defaultChecked={method?.split_eligible ?? false} />
+          Split-eligible — can be one half of a <strong>/withdraw2</strong> split cash-out
+        </label>
+        <div className="field-hint">
+          Only peer-to-peer methods work in a split (a shared pool filled by whoever deposits).
+          Turn this on for the methods you want players to combine — e.g. Venmo and Zelle.
+        </div>
       </div>
 
       {msg && <div className={`alert ${msg.ok ? 'ok' : 'err'}`}>{msg.text}</div>}

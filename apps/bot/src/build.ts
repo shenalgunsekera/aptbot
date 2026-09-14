@@ -26,6 +26,9 @@ import {
   cashoutReducePrompt, cashoutReduceConfirm,
   addToWithdrawStart, addToWithdrawPick, addToWithdrawAmount,
 } from './commands/cashout.js';
+import {
+  withdraw2Start, withdraw2PickPlatform, withdraw2PickA, withdraw2PickB, withdraw2Amount,
+} from './commands/withdraw2.js';
 import { disputeReason } from './commands/confirm.js';
 import { withdrawalHistory, depositHistory } from './commands/payments.js';
 import { supportStart, relayInquiryToAdmins, maybeRelayAdminReply } from './commands/support.js';
@@ -50,6 +53,7 @@ export const PLAYER_COMMANDS = [
   { command: 'withdraw', description: 'Cash-out' },
   { command: 'cancelwithdraw', description: 'Cancel a cash-out that has not been paid' },
   { command: 'addtowithdraw', description: 'Add more to a cash-out already in the queue' },
+  { command: 'withdraw2', description: 'Cash-out split across two methods (e.g. Venmo + Zelle)' },
   { command: 'pending', description: 'Your pending cash-outs' },
   { command: 'withdrawalhistory', description: 'Cash-outs paid to you & receipts' },
   { command: 'deposithistory', description: 'Deposits you made & receipts' },
@@ -168,6 +172,7 @@ export function buildBot(token: string): Bot<Ctx> {
         `💸 */withdraw* — cash-out. We take it off your table and pay you the way you've set up.\n` +
         `✖️ */cancelwithdraw* — cancel a cash-out that hasn't been paid yet.\n` +
         `➕ */addtowithdraw* — add more to a cash-out already in the queue, keeping your place in line.\n` +
+        `🔀 */withdraw2* — cash-out split across two methods (e.g. Venmo + Zelle); whoever pays first fills it, up to the total.\n` +
         `⏳ */pending* — see deposits and cash-outs still in progress, and cancel a cash-out if you need to.\n` +
         `📄 */withdrawalhistory* — the cash-outs paid to you, with every receipt.\n` +
         `📥 */deposithistory* — the deposits you've made, with every receipt.\n\n` +
@@ -196,6 +201,7 @@ export function buildBot(token: string): Bot<Ctx> {
   bot.command(['withdraw', 'cashout'], dmOnly(cashoutStart));
   bot.command(['cancelwithdraw', 'cancelcashout'], dmOnly(cashoutCancel));
   bot.command(['addtowithdraw', 'addtocashout'], dmOnly(addToWithdrawStart));
+  bot.command(['withdraw2', 'cashout2'], dmOnly(withdraw2Start));
   bot.command(['pending', 'me'], dmOnly(me));
   bot.command(['withdrawalhistory', 'payments', 'history', 'receipts'], dmOnly(withdrawalHistory));
   bot.command(['deposithistory', 'deposits'], dmOnly(depositHistory));
@@ -383,6 +389,9 @@ export function buildBot(token: string): Bot<Ctx> {
   bot.callbackQuery(/^wc:part:(.+)$/, (ctx) => cashoutCancelPartPrompt(ctx, ctx.match![1]!));
   bot.callbackQuery(/^wd:reduce:(.+)$/, (ctx) => cashoutReducePrompt(ctx, ctx.match![1]!));
   bot.callbackQuery(/^wt:pick:(.+)$/, (ctx) => addToWithdrawPick(ctx, ctx.match![1]!));
+  bot.callbackQuery(/^w2:pf:(.+)$/, (ctx) => withdraw2PickPlatform(ctx, ctx.match![1]!));
+  bot.callbackQuery(/^w2:a:(.+)$/, (ctx) => withdraw2PickA(ctx, ctx.match![1]!));
+  bot.callbackQuery(/^w2:b:(.+)$/, (ctx) => withdraw2PickB(ctx, ctx.match![1]!));
   bot.callbackQuery(/^out:h:(.+)$/, async (ctx) => {
     const s = ctx.session.step;
     if (s.name !== 'out:handle') return void (await ctx.answerCallbackQuery({ text: 'That expired — /withdraw again.' }));
@@ -513,6 +522,7 @@ export function buildBot(token: string): Bot<Ctx> {
       case 'out:handle': return void (await cashoutHandle(ctx, step.platformId, step.amount, step.methodId, text));
       case 'out:cancel_amount': return void (await cashoutCancelAmount(ctx, step.withdrawId, text));
       case 'out:topup_amount': return void (await addToWithdrawAmount(ctx, step.withdrawId, text));
+      case 'out2:amount': return void (await withdraw2Amount(ctx, step.platformId, step.methodA, step.methodB, text));
       case 'dispute:reason': return void (await disputeReason(ctx, step.fillId, text));
       default:
         // Stray text when not in a flow: do NOT auto-relay every message (that

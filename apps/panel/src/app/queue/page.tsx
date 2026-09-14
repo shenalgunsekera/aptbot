@@ -116,7 +116,9 @@ export default async function QueuePage({
                 // not clearing — that's the owner's cue to backstop.
                 const stale = r.waiting_seconds > 3600 * 6;
                 return (
-                  <tr key={r.id} style={stale ? { background: 'var(--warn-dim)' } : undefined}>
+                  // A split cash-out appears once per method (same id), so the key
+                  // must include the method to stay unique across both rows.
+                  <tr key={`${r.id}:${r.method_name}`} style={stale ? { background: 'var(--warn-dim)' } : undefined}>
                     <td className="mono">{r.queue_position}</td>
                     <td>
                       <strong>{r.account ?? r.display_name ?? '—'}</strong>
@@ -130,13 +132,16 @@ export default async function QueuePage({
                         <span className="badge accent" style={{ marginTop: 4 }}>min ${(r.min_override / 100).toFixed(2)}</span>
                       )}
                     </td>
-                    <td><span className="badge muted">{r.method_name}</span></td>
+                    <td>
+                      <span className="badge muted">{r.method_name}</span>
+                      {r.is_split && <div className="badge accent" style={{ marginTop: 2 }}>🔀 split</div>}
+                    </td>
                     <td className="num"><Money minor={r.amount} currency={r.currency} /></td>
                     <td className="num">
                       <strong><Money minor={owed} currency={r.currency} /></strong>
                       {locked > 0 && (
                         <div className="badge warn" style={{ marginTop: 2, fontSize: 10 }}>
-                          <Money minor={locked} currency={r.currency} /> being paid
+                          <Money minor={locked} currency={r.currency} /> being paid{r.is_split ? ' (shared)' : ''}
                         </div>
                       )}
                     </td>
