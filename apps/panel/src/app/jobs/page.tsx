@@ -13,7 +13,7 @@ interface Job {
   claimed_by_email: string | null; claimed_at: string | null; created_at: string; stale: boolean;
   is_discord: boolean;
 }
-interface PayJob { id: string; name: string | null; amount: number; currency: string; platform: string; method: string; handle: string | null; created_at: string; is_discord: boolean; }
+interface PayJob { id: string; name: string | null; amount: number; currency: string; platform: string; method: string; handle: string | null; created_at: string; is_discord: boolean; is_split: boolean; }
 interface VerifyJob { id: string; name: string | null; amount: number; currency: string; method: string; money_in: boolean; created_at: string; is_discord: boolean; }
 interface HeldJob { id: string; order_id: string; name: string; amount: number; currency: string; method: string; created_at: string; order_status: string; topup_amount: number; is_discord: boolean; }
 
@@ -89,12 +89,31 @@ export default async function JobsPage() {
      where lo.status in ('done','failed','cancelled')
      order by lo.done_at desc nulls last limit 20`;
 
-  // Cash-outs waiting to be paid (the "cash-out to pay" cards in the bots).
+  // Cash-outs waiting to be paid. Read withdraw_requests directly (ONE row per
+  // cash-out) rather than v_withdraw_queue — the queue view expands a split into
+  // one row per method, which would double-count the money owed here. For a split
+  // we aggregate both methods and both handles onto the single row.
   const toPay = await sql<PayJob[]>`
-    select q.id, q.display_name as name, q.amount_remaining as amount, q.currency,
-           q.platform, q.method_name as method, q.payout_handle as handle, q.created_at,
-           exists(select 1 from discord_players x where x.player_id = q.player_id) as is_discord
-      from v_withdraw_queue q order by q.created_at limit 100`;
+    select w.id, pl.display_name as name, w.amount_remaining as amount, w.currency,
+           pf.name as platform,
+           case when w.is_split then (
+             select string_agg(pm2.name, ' + ' order by pm2.name)
+               from withdraw_split_methods sm join payment_methods pm2 on pm2.id = sm.method_id
+              where sm.withdraw_id = w.id)
+           else pm.name end as method,
+           case when w.is_split then (
+             select string_agg(sm.payout_handle, ' · ' order by pm3.name)
+               from withdraw_split_methods sm join payment_methods pm3 on pm3.id = sm.method_id
+              where sm.withdraw_id = w.id)
+           else w.payout_handle end as handle,
+           w.is_split, w.created_at,
+           exists(select 1 from discord_players x where x.player_id = w.player_id) as is_discord
+      from withdraw_requests w
+      join players pl on pl.id = w.player_id
+      left join platforms pf on pf.id = w.platform_id
+      left join payment_methods pm on pm.id = w.method_id
+     where w.status in ('queued','partially_filled') and w.amount_remaining > 0
+     order by w.created_at limit 100`;
 
   // Payments waiting to be verified (the "payment to verify — Verify/Discard" cards).
   const toVerify = await sql<VerifyJob[]>`
@@ -256,7 +275,10 @@ export default async function JobsPage() {
                     <td className="num"><Money minor={j.amount} currency={j.currency} /></td>
                     <td><strong>{j.name ?? '—'}</strong></td>
                     <td>{j.platform}</td>
-                    <td><span className="badge muted">{j.method}</span></td>
+                    <td>
+                      <span className="badge muted">{j.method}</span>
+                      {j.is_split && <span className="badge accent" style={{ marginLeft: 4 }}>🔀 split</span>}
+                    </td>
                     <td className="mono" style={{ fontSize: 11 }}>{j.handle ?? '—'}</td>
                     <td><Via discord={j.is_discord} /></td>
                     <td><Ago at={j.created_at} /></td>
