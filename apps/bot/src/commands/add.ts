@@ -611,7 +611,10 @@ export async function addReceipt(ctx: Ctx, fillId: string): Promise<void> {
     }
   } catch (err) {
     console.error('receipt upload failed:', err);
-    await ctx.reply("Hmm, that image didn't upload. Please send it again.");
+    // TEMP DIAGNOSTIC: surface the real reason so we can pinpoint the Zelle-path
+    // failure (names the failing step: telegram fetch / firebase / db). Remove.
+    const detail = String((err as { message?: string })?.message ?? err).slice(0, 200);
+    await ctx.reply(`Hmm, that image didn't upload. Please send it again.\n\n[diag: ${detail}]`);
     return;
   }
 
