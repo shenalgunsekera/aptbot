@@ -1,6 +1,6 @@
 import { InlineKeyboard } from 'grammy';
 import {
-  db, isUserError, userMessage, uploadReceipt, storageConfigured, peerpayCheckout,
+  db, isUserError, userMessage, storageConfigured, peerpayCheckout,
   type PaymentMethod, type Fill, type Platform,
 } from '@union/core';
 import type { Ctx } from '../session.js';
@@ -8,6 +8,7 @@ import { requireActive } from '../player.js';
 import { money, whole, parseAmount, amountProblem, receiptInstruction, windowLabel } from '../words.js';
 import { resolvePlatform, platformKeyboard } from '../prefs.js';
 import { ask, clearQuestion } from '../ask.js';
+import { storeTelegramReceipt } from '../media.js';
 
 /**
  * /deposit — add money. (deposit)
@@ -594,14 +595,10 @@ export async function addReceipt(ctx: Ctx, fillId: string): Promise<void> {
     : null;
 
   try {
-    const file = await ctx.api.getFile(fileId);
-    const url = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
-    const res = await fetch(url);
-    const bytes = Buffer.from(await res.arrayBuffer());
     const contentType = doc?.mime_type ?? 'image/jpeg';
 
     if (storageConfigured()) {
-      const stored = await uploadReceipt(bytes, contentType, 'fill', fillId);
+      const stored = await storeTelegramReceipt(ctx.api, fileId, contentType, 'fill', fillId);
       await sql`
         select receipt_add(
           ${p.id}::uuid, 'fill', ${fillId}::uuid, ${stored.storagePath}, ${stored.url},
@@ -717,11 +714,8 @@ export async function stripeReceipt(ctx: Ctx, platformId: string, amount?: numbe
 
   let url: string | null = null;
   try {
-    const file = await ctx.api.getFile(fileId);
-    const res = await fetch(`https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`);
-    const bytes = Buffer.from(await res.arrayBuffer());
     if (storageConfigured()) {
-      const stored = await uploadReceipt(bytes, doc?.mime_type ?? 'image/jpeg', 'stripe_claim', claim!.id);
+      const stored = await storeTelegramReceipt(ctx.api, fileId, doc?.mime_type ?? 'image/jpeg', 'stripe_claim', claim!.id);
       url = stored.url;
       await sql`update stripe_claims set receipt_url = ${url} where id = ${claim!.id}`;
     }

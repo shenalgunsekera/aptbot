@@ -1,8 +1,9 @@
 import { InlineKeyboard } from 'grammy';
-import { db, isUserError, userMessage, uploadReceipt, storageConfigured } from '@union/core';
+import { db, isUserError, userMessage, storageConfigured } from '@union/core';
 import type { Ctx } from '../session.js';
 import { isAdminGroup } from '../guards.js';
 import { money, parseAmount } from '../words.js';
+import { storeTelegramReceipt } from '../media.js';
 
 /**
  * ADMIN CASH-OUT CONTROLS — for the admin acting on ONE player's cash-out.
@@ -240,10 +241,7 @@ async function recordPayment(ctx: Ctx, withdrawId: string, amount: number, recei
 export async function toReceiptUrl(ctx: Ctx, fileId: string, refId: string): Promise<string> {
   if (!storageConfigured()) return fileId;
   try {
-    const file = await ctx.api.getFile(fileId);
-    const res = await fetch(`https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`);
-    const bytes = Buffer.from(await res.arrayBuffer());
-    const stored = await uploadReceipt(bytes, 'image/jpeg', 'fill', refId);
+    const stored = await storeTelegramReceipt(ctx.api, fileId, 'image/jpeg', 'fill', refId);
     return stored.url;
   } catch (err) {
     console.error('[adjust] receipt upload failed, keeping file_id:', err);
