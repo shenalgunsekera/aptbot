@@ -597,8 +597,22 @@ export async function addReceipt(ctx: Ctx, fillId: string): Promise<void> {
   try {
     const contentType = doc?.mime_type ?? 'image/jpeg';
 
+    // Try Firebase, but NEVER let its failure dead-end the payment. If the upload
+    // fails (e.g. a Firebase billing/outage blip), fall back to storing the Telegram
+    // file_id — the image still renders in the admin group and /history on Telegram,
+    // and the player's proof is recorded so the payment keeps moving. Matches how
+    // the Stripe receipt path already degrades. A permanent url backfills once
+    // storage is healthy (the file_id is kept regardless).
+    let stored: Awaited<ReturnType<typeof storeTelegramReceipt>> | null = null;
     if (storageConfigured()) {
-      const stored = await storeTelegramReceipt(ctx.api, fileId, contentType, 'fill', fillId);
+      try {
+        stored = await storeTelegramReceipt(ctx.api, fileId, contentType, 'fill', fillId);
+      } catch (upErr) {
+        console.error('receipt firebase upload failed — falling back to telegram file_id:', upErr);
+      }
+    }
+
+    if (stored) {
       await sql`
         select receipt_add(
           ${p.id}::uuid, 'fill', ${fillId}::uuid, ${stored.storagePath}, ${stored.url},
@@ -610,11 +624,9 @@ export async function addReceipt(ctx: Ctx, fillId: string): Promise<void> {
           ${platformId}::uuid, null, null, ${fileId}, ${p.id}::uuid, null)`;
     }
   } catch (err) {
-    console.error('receipt upload failed:', err);
-    // TEMP DIAGNOSTIC: surface the real reason so we can pinpoint the Zelle-path
-    // failure (names the failing step: telegram fetch / firebase / db). Remove.
-    const detail = String((err as { message?: string })?.message ?? err).slice(0, 200);
-    await ctx.reply(`Hmm, that image didn't upload. Please send it again.\n\n[diag: ${detail}]`);
+    // Only a DB failure reaches here now — the upload can no longer block proof.
+    console.error('receipt save failed:', err);
+    await ctx.reply("Hmm, something went wrong saving that. Please send it again.");
     return;
   }
 
