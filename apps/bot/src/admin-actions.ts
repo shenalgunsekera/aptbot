@@ -390,10 +390,17 @@ export async function fillVerify(ctx: Ctx, fillId: string): Promise<void> {
     await ctx.answerCallbackQuery({ text: 'Verified — money on its way.' });
   } catch (err) {
     if (!isUserError(err)) throw err;
-    // Already released/handled — verified in the panel, by another admin, or this
-    // card went stale. Don't dead-end: tell them, then refresh the card to the
-    // step it's actually at (the loader task) so it stops looking stuck.
-    await ctx.answerCallbackQuery({ text: userMessage(err), show_alert: true });
+    // Already handled — verified in the panel, by another admin, or this card went
+    // stale. That is NOT a failure: a payment already verified needs nothing more.
+    // Show a calm toast (not a scary alert) and let the card refresh to the real
+    // step below. A genuine block (e.g. needs the owner) still gets a full alert.
+    const [f] = await sql<{ status: string }[]>`select status from fills where id = ${fillId}`;
+    const alreadyDone = f && f.status !== 'awaiting_confirmation';
+    await ctx.answerCallbackQuery(
+      alreadyDone
+        ? { text: '✅ Already verified — see the step below.' }
+        : { text: userMessage(err), show_alert: true },
+    );
   }
   await advanceToLoaderStep(ctx, admin.id, fillId);
 }
