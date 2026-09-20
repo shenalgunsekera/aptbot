@@ -73,6 +73,7 @@ export const GROUP_COMMANDS = [
   { command: 'reversepayment', description: 'Undo a sent payment that turned out fake (admins)' },
   { command: 'setadmingroup', description: 'Make this the admin group (admins only)' },
   { command: 'paymentchannel', description: 'Make this the payments feed (admins only)' },
+  { command: 'escalations', description: 'Make this the overdue/small/manual work feed (admins)' },
   { command: 'setadmin', description: 'Add an admin (owner only)' },
   { command: 'p2p', description: 'Venmo/Zelle backstop handle (admins)' },
   { command: 'totals', description: 'Deposited & cashed-out totals per platform (admins)' },
@@ -244,6 +245,18 @@ export function buildBot(token: string): Bot<Ctx> {
       select admin_group_claim(${ctx.chat.id}::bigint, ${ctx.from!.id}::bigint)`;
     await ctx.reply(row?.admin_group_claim
       ? '✅ This group is now the admin group (adjustments, verifications, and everything except the payments feed).'
+      : '⛔ Only an admin can do that.', { parse_mode: 'Markdown' });
+  });
+
+  // The staff-attention feed: overdue tasks, small cash-outs and manual cash-outs
+  // get surfaced here (re-pinged daily until done) so nothing slips. Heads-up only —
+  // you still action items on their real cards in the admin group.
+  bot.command(['escalations', 'escalationchannel', 'staffchannel'], async (ctx) => {
+    if (ctx.chat?.type === 'private') return void (await ctx.reply('Run this inside the group you want overdue / small / manual work sent to.'));
+    const [row] = await db()<{ escalation_channel_claim: boolean }[]>`
+      select escalation_channel_claim(${ctx.chat.id}::bigint, ${ctx.from!.id}::bigint)`;
+    await ctx.reply(row?.escalation_channel_claim
+      ? '✅ This channel is now the *staff attention* feed — overdue tasks, small cash-outs and manual cash-outs land here, re-pinged daily until they\'re done.'
       : '⛔ Only an admin can do that.', { parse_mode: 'Markdown' });
   });
 

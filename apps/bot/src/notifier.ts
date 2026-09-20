@@ -46,8 +46,8 @@ export class Notifier {
 
   async tick(): Promise<number> {
     const sql = db();
-    const [cfg] = await sql<{ admin_group_chat_id: number | null; payments_channel_chat_id: number | null }[]>`
-      select admin_group_chat_id, payments_channel_chat_id from config where id`;
+    const [cfg] = await sql<{ admin_group_chat_id: number | null; payments_channel_chat_id: number | null; escalation_channel_chat_id: number | null }[]>`
+      select admin_group_chat_id, payments_channel_chat_id, escalation_channel_chat_id from config where id`;
 
     // Atomically LEASE a batch by pushing send_after 90s into the future. Two
     // drainers run concurrently in production (this webhook path + the panel's
@@ -83,12 +83,20 @@ export class Notifier {
       // Resolve the destination chat.
       let chatId: number | null = null;
       if (n.audience === 'admins') {
-        // The money-in feed goes to its own channel when one is set; everything
-        // else (adjustments, verify, loader work…) stays in the admin group.
-        chatId = (n.kind === 'payment.detected' ? cfg?.payments_channel_chat_id : null)
-          ?? cfg?.admin_group_chat_id ?? null;
-        // No group set: fall back to fanning out to each linked admin.
-        if (!chatId) { await this.fanOutToAdmins(n); continue; }
+        if (n.kind === 'escalation.item') {
+          // The staff-attention feed goes ONLY to the escalation channel — never
+          // the admin group and never fanned out. If no channel is set, skip it
+          // (the sweep only makes these when a channel exists, so this is a guard).
+          chatId = cfg?.escalation_channel_chat_id ?? null;
+          if (!chatId) { await sql`update notifications set status='skipped' where id=${n.id}`; continue; }
+        } else {
+          // The money-in feed goes to its own channel when one is set; everything
+          // else (adjustments, verify, loader work…) stays in the admin group.
+          chatId = (n.kind === 'payment.detected' ? cfg?.payments_channel_chat_id : null)
+            ?? cfg?.admin_group_chat_id ?? null;
+          // No group set: fall back to fanning out to each linked admin.
+          if (!chatId) { await this.fanOutToAdmins(n); continue; }
+        }
       } else {
         chatId = cm?.player_chat ?? cm?.admin_tg ?? null;
       }
@@ -239,6 +247,11 @@ export function renderNotification(n: Notification): Rendered | null {
   const m = (v: unknown, c?: unknown) => money(Number(v ?? 0), String(c ?? 'USD'));
 
   switch (n.kind) {
+    // ── Staff-attention (escalation) feed ── the sweep pre-renders the line; we
+    // just print it. Heads-up only, no buttons — action items on their real cards.
+    case 'escalation.item':
+      return { text: String(p.text ?? '') };
+
     // ── Player-facing ──
     // Players no longer confirm payments (admins do). Kept as a plain heads-up in
     // case any pre-change rows are still in the outbox — no dead buttons.
