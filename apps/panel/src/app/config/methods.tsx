@@ -127,11 +127,12 @@ function MethodForm({ method, onDone }: { method: any | null; onDone?: () => voi
         for (const [k, v] of fd.entries()) {
           const s = String(v);
           if (NUM.has(k)) patch[k] = s === '' ? null : Number(s);
-          else if (k === 'enabled' || k === 'split_eligible') patch[k] = s === 'on';
+          else if (k === 'enabled' || k === 'split_eligible' || k === 'allow_skip_payee') patch[k] = s === 'on';
           else patch[k] = s === '' ? null : s;
         }
         if (!fd.has('enabled')) patch.enabled = false;
         if (!fd.has('split_eligible')) patch.split_eligible = false;
+        if (!fd.has('allow_skip_payee')) patch.allow_skip_payee = false;
 
         setMsg(null);
         start(async () => {
@@ -268,6 +269,17 @@ function MethodForm({ method, onDone }: { method: any | null; onDone?: () => voi
         <div className="field-hint">
           Only peer-to-peer methods work in a split (a shared pool filled by whoever deposits).
           Turn this on for the methods you want players to combine — e.g. Venmo and Zelle.
+        </div>
+      </div>
+
+      <div className="field">
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input type="checkbox" name="allow_skip_payee" defaultChecked={method?.allow_skip_payee ?? false} />
+          Allow “can’t send → next tag” — depositor can swap to the next payee in line
+        </label>
+        <div className="field-hint">
+          If a depositor can’t send to the tag they were given, a button hands the slice back and gives
+          them the next queued payee (or the club backstop). Peer-to-peer only; capped at 3 swaps per deposit.
         </div>
       </div>
 

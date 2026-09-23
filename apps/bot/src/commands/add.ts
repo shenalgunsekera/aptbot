@@ -324,30 +324,79 @@ async function runMatch(ctx: Ctx, platformId: string, amount: number, methodId: 
   // The real window is the configured match timeout — show it honestly so the
   // player knows exactly how long they have (and it stays in step with the panel).
   const [tcfg] = await sql<{ match_timeout_seconds: number }[]>`select match_timeout_seconds from config where id`;
-  const lines: string[] = [`*💸 Send your payment now — you have ${windowLabel(tcfg?.match_timeout_seconds ?? 300)}*\n`];
-
-  if (fills.length > 1) {
-    lines.push(`Your ${money(amount)} is split across *${fills.length} people*. Pay *each* separately:\n`);
-  }
-  for (const [i, f] of fills.entries()) {
-    if (fills.length > 1) lines.push(`*── Payment ${i + 1} of ${fills.length} ──*`);
-    lines.push(`Send: *${money(f.gross_to_send, f.currency)}*`);
-    if (f.gross_to_send !== f.amount) {
-      lines.push(`_(${money(f.amount, f.currency)} + ${money(f.gross_to_send - f.amount, f.currency)} ${m!.name} fee, so they get the full amount)_`);
-    }
-    lines.push(`Address: \`${f.payout_handle}\`  _(tap to copy)_`);
-    if (f.payout_name) lines.push(`Name on ${m!.name}: *${f.payout_name}*`);
-    lines.push('');
-  }
-  if (m?.code === 'paypal') lines.push('⚠️ *Make sure to send as Friends & Family* (not Goods & Services).\n');
-  lines.push(`Once you've sent it, send ${receiptInstruction(m!.code)} here so we can confirm it.`);
-  lines.push('_Changed your mind? /canceldeposit before you pay._');
+  const { text, keyboard } = buildPayInstruction(fills, m!, tcfg?.match_timeout_seconds ?? 300);
 
   // The receipt IS the proof now. Collect it (up to two), submitting proof on the
   // first one. Every locked slice of this deposit is proven together.
   ctx.session.step = { name: 'add:receipt', fillId: fills[0]!.id };
   await clearQuestion(ctx);
-  await ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' });
+  await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+}
+
+/** The "send your payment to X" card. Shared by the initial match and the
+ *  skip-to-next-tag re-render so both look identical. Adds a "can't send → next
+ *  tag" button only for a single PLAYER fill (one with a cash-out behind it) on a
+ *  method that allows skipping — a club/backstop fill has no "next". */
+export function buildPayInstruction(
+  fills: Fill[], m: PaymentMethod, matchSecs: number,
+): { text: string; keyboard?: InlineKeyboard } {
+  const lines: string[] = [`*💸 Send your payment now — you have ${windowLabel(matchSecs)}*\n`];
+  if (fills.length > 1) {
+    lines.push(`Your payment is split across *${fills.length} people*. Pay *each* separately:\n`);
+  }
+  for (const [i, f] of fills.entries()) {
+    if (fills.length > 1) lines.push(`*── Payment ${i + 1} of ${fills.length} ──*`);
+    lines.push(`Send: *${money(f.gross_to_send, f.currency)}*`);
+    if (f.gross_to_send !== f.amount) {
+      lines.push(`_(${money(f.amount, f.currency)} + ${money(f.gross_to_send - f.amount, f.currency)} ${m.name} fee, so they get the full amount)_`);
+    }
+    lines.push(`Address: \`${f.payout_handle}\`  _(tap to copy)_`);
+    if (f.payout_name) lines.push(`Name on ${m.name}: *${f.payout_name}*`);
+    lines.push('');
+  }
+  if (m.code === 'paypal') lines.push('⚠️ *Make sure to send as Friends & Family* (not Goods & Services).\n');
+  lines.push(`Once you've sent it, send ${receiptInstruction(m.code)} here so we can confirm it.`);
+
+  let keyboard: InlineKeyboard | undefined;
+  const only = fills.length === 1 ? fills[0]! : null;
+  if (only && (only as { withdraw_id?: string }).withdraw_id && (m as { allow_skip_payee?: boolean }).allow_skip_payee) {
+    lines.push('_Can\'t send to this tag? Tap the button below for the next one in line._');
+    keyboard = new InlineKeyboard().text("⚠️ Can't send to this tag? Next one", `dep:skip:${only.id}`);
+  }
+  lines.push('_Changed your mind? /canceldeposit before you pay._');
+  return { text: lines.join('\n'), keyboard };
+}
+
+/** Depositor tapped "can't send to this tag": hand the slice back and show the
+ *  next payee in the queue (or the club backstop). See deposit_skip_payee (0121). */
+export async function depositSkip(ctx: Ctx, fillId: string): Promise<void> {
+  const p = await requireActive(ctx);
+  if (!p) return;
+  const sql = db();
+
+  // Guard: only the depositor who owns this fill may skip it.
+  const [own] = await sql<{ ok: boolean }[]>`
+    select exists(select 1 from fills f join deposit_requests dr on dr.id = f.deposit_id
+                   where f.id = ${fillId} and dr.player_id = ${p.id}) as ok`;
+  if (!own?.ok) return void (await ctx.answerCallbackQuery({ text: "That isn't your payment.", show_alert: true }));
+
+  let nf: Fill;
+  try {
+    [nf] = await sql<Fill[]>`select * from deposit_skip_payee(${fillId}::uuid)`;
+  } catch (err) {
+    if (isUserError(err)) return void (await ctx.answerCallbackQuery({ text: userMessage(err), show_alert: true }));
+    console.error('deposit_skip_payee failed:', err);
+    return void (await ctx.answerCallbackQuery({ text: 'Something went wrong — try again in a moment.', show_alert: true }));
+  }
+
+  const [m] = await sql<PaymentMethod[]>`select * from payment_methods where id = ${nf.method_id}`;
+  const [tcfg] = await sql<{ match_timeout_seconds: number }[]>`select match_timeout_seconds from config where id`;
+  const { text, keyboard } = buildPayInstruction([nf], m!, tcfg?.match_timeout_seconds ?? 300);
+  // Receipts attach to the NEW fill now (the old one was returned to the queue).
+  ctx.session.step = { name: 'add:receipt', fillId: nf.id };
+  await ctx.answerCallbackQuery({ text: nf.withdraw_id ? "Here's the next tag." : 'Switched to the backup tag.' });
+  try { await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard }); }
+  catch { await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard }); }
 }
 
 /** PeerPay deposit: mint a checkout link for this amount and show a Pay button +
