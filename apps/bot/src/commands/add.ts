@@ -361,7 +361,7 @@ export function buildPayInstruction(
   const only = fills.length === 1 ? fills[0]! : null;
   if (only && (only as { withdraw_id?: string }).withdraw_id && (m as { allow_skip_payee?: boolean }).allow_skip_payee) {
     lines.push('_Can\'t send to this tag? Tap the button below for the next one in line._');
-    keyboard = new InlineKeyboard().text("⚠️ Can't send to this tag? Next one", `dep:skip:${only.id}`);
+    keyboard = new InlineKeyboard().text("⚠️ Can't send to this tag? Click here.", `dep:skip:${only.id}`);
   }
   lines.push('_Changed your mind? /canceldeposit before you pay._');
   return { text: lines.join('\n'), keyboard };
