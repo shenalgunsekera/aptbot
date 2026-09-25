@@ -184,7 +184,25 @@ function htmlToText(html: string): string {
     .trim();
 }
 
+/** Remove provider/brand words so they don't pollute a name match — "PayPal. John
+ *  Smith" → "John Smith"; "Sarah Kim with Zelle" → "Sarah Kim". Runs only as a
+ *  SECOND pass, so a clean first match is never disturbed. */
+function stripBrands(s: string): string {
+  return s
+    .replace(/\bwith\s+(zelle|venmo)\b/gi, ' ')
+    .replace(/\bvia\s+(zelle|venmo|paypal|cash\s?app)\b/gi, ' ')
+    .replace(/\b(paypal|venmo|zelle|cash\s?app|square|bank of america|chase|wells\s?fargo|citibank|citi|capital one|pnc|us bank|ally|truist)\b/gi, ' ')
+    .replace(/\s+/g, ' ').trim();
+}
+
+/** Sender name, best-effort: the raw email first, then a brand-stripped retry — banks
+ *  and Venmo/Zelle glue their own name right next to the person's ("You received
+ *  $50 from Sarah Kim with Zelle"), and the retry pass recovers the real name. */
 function senderName(subject: string, text: string): string | null {
+  return senderName_(subject, text) ?? senderName_(stripBrands(subject), stripBrands(text));
+}
+
+function senderName_(subject: string, text: string): string | null {
   // Search the subject and the body SEPARATELY — never a `subject + "\n" + body`
   // join. A joined haystack lets a name match run across the boundary and swallow
   // the subject's trailing word (e.g. body "chris Boyett …" under subject "Payment
@@ -194,10 +212,12 @@ function senderName(subject: string, text: string): string | null {
   const candidates: Array<string | undefined> = [
     // "jennifer Setton sent you …" / "Ethan Katz paid you" / "… is requesting" — name leads the subject.
     subject.match(/^(.{2,40}?)\s+(?:sent you|paid you|is requesting|wants\b)/i)?.[1],
-    // "Michael Luvish requested $30" / "… canceled a request" — name leads the subject.
-    subject.match(/^([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,2})\s+(?:requested\b|cancel(?:l)?ed|declined)/i)?.[1],
+    // "Michael Luvish requested $30" / "Jenny charged you" (Venmo) / "… canceled a request" — name leads the subject.
+    subject.match(/^([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,2})\s+(?:requested\b|charged you|cancel(?:l)?ed|declined)/i)?.[1],
     // Same phrasing but anywhere in the BODY (Isaac's request had no name in the subject).
-    body.match(/([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,2})\s+(?:sent you|paid you|is requesting|requested\b|has\s+cancel(?:l)?ed)/i)?.[1],
+    body.match(/([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,2})\s+(?:sent you|paid you|charged you|is requesting|requested\b|has\s+cancel(?:l)?ed)/i)?.[1],
+    // Zelle: "You received $75.00 from Sarah Kim" (Chase/WF phrasing — name after the amount).
+    body.match(/\breceived\s+\$[\d,.]+\s+from\s+([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,2})/i)?.[1],
     // Cash App payment body: "You were sent $100 by cake." / "… by John Doe. Receipt".
     body.match(/sent\s+\$[\d,.]+\s+by\s+([A-Za-z][A-Za-z'. -]*?)(?:[.\n]|$)/i)?.[1],
     // "the $60 request from Ali Salem for …".
@@ -282,6 +302,19 @@ export function parseCashapp(subject: string, text: string): Parsed | null {
   return { amount, currency: 'USD', name: senderName(subject, text), kind: isCancel ? 'cancel' : isRequest ? 'request' : 'payment' };
 }
 
+/** The money amount in cents, preferring the figure tied to the payment phrase
+ *  ("$X from NAME", "sent you $X") over any stray dollar figure (a fee line, a
+ *  promo). Falls back to the first $ amount, then "N USD". Null if none > 0. */
+function amountOf(hay: string): number | null {
+  const m = hay.match(/\$\s?([\d,]+(?:\.\d{2})?)\s+from\b/i)
+    ?? hay.match(/(?:sent you|paid you|received(?:\s+a)?)\s*(?:a\s+)?\$\s?([\d,]+(?:\.\d{2})?)/i)
+    ?? hay.match(/\$\s?([\d,]+(?:\.\d{2})?)/)
+    ?? hay.match(/([\d,]+(?:\.\d{2})?)\s?USD/i);
+  if (!m) return null;
+  const a = Math.round(parseFloat(m[1]!.replace(/,/g, '')) * 100);
+  return a > 0 ? a : null;
+}
+
 /** Venmo. Incoming reads "NAME paid you $X"; a request is "NAME charged you"/"is
  *  requesting"; our own payout is "You paid NAME $X". Amounts usually carry cents. */
 export function parseVenmo(subject: string, text: string): Parsed | null {
@@ -289,10 +322,8 @@ export function parseVenmo(subject: string, text: string): Parsed | null {
   // Direction from the SUBJECT only — the body's "Venmo" footer must not flip it.
   const isSent = /(you paid|you sent|payment to|you completed)/i.test(subject);
 
-  const m = hay.match(/\$\s?([\d,]+(?:\.\d{2})?)/) ?? hay.match(/([\d,]+(?:\.\d{2})?)\s?USD/i);
-  if (!m) return null;
-  const amount = Math.round(parseFloat(m[1]!.replace(/,/g, '')) * 100);
-  if (amount <= 0) return null;
+  const amount = amountOf(hay);
+  if (amount == null) return null;
 
   if (isSent) return { amount, currency: 'USD', name: recipientName(subject, text), kind: 'sent' };
 
@@ -302,20 +333,19 @@ export function parseVenmo(subject: string, text: string): Parsed | null {
 }
 
 /** Zelle. Banks phrase incoming as "NAME sent you $X" (BofA) or "You received $X
- *  from NAME" (Chase); outgoing as "You sent $X to NAME". Requests are rare but
- *  exist ("NAME requested $X"). The rail word is always "Zelle" in the body. */
+ *  from NAME" (Chase/WF); outgoing as "You sent $X to NAME". Requests exist too
+ *  ("NAME requested $X"). The rail word is usually "Zelle" — but some banks omit it,
+ *  so the webhook also treats a bank sender + a payment phrase as Zelle. */
 export function parseZelle(subject: string, text: string): Parsed | null {
   const hay = `${subject}\n${text}`;
   // "you sent" is outgoing; "sent you" is incoming — don't let the first match the second.
   const isSent = /(you sent|you paid|your payment|payment to)/i.test(subject) && !/sent you/i.test(subject);
 
-  const m = hay.match(/\$\s?([\d,]+(?:\.\d{2})?)/) ?? hay.match(/([\d,]+(?:\.\d{2})?)\s?USD/i);
-  if (!m) return null;
-  const amount = Math.round(parseFloat(m[1]!.replace(/,/g, '')) * 100);
-  if (amount <= 0) return null;
+  const amount = amountOf(hay);
+  if (amount == null) return null;
 
   if (isSent) return { amount, currency: 'USD', name: recipientName(subject, text), kind: 'sent' };
 
-  const isRequest = /(requested\s+\$|is requesting|request for \$|sent you a request|payment request)/i.test(hay);
+  const isRequest = /(requested\s+\$|is requesting|requests\s+\$|request for \$|sent you a request|payment request)/i.test(hay);
   return { amount, currency: 'USD', name: senderName(subject, text), kind: isRequest ? 'request' : 'payment' };
 }

@@ -43,11 +43,17 @@ export async function POST(req: Request): Promise<Response> {
   // Order matters: Zelle & Venmo name themselves distinctively; check them before the
   // more generic Cash App / PayPal markers.
   const hay = `${from} ${subject} ${text}`.toLowerCase();
+  // A bank sender + a money-received phrase = Zelle even when the plain-text body
+  // never spells out "Zelle" (some banks put the word only in the HTML/logo). Gated
+  // by the payment phrase so statements and "$200 bonus" promos don't false-trigger.
+  const bankSender = /bank of america|bankofamerica|chase|wells\s?fargo|wellsfargo|citi|usbank|u\.s\. bank|capital ?one|pnc|td ?bank|ally|truist|regions|fifth ?third|huntington|key ?bank|citizens|navy ?federal/;
+  const zellePhrase = /\bsent you\b|\bpaid you\b|received\s+(?:a\s+)?\$|received[^.\n]{0,40}\bfrom\b|you received\b|requested\b|is requesting/;
   const rail: 'paypal' | 'cashapp' | 'venmo' | 'zelle' | null =
       /zelle/.test(hay) ? 'zelle'
     : /venmo/.test(hay) ? 'venmo'
     : /paypal/.test(hay) ? 'paypal'
     : /cash\s?app|square\.com|cash\.app/.test(hay) ? 'cashapp'
+    : (bankSender.test(hay) && zellePhrase.test(hay)) ? 'zelle'
     : null;
   if (!rail) return Response.json({ ok: true, detected: false, reason: 'not a known payment rail' });
 

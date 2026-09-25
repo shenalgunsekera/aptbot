@@ -38,8 +38,9 @@ function forwardNewPayments() {
   // slightly wider net here is safe (non-payments are simply ignored downstream).
   var query = '(' +
       'from:paypal.com OR from:cash@square.com OR from:cash.app OR from:venmo.com ' +
-      'OR subject:"paid you" OR subject:"sent you" OR subject:"requested" ' +
-      'OR subject:"requests" OR subject:zelle OR subject:venmo OR subject:"received money"' +
+      'OR from:bankofamerica.com OR from:chase.com OR from:wellsfargo.com OR from:citi.com OR from:zellepay.com ' +
+      'OR subject:"paid you" OR subject:"sent you" OR subject:"received" OR subject:"requested" ' +
+      'OR subject:"requests" OR subject:zelle OR subject:venmo' +
     ') -label:' + LABEL + ' newer_than:1d';
   var threads = GmailApp.search(query, 0, 25);
 
