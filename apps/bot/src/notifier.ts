@@ -412,6 +412,8 @@ export function renderNotification(n: Notification): Rendered | null {
       // (Apple Pay / Cash App Pay / Link / Card …) in `method`.
       const src = p.source === 'paypal' ? 'PayPal'
         : p.source === 'cashapp' ? 'Cash App'
+        : p.source === 'venmo' ? 'Venmo'
+        : p.source === 'zelle' ? 'Zelle'
         : (p.method || (p.source === 'stripe' ? 'Card' : 'crypto'));
       const who = md(p.name) || 'someone';
       const amt = m(p.amount, p.currency);

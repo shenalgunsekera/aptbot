@@ -7,7 +7,7 @@ import 'server-only';
  * still taps Verify. Idempotent: the same provider event twice is a no-op.
  */
 export async function recordDetection(d: {
-  source: 'stripe' | 'paypal' | 'crypto' | 'cashapp' | 'peerpay';
+  source: 'stripe' | 'paypal' | 'crypto' | 'cashapp' | 'peerpay' | 'venmo' | 'zelle';
   externalId: string;
   methodCode: string;
   amount: number;         // minor units (cents)

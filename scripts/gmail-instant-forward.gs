@@ -31,9 +31,16 @@ var LABEL   = 'apt-forwarded';   // emails we've already pushed get this label
 
 function forwardNewPayments() {
   var label = GmailApp.getUserLabelByName(LABEL) || GmailApp.createLabel(LABEL);
-  // Money-in emails from the two rails, not yet forwarded, last day only.
-  var query = '(from:paypal.com OR from:cash@square.com OR from:cash.app) ' +
-              '-label:' + LABEL + ' newer_than:1d';
+  // Money emails from all four rails, not yet forwarded, last day only. We match on
+  // BOTH the provider senders AND telltale subject phrases, because Venmo/Zelle (and
+  // sometimes PayPal) arrive FORWARDED from another account — which rewrites the From,
+  // so a sender-only query would miss them. The webhook parses + dedupes, so casting a
+  // slightly wider net here is safe (non-payments are simply ignored downstream).
+  var query = '(' +
+      'from:paypal.com OR from:cash@square.com OR from:cash.app OR from:venmo.com ' +
+      'OR subject:"paid you" OR subject:"sent you" OR subject:"requested" ' +
+      'OR subject:"requests" OR subject:zelle OR subject:venmo OR subject:"received money"' +
+    ') -label:' + LABEL + ' newer_than:1d';
   var threads = GmailApp.search(query, 0, 25);
 
   for (var i = 0; i < threads.length; i++) {

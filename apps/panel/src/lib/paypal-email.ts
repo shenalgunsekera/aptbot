@@ -192,12 +192,12 @@ function senderName(subject: string, text: string): string | null {
   // one line, so matching per-side is both correct and safer.
   const body = text;
   const candidates: Array<string | undefined> = [
-    // "jennifer Setton sent you …" / "… is requesting" — name leads the subject.
-    subject.match(/^(.{2,40}?)\s+(?:sent you|is requesting|wants\b)/i)?.[1],
+    // "jennifer Setton sent you …" / "Ethan Katz paid you" / "… is requesting" — name leads the subject.
+    subject.match(/^(.{2,40}?)\s+(?:sent you|paid you|is requesting|wants\b)/i)?.[1],
     // "Michael Luvish requested $30" / "… canceled a request" — name leads the subject.
     subject.match(/^([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,2})\s+(?:requested\b|cancel(?:l)?ed|declined)/i)?.[1],
     // Same phrasing but anywhere in the BODY (Isaac's request had no name in the subject).
-    body.match(/([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,2})\s+(?:sent you|is requesting|requested\b|has\s+cancel(?:l)?ed)/i)?.[1],
+    body.match(/([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,2})\s+(?:sent you|paid you|is requesting|requested\b|has\s+cancel(?:l)?ed)/i)?.[1],
     // Cash App payment body: "You were sent $100 by cake." / "… by John Doe. Receipt".
     body.match(/sent\s+\$[\d,.]+\s+by\s+([A-Za-z][A-Za-z'. -]*?)(?:[.\n]|$)/i)?.[1],
     // "the $60 request from Ali Salem for …".
@@ -280,4 +280,42 @@ export function parseCashapp(subject: string, text: string): Parsed | null {
   const isRequest = /(requested \$|is requesting|request for \$|money request|sent you a request|request received|request from)/i.test(hay);
 
   return { amount, currency: 'USD', name: senderName(subject, text), kind: isCancel ? 'cancel' : isRequest ? 'request' : 'payment' };
+}
+
+/** Venmo. Incoming reads "NAME paid you $X"; a request is "NAME charged you"/"is
+ *  requesting"; our own payout is "You paid NAME $X". Amounts usually carry cents. */
+export function parseVenmo(subject: string, text: string): Parsed | null {
+  const hay = `${subject}\n${text}`;
+  // Direction from the SUBJECT only — the body's "Venmo" footer must not flip it.
+  const isSent = /(you paid|you sent|payment to|you completed)/i.test(subject);
+
+  const m = hay.match(/\$\s?([\d,]+(?:\.\d{2})?)/) ?? hay.match(/([\d,]+(?:\.\d{2})?)\s?USD/i);
+  if (!m) return null;
+  const amount = Math.round(parseFloat(m[1]!.replace(/,/g, '')) * 100);
+  if (amount <= 0) return null;
+
+  if (isSent) return { amount, currency: 'USD', name: recipientName(subject, text), kind: 'sent' };
+
+  const isCancel = /(cancel(l)?ed|declined)/i.test(subject) && /(request|charge)/i.test(hay);
+  const isRequest = /(charged you|is requesting|requests?\s+\$|requested\s+\$|sent you a (?:request|charge)|wants\b)/i.test(hay);
+  return { amount, currency: 'USD', name: senderName(subject, text), kind: isCancel ? 'cancel' : isRequest ? 'request' : 'payment' };
+}
+
+/** Zelle. Banks phrase incoming as "NAME sent you $X" (BofA) or "You received $X
+ *  from NAME" (Chase); outgoing as "You sent $X to NAME". Requests are rare but
+ *  exist ("NAME requested $X"). The rail word is always "Zelle" in the body. */
+export function parseZelle(subject: string, text: string): Parsed | null {
+  const hay = `${subject}\n${text}`;
+  // "you sent" is outgoing; "sent you" is incoming — don't let the first match the second.
+  const isSent = /(you sent|you paid|your payment|payment to)/i.test(subject) && !/sent you/i.test(subject);
+
+  const m = hay.match(/\$\s?([\d,]+(?:\.\d{2})?)/) ?? hay.match(/([\d,]+(?:\.\d{2})?)\s?USD/i);
+  if (!m) return null;
+  const amount = Math.round(parseFloat(m[1]!.replace(/,/g, '')) * 100);
+  if (amount <= 0) return null;
+
+  if (isSent) return { amount, currency: 'USD', name: recipientName(subject, text), kind: 'sent' };
+
+  const isRequest = /(requested\s+\$|is requesting|request for \$|sent you a request|payment request)/i.test(hay);
+  return { amount, currency: 'USD', name: senderName(subject, text), kind: isRequest ? 'request' : 'payment' };
 }
