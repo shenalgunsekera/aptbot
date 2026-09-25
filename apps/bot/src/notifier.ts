@@ -252,6 +252,12 @@ export function renderNotification(n: Notification): Rendered | null {
     case 'escalation.item':
       return { text: String(p.text ?? '') };
 
+    // ── Generic admin alert ── a pre-rendered heads-up line to the admin group
+    // (e.g. the cron's "Discord bot is down / back online" health alert). Routes to
+    // admin_group_chat_id like any other admin row; no buttons.
+    case 'admin.alert':
+      return { text: String(p.text ?? '') };
+
     // ── Player-facing ──
     // Players no longer confirm payments (admins do). Kept as a plain heads-up in
     // case any pre-change rows are still in the outbox — no dead buttons.
