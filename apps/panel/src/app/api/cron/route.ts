@@ -68,7 +68,19 @@ export async function GET(req: Request): Promise<Response> {
     // one cron cycle.
     const webhookFixed = await ensureWebhook(bot, req);
 
-    return Response.json({ ok: true, ...swept, delivered, cryptoPolled, cryptoDisabled, paypalSeen, emailBreakdown, emailConfigured, emailError, webhookFixed });
+    // Keep the free-tier Render Discord bot AWAKE. Render spins a free service down
+    // after ~15 min without INBOUND HTTP, and a service pinging itself isn't reliably
+    // counted — so an EXTERNAL hit is what actually resets the idle clock. This cron
+    // already runs every few minutes, so it's the perfect external pinger: a
+    // spun-down Discord bot can't ack an interaction in time ("did not respond").
+    // Best-effort, timeout-guarded — never let it affect the cron result.
+    let discordPinged = false;
+    try {
+      const durl = process.env.DISCORD_HEALTH_URL ?? 'https://aptbotdiscord.onrender.com/health';
+      await withTimeout(fetch(durl).then((r) => { discordPinged = r.ok; }, () => {}), 15000, undefined);
+    } catch (err) { console.error('[cron] discord keepalive failed:', err); }
+
+    return Response.json({ ok: true, ...swept, delivered, cryptoPolled, cryptoDisabled, paypalSeen, emailBreakdown, emailConfigured, emailError, webhookFixed, discordPinged });
   } catch (err) {
     console.error('[cron] failed:', err);
     return Response.json({ ok: false, error: String(err) }, { status: 500 });
