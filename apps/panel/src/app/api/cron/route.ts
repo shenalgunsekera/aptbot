@@ -102,48 +102,44 @@ export async function GET(req: Request): Promise<Response> {
   }
 }
 
-/** Alert the Telegram admin group when the Discord bot is down, and once when it
- *  recovers. The down-alert goes to Telegram ONLY — the whole point is that it
- *  reaches you even when Discord itself is the thing that's down. Deduped so a real
- *  outage pings at most every 15 min (not every cron cycle), and recovery is
- *  announced once. Best-effort — wrapped so it can never disturb the money sweeps.
+/** Alert the Telegram admin group ONLY when the Discord bot's health CHANGES state:
+ *  exactly one message when it goes down, exactly one when it comes back — and
+ *  nothing in between (no every-cycle repeats). We look at the LAST health alert we
+ *  sent to know the current known state, and only post on a transition. The alert
+ *  goes to Telegram only (it must reach you even when Discord itself is what's down).
+ *  Best-effort — wrapped so it can never disturb the money sweeps.
  *
- *  `ready`: true = gateway up, false = process up but not connected, null =
- *  unreachable (possibly dead). Anything but true is treated as "down". */
+ *  `ready`: true = gateway up; false = process up but not connected; null =
+ *  unreachable. Anything but true counts as "down". */
 async function alertDiscordHealth(ready: boolean | null): Promise<void> {
   try {
     const sql = db();
     const up = ready === true;
-    if (!up) {
-      // Only fire if we haven't already alerted in the last 15 min.
-      const [recent] = await sql<{ x: number }[]>`
-        select 1 x from notifications
-         where kind = 'admin.alert' and ref_type = 'discord.health'
-           and payload->>'state' = 'down' and created_at > now() - interval '15 minutes' limit 1`;
-      if (recent) return;
-      const detail = ready === null ? 'it is unreachable (the host may be asleep or the process may have crashed)'
+    // The last health alert we sent = the state we last announced. Default 'up' so
+    // the very first cron run never fires a spurious "recovery".
+    const [last] = await sql<{ state: string }[]>`
+      select payload->>'state' as state from notifications
+       where kind = 'admin.alert' and ref_type = 'discord.health'
+       order by created_at desc limit 1`;
+    const lastState = last?.state ?? 'up';
+
+    if (!up && lastState !== 'down') {
+      // Transition UP → DOWN: fire once.
+      const detail = ready === null ? 'it is unreachable (the host may be down or the process crashed)'
                                     : 'it is running but can’t connect to Discord';
       await sql`insert into notifications (audience, kind, ref_type, ref_id, payload, platform)
         values ('admins', 'admin.alert', 'discord.health', gen_random_uuid(),
-                ${sql.json({ state: 'down', text: `🔴 *Discord bot is DOWN* — ${detail}, so Discord commands show “did not respond.” It retries and self-heals on its own; if it’s still down after ~30 min, check the Render logs.` })}::jsonb,
+                ${sql.json({ state: 'down', text: `🔴 *Discord bot is DOWN* — ${detail}, so Discord commands show “did not respond.” It retries and self-heals; if it’s still down after ~30 min, check the server.` })}::jsonb,
                 'telegram')`;
-    } else {
-      // Recovered: announce once, but only if we actually alerted a down recently.
-      const [wasDown] = await sql<{ x: number }[]>`
-        select 1 x from notifications
-         where kind = 'admin.alert' and ref_type = 'discord.health'
-           and payload->>'state' = 'down' and created_at > now() - interval '3 hours' limit 1`;
-      const [alreadyToldUp] = await sql<{ x: number }[]>`
-        select 1 x from notifications
-         where kind = 'admin.alert' and ref_type = 'discord.health'
-           and payload->>'state' = 'up' and created_at > now() - interval '3 hours' limit 1`;
-      if (wasDown && !alreadyToldUp) {
-        await sql`insert into notifications (audience, kind, ref_type, ref_id, payload, platform)
-          values ('admins', 'admin.alert', 'discord.health', gen_random_uuid(),
-                  ${sql.json({ state: 'up', text: '🟢 *Discord bot is back online.*' })}::jsonb,
-                  'telegram')`;
-      }
+    } else if (up && lastState === 'down') {
+      // Transition DOWN → UP: record recovery SILENTLY (status 'skipped' = never
+      // delivered) — the owner doesn't want a "back online" message. This only
+      // resets our known state so the NEXT real outage alerts again.
+      await sql`insert into notifications (audience, kind, ref_type, ref_id, payload, platform, status)
+        values ('admins', 'admin.alert', 'discord.health', gen_random_uuid(),
+                ${sql.json({ state: 'up', text: '' })}::jsonb, 'telegram', 'skipped')`;
     }
+    // Otherwise no state change → stay silent.
   } catch (err) { console.error('[cron] discord health alert failed:', err); }
 }
 
