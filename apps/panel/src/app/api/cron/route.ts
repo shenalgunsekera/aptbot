@@ -90,57 +90,14 @@ export async function GET(req: Request): Promise<Response> {
       }, () => {}), 15000, undefined);
     } catch (err) { console.error('[cron] discord keepalive failed:', err); }
 
-    // Alert admins on Telegram if the Discord bot is down (or back). This is the
-    // safety net that turns "down for hours before anyone notices" into a ping in
-    // minutes. Fully isolated + guarded — it must NEVER affect the money sweeps.
-    await alertDiscordHealth(discordReady);
+    // (Discord down-alert removed — the owner found it too noisy. discordReady is
+    // still surfaced in the response for manual checks, but nothing is messaged.)
 
     return Response.json({ ok: true, ...swept, delivered, cryptoPolled, cryptoDisabled, paypalSeen, emailBreakdown, emailConfigured, emailError, webhookFixed, discordPinged, discordReady });
   } catch (err) {
     console.error('[cron] failed:', err);
     return Response.json({ ok: false, error: String(err) }, { status: 500 });
   }
-}
-
-/** Alert the Telegram admin group ONLY when the Discord bot's health CHANGES state:
- *  exactly one message when it goes down, exactly one when it comes back — and
- *  nothing in between (no every-cycle repeats). We look at the LAST health alert we
- *  sent to know the current known state, and only post on a transition. The alert
- *  goes to Telegram only (it must reach you even when Discord itself is what's down).
- *  Best-effort — wrapped so it can never disturb the money sweeps.
- *
- *  `ready`: true = gateway up; false = process up but not connected; null =
- *  unreachable. Anything but true counts as "down". */
-async function alertDiscordHealth(ready: boolean | null): Promise<void> {
-  try {
-    const sql = db();
-    const up = ready === true;
-    // The last health alert we sent = the state we last announced. Default 'up' so
-    // the very first cron run never fires a spurious "recovery".
-    const [last] = await sql<{ state: string }[]>`
-      select payload->>'state' as state from notifications
-       where kind = 'admin.alert' and ref_type = 'discord.health'
-       order by created_at desc limit 1`;
-    const lastState = last?.state ?? 'up';
-
-    if (!up && lastState !== 'down') {
-      // Transition UP → DOWN: fire once.
-      const detail = ready === null ? 'it is unreachable (the host may be down or the process crashed)'
-                                    : 'it is running but can’t connect to Discord';
-      await sql`insert into notifications (audience, kind, ref_type, ref_id, payload, platform)
-        values ('admins', 'admin.alert', 'discord.health', gen_random_uuid(),
-                ${sql.json({ state: 'down', text: `🔴 *Discord bot is DOWN* — ${detail}, so Discord commands show “did not respond.” It retries and self-heals; if it’s still down after ~30 min, check the server.` })}::jsonb,
-                'telegram')`;
-    } else if (up && lastState === 'down') {
-      // Transition DOWN → UP: record recovery SILENTLY (status 'skipped' = never
-      // delivered) — the owner doesn't want a "back online" message. This only
-      // resets our known state so the NEXT real outage alerts again.
-      await sql`insert into notifications (audience, kind, ref_type, ref_id, payload, platform, status)
-        values ('admins', 'admin.alert', 'discord.health', gen_random_uuid(),
-                ${sql.json({ state: 'up', text: '' })}::jsonb, 'telegram', 'skipped')`;
-    }
-    // Otherwise no state change → stay silent.
-  } catch (err) { console.error('[cron] discord health alert failed:', err); }
 }
 
 /** Enabled crypto methods can't be watched (missing chain API key) → tell admins,
