@@ -390,6 +390,20 @@ export async function depositSkip(ctx: Ctx, fillId: string): Promise<void> {
   }
 
   const [m] = await sql<PaymentMethod[]>`select * from payment_methods where id = ${nf.method_id}`;
+
+  // The next payee can be a club-BACKSTOP tier, not a plain tag. PeerPay and Staff
+  // are whole SYSTEMS (a minted checkout link / a human handing over a handle), not
+  // handles you send to — so route them exactly like the initial deposit does
+  // (add.ts ~line 301). Without this the card printed the literal sentinel
+  // ("PEERPAY"/"STAFF") as an "Address", which is the bug being fixed here.
+  if (nf.payout_handle === 'PEERPAY' || nf.payout_handle === 'STAFF') {
+    await ctx.answerCallbackQuery({ text: 'Switched to your backup.' });
+    try { await ctx.editMessageReplyMarkup(); } catch { /* strip the now-stale skip button off the old card */ }
+    if (nf.payout_handle === 'PEERPAY') await sendPeerpayInstruction(ctx, nf, m!);
+    else await sendStaffProvideInstruction(ctx, nf, m!.name);
+    return;
+  }
+
   const [tcfg] = await sql<{ match_timeout_seconds: number }[]>`select match_timeout_seconds from config where id`;
   const { text, keyboard } = buildPayInstruction([nf], m!, tcfg?.match_timeout_seconds ?? 300);
   // Receipts attach to the NEW fill now (the old one was returned to the queue).
