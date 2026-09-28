@@ -565,6 +565,13 @@ export async function staffWaitReceipt(ctx: Ctx, fillId: string): Promise<void> 
     await addReceipt(ctx, fillId);
     return;
   }
+  // Say "hang tight" ONCE for this wait, not on every screenshot. Shares the same
+  // per-(fill,phase) guard as the text handler in build.ts, so a player who sends
+  // several messages/screenshots while waiting gets a single reply, then silence.
+  const key = `${fillId}:waiting`;
+  const sess = ctx.session as any;
+  if (sess._staffwaitNotified === key) return;
+  sess._staffwaitNotified = key;
   await ctx.reply("⏳ Hang tight — we're still getting your payment details. I'll send them here, then you can send your screenshot.");
 }
 
