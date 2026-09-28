@@ -398,7 +398,10 @@ export async function depositSkip(ctx: Ctx, fillId: string): Promise<void> {
   // ("PEERPAY"/"STAFF") as an "Address", which is the bug being fixed here.
   if (nf.payout_handle === 'PEERPAY' || nf.payout_handle === 'STAFF') {
     await ctx.answerCallbackQuery({ text: 'Switched to your backup.' });
-    try { await ctx.editMessageReplyMarkup(); } catch { /* strip the now-stale skip button off the old card */ }
+    // PeerPay/Staff post a NEW message (a Pay button / a staff hand-off), so DELETE
+    // the old tag card — otherwise the stale "Address: @old-tag" lingers and a player
+    // might pay the wrong place. (The plain-tag path below edits in place instead.)
+    try { await ctx.deleteMessage(); } catch { /* old card already gone — fine */ }
     if (nf.payout_handle === 'PEERPAY') await sendPeerpayInstruction(ctx, nf, m!);
     else await sendStaffProvideInstruction(ctx, nf, m!.name);
     return;
