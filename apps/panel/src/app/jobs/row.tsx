@@ -1,7 +1,34 @@
 'use client';
 
 import { ActionButton, PromptAction } from '../../components/ui';
-import { claimJob, completeJob, failJob, releaseJob } from '../../lib/actions';
+import { claimJob, completeJob, failJob, releaseJob, verifyPayment, discardPayment } from '../../lib/actions';
+
+/** Verify / Discard for a "payment to verify" row. Verify credits the money;
+ *  Discard clears a payment that never landed and unblocks the player. */
+export function VerifyRow({
+  fill,
+}: {
+  fill: { id: string; name: string; amount: number; currency: string; money_in: boolean };
+}) {
+  const amt = `$${(fill.amount / 100).toFixed(2)}`;
+  const who = fill.name || 'this player';
+  return (
+    <div className="btn-row">
+      <ActionButton
+        small variant="ok" label="Verify"
+        confirm={`Confirm the ${amt} ${fill.money_in ? 'payment from' : 'payout to'} ${who} actually landed. ` +
+          `This releases the money — only tap it if you've checked it.`}
+        action={() => verifyPayment(fill.id, 'verified via panel')}
+      />
+      <ActionButton
+        small variant="danger" label="Discard"
+        confirm={`Discard this ${amt} ${who} payment? Use this when the payment never happened. ` +
+          `It clears the job, unblocks the player, and credits nothing.`}
+        action={() => discardPayment(fill.id)}
+      />
+    </div>
+  );
+}
 
 export function JobRow({
   job,

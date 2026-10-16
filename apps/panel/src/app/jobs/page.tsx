@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { db } from '@union/core';
 import { Shell } from '../../components/shell';
 import { Money, Ago } from '../../components/ui';
-import { JobRow } from './row';
+import { JobRow, VerifyRow } from './row';
 
 export const dynamic = 'force-dynamic';
 
@@ -295,6 +295,7 @@ export default async function JobsPage() {
           <div className="table-wrap">
             <table>
               <thead><tr>
+                <th style={{ width: 180 }}>Action</th>
                 <th className="num" style={{ width: 110 }}>Amount</th><th>Player</th>
                 <th>Method</th><th style={{ width: 120 }}>Direction</th>
                 <th style={{ width: 120 }}>Via</th><th style={{ width: 70 }}>Age</th>
@@ -302,6 +303,7 @@ export default async function JobsPage() {
               <tbody>
                 {toVerify.map((j) => (
                   <tr key={j.id}>
+                    <td><VerifyRow fill={{ id: j.id, name: j.name ?? '', amount: j.amount, currency: j.currency, money_in: j.money_in }} /></td>
                     <td className="num"><Money minor={j.amount} currency={j.currency} /></td>
                     <td><strong>{j.name ?? '—'}</strong></td>
                     <td><span className="badge muted">{j.method}</span></td>

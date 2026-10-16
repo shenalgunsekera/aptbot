@@ -154,7 +154,22 @@ export async function verifyPayment(fillId: string, note: string): Promise<Resul
     await db()`select fill_admin_verify(${fillId}::uuid, ${s.admin.id}::uuid, ${note})`;
     await syncCard('fill', fillId, '✅ *Verified in the panel* — money on its way.');
     return 'Verified and released.';
-  }, ['/transactions', '/']);
+  }, ['/jobs', '/transactions', '/']);
+}
+
+/** 🗑 Discard a payment-to-verify: the payment didn't actually land. Cancels the
+ *  fill, cancels the deposit it was holding open (so the player is UNBLOCKED and it
+ *  leaves their /pending), and tells the player — the same fill_admin_discard the
+ *  Telegram/Discord "Discard" button calls. No money is credited. This is the fix
+ *  for a stuck "payment to verify" with no real payment behind it, which otherwise
+ *  had no way to be cleared from the panel. */
+export async function discardPayment(fillId: string): Promise<Result> {
+  return run(async () => {
+    const s = await requireAdmin();
+    await db()`select fill_admin_discard(${fillId}::uuid, ${s.admin.id}::uuid)`;
+    await syncCard('fill', fillId, '🗑 *Discarded in the panel* — no credit given.');
+    return 'Discarded — the job is cleared and the player is unblocked.';
+  }, ['/jobs', '/transactions', '/']);
 }
 
 export async function reversePayment(fillId: string, reason: string, freeze: boolean): Promise<Result> {
