@@ -561,3 +561,66 @@ export async function updateClub(
     return 'Club saved.';
   }, ['/config']);
 }
+
+// ─── Announcements (0123) ────────────────────────────────────────────────────
+
+export type AnnouncementAudience = 'all' | 'telegram' | 'discord';
+export interface AnnouncementDraft {
+  title: string;
+  body: string;
+  images: string[];                          // public URLs from /api/announcements/media
+  buttons: { label: string; url: string }[];
+  reel: string;                              // Instagram reel / video link (optional)
+  preview: boolean;                          // show the link preview
+  audience: AnnouncementAudience;
+  includeOnHold: boolean;
+  includePending: boolean;
+}
+
+/** How many players a broadcast with these options would reach, per platform. */
+export async function announcementRecipients(
+  audience: AnnouncementAudience, includeOnHold: boolean, includePending: boolean,
+): Promise<{ telegram: number; discord: number }> {
+  await requireAdmin();
+  const rows = await db()<{ platform: string; n: number }[]>`
+    select platform, count(*)::int as n
+      from announcement_targets(${audience}, ${includeOnHold}, ${includePending})
+     group by platform`;
+  const get = (p: string) => rows.find((r) => r.platform === p)?.n ?? 0;
+  return { telegram: get('telegram'), discord: get('discord') };
+}
+
+/** Send an announcement — to every targeted player, or (test) to the admin group /
+ *  admin channel only. Queues one message per player in their own chat via
+ *  announcement_send, then pushes the first Telegram wave out right away; the
+ *  every-minute cron delivers the rest and the Discord bot delivers its share. */
+export async function broadcastAnnouncement(d: AnnouncementDraft, test: boolean): Promise<Result> {
+  return run(async () => {
+    const s = await requireAdmin();
+    const sql = db();
+    const buttons = (d.buttons ?? [])
+      .map((b) => ({ label: String(b.label ?? '').trim(), url: String(b.url ?? '').trim() }))
+      .filter((b) => b.label || b.url);
+    const [{ id }] = await sql<{ id: string }[]>`
+      select announcement_create(
+        ${d.title ?? ''}, ${d.body ?? ''}, ${sql.json((d.images ?? []) as any)}::jsonb, ${sql.json(buttons as any)}::jsonb,
+        ${d.reel ?? ''}, ${d.preview !== false}, ${d.audience ?? 'all'},
+        ${!!d.includeOnHold}, ${!!d.includePending}, ${test}, ${s.admin.id}::uuid) as id`;
+    const [{ n }] = await sql<{ n: number }[]>`select announcement_send(${id}::uuid, ${s.admin.id}::uuid) as n`;
+
+    if (n === 0) {
+      return test
+        ? 'No admin group or admin channel is set, so the test had nowhere to go.'
+        : 'Nobody matched that audience, so nothing was sent.';
+    }
+    // First wave now so it starts landing immediately; the cron carries the rest.
+    try {
+      const { getBot, drainAnnouncements } = await import('./bot');
+      await drainAnnouncements(await getBot(), test ? 12_000 : 20_000);
+    } catch (e) { console.error('[panel] announcement first wave failed:', e); }
+
+    return test
+      ? 'Test sent to your admin group / admin channel — check how it looks.'
+      : `Sending to ${n} player${n === 1 ? '' : 's'}. Delivery progress is shown below.`;
+  }, ['/announcements']);
+}

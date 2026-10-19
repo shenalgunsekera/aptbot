@@ -1,5 +1,5 @@
 import { db } from '@union/core';
-import { getBot, drainNotifications } from '../../../lib/bot';
+import { getBot, drainNotifications, drainAnnouncements } from '../../../lib/bot';
 
 /**
  * The sweepers + notification drain, as a scheduled target.
@@ -25,6 +25,7 @@ function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
 }
 
 export async function GET(req: Request): Promise<Response> {
+  const startedAt = Date.now();
   const secret = process.env.CRON_SECRET;
   const auth = req.headers.get('authorization');
   if (secret && auth !== `Bearer ${secret}`) {
@@ -90,10 +91,18 @@ export async function GET(req: Request): Promise<Response> {
       }, () => {}), 15000, undefined);
     } catch (err) { console.error('[cron] discord keepalive failed:', err); }
 
+    // Announcements: spend whatever's left of this run pushing the broadcast queue
+    // (paced, rate-limit aware). Runs LAST so it can never crowd out the sweeps,
+    // detection, or the normal notification drain above.
+    let announced = 0;
+    try {
+      announced = await drainAnnouncements(bot, Math.max(0, 52_000 - (Date.now() - startedAt)));
+    } catch (err) { console.error('[cron] announcement drain failed:', err); }
+
     // (Discord down-alert removed — the owner found it too noisy. discordReady is
     // still surfaced in the response for manual checks, but nothing is messaged.)
 
-    return Response.json({ ok: true, ...swept, delivered, cryptoPolled, cryptoDisabled, paypalSeen, emailBreakdown, emailConfigured, emailError, webhookFixed, discordPinged, discordReady });
+    return Response.json({ ok: true, ...swept, delivered, cryptoPolled, cryptoDisabled, paypalSeen, emailBreakdown, emailConfigured, emailError, webhookFixed, discordPinged, discordReady, announced });
   } catch (err) {
     console.error('[cron] failed:', err);
     return Response.json({ ok: false, error: String(err) }, { status: 500 });

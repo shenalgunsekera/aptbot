@@ -1,4 +1,5 @@
-export { renderNotification, sendRendered, editCardFor } from './notifier.js';
+export { renderNotification, sendRendered, editCardFor, sendAnnouncement, announcementHtml } from './notifier.js';
+export type { AnnouncementPayload } from './notifier.js';
 import { Bot, session, GrammyError, HttpError } from 'grammy';
 import { db, closeDb, platformTotals, formatMinor } from '@union/core';
 import { type Ctx, type SessionData, initialSession } from './session.js';

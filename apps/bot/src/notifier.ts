@@ -242,6 +242,112 @@ export async function editCardFor(
   }
 }
 
+// ─── Announcements (0123) ───────────────────────────────────────────────────────
+
+/** An announcement as queued by announcement_send. */
+export interface AnnouncementPayload {
+  title?: string | null;
+  body?: string | null;
+  images?: string[];
+  buttons?: { label: string; url: string }[];
+  reel?: string | null;
+  preview?: boolean;
+  test?: boolean;
+}
+
+const escHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/** The panel's simple markup → Telegram HTML. Escapes FIRST, so nothing typed can
+ *  inject markup. Supports **bold**, _italic_, __underline__, ~~strike~~, ||spoiler||,
+ *  `code` and [text](https://link). HTML rather than Markdown so an underscore in a
+ *  username or a link can never break (and silently drop) the whole message. */
+export function announcementHtml(title: string | null | undefined, body: string | null | undefined): string {
+  let t = escHtml(body ?? '');
+  t = t.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g,
+    (_m, txt: string, url: string) => `<a href="${url.replace(/"/g, '&quot;')}">${txt}</a>`);
+  t = t.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  t = t.replace(/\*\*([^*\n](?:[^*]*?[^*\n])?)\*\*/g, '<b>$1</b>');
+  t = t.replace(/__([^_\n](?:[^_]*?[^_\n])?)__/g, '<u>$1</u>');
+  t = t.replace(/~~([^~\n](?:[^~]*?[^~\n])?)~~/g, '<s>$1</s>');
+  t = t.replace(/\|\|([^|\n](?:[^|]*?[^|\n])?)\|\|/g, '<tg-spoiler>$1</tg-spoiler>');
+  t = t.replace(/(^|[\s(>])_([^_\n]+?)_(?=$|[\s).,!?:;<])/gm, '$1<i>$2</i>');
+  const head = title && title.trim() ? `<b>${escHtml(title.trim())}</b>` : '';
+  return [head, t.trim()].filter(Boolean).join('\n\n');
+}
+
+/** Once Telegram has an image, re-send it by file_id: the same picture goes to
+ *  hundreds of chats without being downloaded hundreds of times. Per warm instance. */
+const annFileIds = new Map<string, string>();
+const plainLen = (html: string) => html.replace(/<[^>]+>/g, '').replace(/&(amp|lt|gt|quot);/g, 'x').length;
+const tgErr = (e: unknown) => String((e as { description?: string })?.description ?? e);
+const isEntityErr = (e: unknown) => /can't parse entities/i.test(tgErr(e));
+
+/** Deliver one announcement to one chat: text, a single photo, or an album, with
+ *  URL buttons and (for a reel link) a large link preview. Returns a message id. */
+export async function sendAnnouncement(bot: Bot<Ctx>, chatId: number, p: AnnouncementPayload): Promise<number | undefined> {
+  let html = announcementHtml(p.title, p.body);
+  if (p.test) html = `🧪 <i>Test preview — only the admin group sees this.</i>${html ? '\n\n' + html : ''}`;
+  const images = (Array.isArray(p.images) ? p.images : [])
+    .filter((u): u is string => typeof u === 'string' && /^https:\/\//.test(u)).slice(0, 10);
+  const buttons = (Array.isArray(p.buttons) ? p.buttons : [])
+    .filter((b) => b && String(b.label ?? '').trim() && /^https?:\/\//.test(String(b.url ?? '')));
+  const reel = p.reel && /^https?:\/\//.test(p.reel) ? p.reel : null;
+
+  let kb: InlineKeyboard | undefined;
+  if (buttons.length || reel) {
+    kb = new InlineKeyboard();
+    if (reel) kb.url('▶️ Watch the reel', reel).row();
+    for (const b of buttons) kb.url(String(b.label).trim().slice(0, 60), String(b.url)).row();
+  }
+  const markup = kb ? { reply_markup: kb } : {};
+  const linkPreview = p.preview === false
+    ? { is_disabled: true }
+    : reel ? { url: reel, prefer_large_media: true } : {};
+  const media = (u: string) => annFileIds.get(u) ?? u;
+  const remember = (u: string, photo?: { file_id: string }[]) => {
+    const id = photo?.[photo.length - 1]?.file_id;
+    if (id) annFileIds.set(u, id);
+  };
+
+  const sendText = async (text: string): Promise<number> => {
+    try {
+      return (await bot.api.sendMessage(chatId, text, { parse_mode: 'HTML', link_preview_options: linkPreview, ...markup })).message_id;
+    } catch (e) {
+      if (!isEntityErr(e)) throw e;
+      return (await bot.api.sendMessage(chatId, text.replace(/<[^>]+>/g, ''), { link_preview_options: linkPreview, ...markup })).message_id;
+    }
+  };
+
+  if (images.length === 0) return sendText(html || '📣');
+
+  const captionFits = !!html && plainLen(html) <= 1000;
+
+  if (images.length === 1) {
+    const u = images[0]!;
+    const opts = captionFits ? { caption: html, parse_mode: 'HTML' as const, ...markup } : (!html ? markup : {});
+    let m;
+    try { m = await bot.api.sendPhoto(chatId, media(u), opts); }
+    catch (e) {
+      if (!isEntityErr(e)) throw e;
+      m = await bot.api.sendPhoto(chatId, media(u), captionFits ? { caption: html.replace(/<[^>]+>/g, ''), ...markup } : {});
+    }
+    remember(u, m.photo);
+    return captionFits || !html ? m.message_id : sendText(html);
+  }
+
+  // Album. Albums can't carry buttons, so the caption rides on the album only when
+  // there are no buttons; otherwise the text + buttons follow straight after.
+  const captionOnAlbum = captionFits && !kb;
+  const msgs = await bot.api.sendMediaGroup(chatId, images.map((u, i) => ({
+    type: 'photo' as const,
+    media: media(u),
+    ...(i === 0 && captionOnAlbum ? { caption: html, parse_mode: 'HTML' as const } : {}),
+  })));
+  msgs.forEach((m, i) => remember(images[i]!, (m as { photo?: { file_id: string }[] }).photo));
+  if (captionOnAlbum) return msgs[0]?.message_id;
+  return sendText(html || '👆');
+}
+
 export function renderNotification(n: Notification): Rendered | null {
   const p = n.payload as Record<string, any>;
   const m = (v: unknown, c?: unknown) => money(Number(v ?? 0), String(c ?? 'USD'));
@@ -257,6 +363,11 @@ export function renderNotification(n: Notification): Rendered | null {
     // admin_group_chat_id like any other admin row; no buttons.
     case 'admin.alert':
       return { text: String(p.text ?? '') };
+
+    // Announcements are delivered by sendAnnouncement (rich HTML / albums / buttons);
+    // this plain fallback only covers a path that can't call it.
+    case 'announcement':
+      return { text: [p.title, p.body].filter(Boolean).map((x) => String(x).replace(/[*_~|`]/g, '')).join('\n\n') || '📣' };
 
     // ── Player-facing ──
     // Players no longer confirm payments (admins do). Kept as a plain heads-up in

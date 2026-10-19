@@ -70,7 +70,9 @@ export async function telegramWebhook(req: Request): Promise<Response> {
   // bot, so this covers the latency-sensitive cases; cron catches the rest
   // (panel actions, retries). Best-effort — never let it break the webhook ack.
   try {
-    await drainNotifications(bot, 10);
+    // Never let a broadcast slow a player's own webhook — announcements are
+    // delivered by the cron / panel send instead.
+    await drainNotifications(bot, 10, { announcements: false });
   } catch (err) {
     console.error('[telegram] inline drain failed:', err);
   }
@@ -82,10 +84,13 @@ export async function telegramWebhook(req: Request): Promise<Response> {
  * low latency) and the cron (catch-all). Kept small per call so it never
  * dominates a request.
  */
-export async function drainNotifications(bot: BotT, limit = 25): Promise<number> {
+export async function drainNotifications(
+  bot: BotT, limit = 25, opts: { announcements?: boolean } = {},
+): Promise<number> {
   const { db } = await import('@union/core');
   const { renderNotification } = await import('@union/bot/build');
   const sql = db();
+  const withAnnouncements = opts.announcements !== false;
 
   const [cfg] = await sql<{ admin_group_chat_id: number | null; payments_channel_chat_id: number | null; escalation_channel_chat_id: number | null }[]>`
     select admin_group_chat_id, payments_channel_chat_id, escalation_channel_chat_id from config where id`;
@@ -96,7 +101,10 @@ export async function drainNotifications(bot: BotT, limit = 25): Promise<number>
     with c as (
       select id from notifications
        where status = 'pending' and send_after <= now() and platform = 'telegram'
-       order by id limit ${limit}
+         ${withAnnouncements ? sql`` : sql`and kind <> 'announcement'`}
+       -- Announcements always queue BEHIND real messages: a 500-player blast must
+       -- never delay a payment alert or a player's "money on its way".
+       order by (kind = 'announcement'), id limit ${limit}
          for update skip locked
     )
     update notifications n set send_after = now() + interval '90 seconds'
@@ -112,7 +120,7 @@ export async function drainNotifications(bot: BotT, limit = 25): Promise<number>
     : [];
   const chatMap = new Map(chats.map((c) => [Number(c.id), c]));
 
-  const { sendRendered } = await import('@union/bot/build');
+  const { sendRendered, sendAnnouncement } = await import('@union/bot/build');
   let sent = 0;
   for (const n of rows) {
     const cm = chatMap.get(Number(n.id));
@@ -133,12 +141,15 @@ export async function drainNotifications(bot: BotT, limit = 25): Promise<number>
       const [o] = await sql<{ status: string }[]>`select status from loader_orders where id = ${n.ref_id}`;
       if (o && o.status !== 'pending') { await sql`update notifications set status='skipped' where id=${n.id}`; continue; }
     }
-    const msg = renderNotification(n);
-    if (!chatId || !msg) { await sql`update notifications set status='skipped' where id=${n.id}`; continue; }
+    const isAnnouncement = n.kind === 'announcement';
+    const msg = isAnnouncement ? null : renderNotification(n);
+    if (!chatId || (!isAnnouncement && !msg)) { await sql`update notifications set status='skipped' where id=${n.id}`; continue; }
     try {
       // sendRendered sends a PHOTO when the notification carries a receipt image,
       // else text — so receipts show inline in Telegram from the cron path too.
-      const mid = await sendRendered(bot, chatId, msg);
+      const mid = isAnnouncement
+        ? await sendAnnouncement(bot, Number(chatId), n.payload)
+        : await sendRendered(bot, chatId, msg!);
       await sql`update notifications set status='sent', sent_at=now(),
                 sent_chat_id=${String(chatId)}, sent_message_id=${mid != null ? String(mid) : null}
                 where id=${n.id}`;
@@ -148,6 +159,78 @@ export async function drainNotifications(bot: BotT, limit = 25): Promise<number>
       const giveUp = /blocked|deactivated|chat not found|kicked/i.test(desc) || n.attempts >= 4;
       await sql`update notifications set status=${giveUp ? 'failed' : 'pending'}, attempts=${n.attempts + 1},
                 last_error=${desc.slice(0, 300)}, send_after=now()+interval '2 minutes' where id=${n.id}`;
+    }
+  }
+  return sent;
+}
+
+/**
+ * Broadcast pump for announcements (0123): delivers queued Telegram announcement
+ * rows for up to `budgetMs`, paced under Telegram's ~30 msg/s bot limit (an album
+ * of N photos counts as N), and honours a 429's retry_after instead of hammering.
+ * Called right after a panel send (first wave out immediately) and by every cron
+ * run (the rest), so a 400-player blast finishes in a couple of minutes without
+ * ever delaying a money message (those go first in drainNotifications).
+ */
+export async function drainAnnouncements(bot: BotT, budgetMs: number): Promise<number> {
+  const { db } = await import('@union/core');
+  const { sendAnnouncement } = await import('@union/bot/build');
+  const sql = db();
+  const deadline = Date.now() + budgetMs;
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const [cfg] = await sql<{ admin_group_chat_id: number | null }[]>`select admin_group_chat_id from config where id`;
+  let sent = 0;
+
+  while (Date.now() < deadline - 3_000) {
+    const rows = await sql<any[]>`
+      with c as (
+        select id from notifications
+         where status = 'pending' and send_after <= now() and platform = 'telegram' and kind = 'announcement'
+         order by id limit 20
+           for update skip locked
+      )
+      update notifications n set send_after = now() + interval '90 seconds'
+        from c where n.id = c.id
+      returning n.*`;
+    if (!rows.length) break;
+    const chats = await sql<{ id: number; chat: number | null }[]>`
+      select n.id, coalesce(p.chat_id, p.telegram_id) as chat
+        from notifications n left join players p on p.id = n.player_id
+       where n.id = any(${sql.array(rows.map((r) => Number(r.id)))}::bigint[])`;
+    const chatFor = new Map(chats.map((c) => [Number(c.id), c.chat]));
+
+    for (let i = 0; i < rows.length; i++) {
+      const n = rows[i];
+      if (Date.now() > deadline - 2_000) {
+        // Out of time — hand the rest straight back so the next run takes them.
+        const left = rows.slice(i).map((r) => Number(r.id));
+        await sql`update notifications set send_after = now() where id = any(${sql.array(left)}::bigint[])`;
+        return sent;
+      }
+      const chatId = n.audience === 'admins' ? cfg?.admin_group_chat_id : chatFor.get(Number(n.id));
+      if (!chatId) { await sql`update notifications set status='skipped' where id=${n.id}`; continue; }
+      const imgs = Array.isArray(n.payload?.images) ? n.payload.images.length : 0;
+      try {
+        const mid = await sendAnnouncement(bot, Number(chatId), n.payload);
+        await sql`update notifications set status='sent', sent_at=now(),
+                  sent_chat_id=${String(chatId)}, sent_message_id=${mid != null ? String(mid) : null}
+                  where id=${n.id}`;
+        sent++;
+      } catch (err) {
+        const retry = Number((err as any)?.parameters?.retry_after ?? 0);
+        if (retry > 0) {
+          // Rate limited: back off for exactly as long as Telegram asks; no attempt burned.
+          await sql`update notifications set send_after = now() + make_interval(secs => ${retry}) where id=${n.id}`;
+          await sleep(Math.min(retry * 1000, Math.max(0, deadline - Date.now() - 2_000)));
+          continue;
+        }
+        const desc = String((err as any)?.description ?? err);
+        const giveUp = /blocked|deactivated|chat not found|kicked|not enough rights|have no rights/i.test(desc) || n.attempts >= 4;
+        await sql`update notifications set status=${giveUp ? 'failed' : 'pending'}, attempts=${n.attempts + 1},
+                  last_error=${desc.slice(0, 300)}, send_after=now()+interval '2 minutes' where id=${n.id}`;
+      }
+      // ~20 message-units/sec: an album of N photos is N messages, plus its text.
+      await sleep(50 * (Math.max(1, imgs) + 1));
     }
   }
   return sent;

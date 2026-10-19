@@ -42,6 +42,7 @@ export async function Shell({ children }: { children: React.ReactNode }) {
     { href: '/queue', label: 'Withdrawals' },
     { href: '/disputes', label: 'Disputes', count: counts?.disputes },
     { href: '/players', label: 'Players', count: counts?.links },
+    { href: '/announcements', label: 'Announcements' },
     { href: '/audit', label: 'History' },
     { href: '/config', label: 'Settings', ownerOnly: true },
   ];
