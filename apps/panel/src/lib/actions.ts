@@ -575,16 +575,21 @@ export interface AnnouncementDraft {
   audience: AnnouncementAudience;
   includeOnHold: boolean;
   includePending: boolean;
+  excludeListIds: string[];                  // saved "don't send to" lists
+  excludePlayerIds: string[];                // one-off "don't send to" picks
 }
 
 /** How many players a broadcast with these options would reach, per platform. */
 export async function announcementRecipients(
   audience: AnnouncementAudience, includeOnHold: boolean, includePending: boolean,
+  excludeListIds: string[] = [], excludePlayerIds: string[] = [],
 ): Promise<{ telegram: number; discord: number }> {
   await requireAdmin();
-  const rows = await db()<{ platform: string; n: number }[]>`
+  const sql = db();
+  const rows = await sql<{ platform: string; n: number }[]>`
     select platform, count(*)::int as n
-      from announcement_targets(${audience}, ${includeOnHold}, ${includePending})
+      from announcement_targets(${audience}, ${includeOnHold}, ${includePending},
+             announcement_exclusions(${sql.array(excludeListIds)}::uuid[], ${sql.array(excludePlayerIds)}::uuid[]))
      group by platform`;
   const get = (p: string) => rows.find((r) => r.platform === p)?.n ?? 0;
   return { telegram: get('telegram'), discord: get('discord') };
@@ -605,7 +610,8 @@ export async function broadcastAnnouncement(d: AnnouncementDraft, test: boolean)
       select announcement_create(
         ${d.title ?? ''}, ${d.body ?? ''}, ${sql.json((d.images ?? []) as any)}::jsonb, ${sql.json(buttons as any)}::jsonb,
         ${d.reel ?? ''}, ${d.preview !== false}, ${d.audience ?? 'all'},
-        ${!!d.includeOnHold}, ${!!d.includePending}, ${test}, ${s.admin.id}::uuid) as id`;
+        ${!!d.includeOnHold}, ${!!d.includePending}, ${test}, ${s.admin.id}::uuid,
+        ${sql.array(d.excludeListIds ?? [])}::uuid[], ${sql.array(d.excludePlayerIds ?? [])}::uuid[]) as id`;
     const [{ n }] = await sql<{ n: number }[]>`select announcement_send(${id}::uuid, ${s.admin.id}::uuid) as n`;
 
     if (n === 0) {
@@ -622,5 +628,38 @@ export async function broadcastAnnouncement(d: AnnouncementDraft, test: boolean)
     return test
       ? 'Test sent to your admin group / admin channel — check how it looks.'
       : `Sending to ${n} player${n === 1 ? '' : 's'}. Delivery progress is shown below.`;
+  }, ['/announcements']);
+}
+
+// ─── Announcement "don't send to" lists (0124) ───────────────────────────────
+
+/** Find players to leave out of an announcement (name, @username, or account). */
+export async function searchAnnouncementPlayers(q: string) {
+  await requireAdmin();
+  const { searchPlayerBriefs } = await import('./announce-data');
+  return searchPlayerBriefs(q);
+}
+
+/** Create (id = null) or update a saved exclusion list; replaces its members. */
+export async function saveAnnouncementList(
+  id: string | null, name: string, playerIds: string[],
+): Promise<Result & { id?: string }> {
+  let newId: string | undefined;
+  const r = await run(async () => {
+    const s = await requireAdmin();
+    const sql = db();
+    const [row] = await sql<{ id: string }[]>`
+      select announcement_list_save(${id}::uuid, ${name}, ${sql.array(playerIds)}::uuid[], ${s.admin.id}::uuid) as id`;
+    newId = row?.id;
+    return id ? 'List saved.' : `List "${name.trim()}" created.`;
+  }, ['/announcements']);
+  return r.ok ? { ...r, id: newId } : r;
+}
+
+export async function deleteAnnouncementList(id: string): Promise<Result> {
+  return run(async () => {
+    const s = await requireAdmin();
+    await db()`select announcement_list_delete(${id}::uuid, ${s.admin.id}::uuid)`;
+    return 'List deleted.';
   }, ['/announcements']);
 }

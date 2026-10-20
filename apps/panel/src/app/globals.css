@@ -484,3 +484,39 @@ dl.kv dd { margin: 0; font-family: var(--mono); word-break: break-all; }
 .ann-progress > span { display: block; height: 100%; background: var(--ok); border-radius: 99px; transition: width 0.4s; }
 .ann-by { font-size: 12px; color: var(--text-dim); }
 @media (prefers-reduced-motion: reduce) { .ann-progress > span, .ann-drop, .ann-spoiler { transition: none; } }
+
+/* ── Announcements: "don't send to" ────────────────────────────────────── */
+.ex-wrap { padding: 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); }
+.ex-lists { display: grid; gap: 6px; margin-bottom: 10px; }
+.ex-list { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 6px 6px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.ex-list.on { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.ex-list-check { margin: 0; flex: 1; min-width: 0; }
+.ex-list-check strong { color: var(--text); }
+.ex-count { color: var(--text-faint); font-weight: 450; font-size: 12px; margin-left: 4px; }
+.ex-search { position: relative; }
+.ex-results { position: absolute; z-index: 20; left: 0; right: 0; top: calc(100% + 4px); max-height: 300px; overflow-y: auto; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: var(--shadow); padding: 4px; }
+.ex-result { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; text-align: left; border: none; background: transparent; padding: 8px 10px; border-radius: 8px; white-space: normal; }
+.ex-result:hover:not(:disabled) { background: var(--surface-2); }
+.ex-result:disabled { opacity: 1; cursor: default; }
+.ex-result.on { background: var(--accent-dim); }
+.ex-result-main { display: flex; flex-direction: column; min-width: 0; }
+.ex-result-main strong { font-size: 13px; }
+.ex-detail { font-size: 11.5px; color: var(--text-faint); font-weight: 450; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ex-result-side { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.ex-add { font-size: 12px; font-weight: 600; color: var(--accent); }
+.ex-result.on .ex-add { color: var(--ok); }
+.ex-empty { padding: 10px; font-size: 12.5px; color: var(--text-faint); }
+.ex-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.ex-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 4px 4px 10px; border-radius: 99px; background: var(--red-dim); color: var(--red-deep); font-size: 12px; font-weight: 600; max-width: 100%; }
+.ex-chip button { padding: 0 6px; min-width: 22px; height: 22px; border-radius: 99px; border: none; background: transparent; color: inherit; font-size: 11px; justify-content: center; }
+.ex-chip button:hover:not(:disabled) { background: rgba(0, 0, 0, 0.08); }
+.ex-empty-inline { font-size: 12px; color: var(--text-faint); }
+.ex-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; font-size: 12.5px; color: var(--text-dim); }
+.ex-foot strong { color: var(--red); font-variant-numeric: tabular-nums; }
+.ex-wrap .alert { margin: 10px 0 0; }
+.ex-overlay { position: fixed; inset: 0; z-index: 100; background: rgba(15, 16, 24, 0.45); display: grid; place-items: center; padding: 16px; }
+.ex-dialog { width: min(520px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; box-shadow: var(--shadow); }
+.ex-dialog h3 { margin: 0 0 16px; font-size: 17px; }
+.ex-dialog .ex-results { max-height: 220px; }
+.ex-dialog-actions { margin-top: 6px; }
+.ex-delete { margin-left: auto; color: var(--red); }

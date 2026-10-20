@@ -7,6 +7,8 @@ import {
   type AnnouncementAudience, type AnnouncementDraft,
 } from '../../lib/actions';
 import { previewHtml, plainLength } from './format';
+import { Exclusions } from './exclusions';
+import type { ExclusionList, PlayerBrief } from '../../lib/announce-data';
 
 type Img = { key: string; url?: string; local: string; name: string; status: 'uploading' | 'ready' | 'error'; error?: string };
 type Btn = { label: string; url: string };
@@ -22,6 +24,7 @@ const MAX_BUTTONS = 6;
 const MAX_CHARS = 2000;                       // Discord's per-message limit
 const CAPTION_FITS = 1000;                    // Telegram caption (with photos)
 const DRAFT_KEY = 'apt.announcement.draft.v1';
+const EXCL_KEY = 'apt.announcement.exclusions.v1';
 const EMOJI = ['📣', '🔥', '🎉', '💰', '♠️', '♥️', '🏆', '🎁', '⚡', '✅', '⏰', '🚀', '💎', '🍀'];
 const isHttp = (u: string) => /^https?:\/\/\S+\.\S+/i.test(u.trim());
 let seq = 0;
@@ -57,7 +60,7 @@ async function shrink(file: File): Promise<Blob> {
   throw new Error('That image is too large even after shrinking it.');
 }
 
-export function Composer({ initialCounts }: { initialCounts: Counts }) {
+export function Composer({ initialCounts, lists }: { initialCounts: Counts; lists: ExclusionList[] }) {
   const router = useRouter();
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -77,12 +80,20 @@ export function Composer({ initialCounts }: { initialCounts: Counts }) {
   const [dragOver, setDragOver] = useState(false);
   const [view, setView] = useState<'telegram' | 'discord'>('telegram');
   const [loaded, setLoaded] = useState(false);
+  const [exLists, setExLists] = useState<string[]>([]);
+  const [exPicked, setExPicked] = useState<PlayerBrief[]>([]);
 
   // ── Draft: restore on load, autosave on every change (survives a refresh). ──
   useEffect(() => {
     try {
       const raw = localStorage.getItem(DRAFT_KEY);
       if (raw) applyDraft(JSON.parse(raw) as ReusableDraft);
+      const ex = localStorage.getItem(EXCL_KEY);
+      if (ex) {
+        const e = JSON.parse(ex) as { lists?: string[]; picked?: PlayerBrief[] };
+        setExLists(Array.isArray(e.lists) ? e.lists : []);
+        setExPicked(Array.isArray(e.picked) ? e.picked : []);
+      }
     } catch { /* storage blocked — start empty */ }
     setLoaded(true);
     const onReuse = (e: Event) => {
@@ -104,6 +115,16 @@ export function Composer({ initialCounts }: { initialCounts: Counts }) {
     try { localStorage.setItem(DRAFT_KEY, JSON.stringify(d)); } catch { /* ignore */ }
   }, [loaded, title, body, reel, preview, buttons, images]);
 
+  useEffect(() => {
+    if (!loaded) return;
+    try { localStorage.setItem(EXCL_KEY, JSON.stringify({ lists: exLists, picked: exPicked })); } catch { /* ignore */ }
+  }, [loaded, exLists, exPicked]);
+
+  // A list deleted elsewhere can't stay selected.
+  useEffect(() => {
+    setExLists((cur) => cur.filter((id) => lists.some((l) => l.id === id)));
+  }, [lists]);
+
   function applyDraft(d: ReusableDraft) {
     setTitle(d.title ?? '');
     setBody(d.body ?? '');
@@ -120,15 +141,19 @@ export function Composer({ initialCounts }: { initialCounts: Counts }) {
   }
 
   // ── Live recipient count ──
+  const exPlayerIds = exPicked.map((p) => p.id);
+  const exKey = exLists.join(',') + '|' + exPlayerIds.join(',') + '|' + lists.map((l) => l.id + ':' + l.members.length).join(',');
   useEffect(() => {
     let live = true;
-    if (audience === 'all' && !onHold && !pending) { setCounts(initialCounts); }
+    const noEx = exLists.length === 0 && exPlayerIds.length === 0;
+    if (audience === 'all' && !onHold && !pending && noEx) { setCounts(initialCounts); }
     else setCounts(null);
-    announcementRecipients(audience, onHold, pending)
+    announcementRecipients(audience, onHold, pending, exLists, exPlayerIds)
       .then((c) => { if (live) setCounts(c); })
       .catch(() => { if (live) setCounts(null); });
     return () => { live = false; };
-  }, [audience, onHold, pending, initialCounts]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audience, onHold, pending, initialCounts, exKey]);
 
   const total = counts ? counts.telegram + counts.discord : null;
 
@@ -217,6 +242,7 @@ export function Composer({ initialCounts }: { initialCounts: Counts }) {
       title: title.trim(), body, images: readyImages,
       buttons: buttons.filter((b) => b.label.trim() || b.url.trim()).map((b) => ({ label: b.label.trim(), url: b.url.trim() })),
       reel: reel.trim(), preview, audience, includeOnHold: onHold, includePending: pending,
+      excludeListIds: exLists, excludePlayerIds: exPlayerIds,
     };
   }
 
@@ -364,10 +390,16 @@ export function Composer({ initialCounts }: { initialCounts: Counts }) {
           </div>
         </div>
 
+        <Exclusions
+          lists={lists}
+          selectedLists={exLists} setSelectedLists={setExLists}
+          picked={exPicked} setPicked={setExPicked}
+        />
+
         <div className="ann-reach" aria-live="polite">
           {counts == null
             ? 'Counting players…'
-            : <>Reaches <strong>{(total ?? 0).toLocaleString()}</strong> player{total === 1 ? '' : 's'} — {counts.telegram.toLocaleString()} on Telegram, {counts.discord.toLocaleString()} on Discord. Each gets it in their own chat. Banned players never do.</>}
+            : <>Reaches <strong>{(total ?? 0).toLocaleString()}</strong> player{total === 1 ? '' : 's'} — {counts.telegram.toLocaleString()} on Telegram, {counts.discord.toLocaleString()} on Discord. Each gets it in their own chat. Banned players never do.{(exLists.length > 0 || exPicked.length > 0) && ' Your “don’t send to” picks are already taken out.'}</>}
         </div>
 
         {result && <div className={`alert ${result.ok ? 'ok' : 'err'}`} role="status">{result.msg}</div>}

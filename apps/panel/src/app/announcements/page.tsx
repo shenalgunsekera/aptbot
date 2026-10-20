@@ -5,6 +5,7 @@ import { Ago } from '../../components/ui';
 import { getSession } from '../../lib/auth';
 import { Composer } from './composer';
 import { AutoRefresh, ReuseButton } from './live';
+import { loadExclusionLists } from '../../lib/announce-data';
 
 export const dynamic = 'force-dynamic';
 // The send action pushes the first wave of messages before returning.
@@ -20,6 +21,7 @@ type Row = {
   id: string; title: string | null; body: string; images: string[]; buttons: { label: string; url: string }[];
   reel: string | null; link_preview: boolean; audience: string; is_test: boolean; recipients: number;
   created_at: string; by: string | null; delivered: number; failed: number; pending: number; last_error: string | null;
+  excluded: number; excluded_lists: string[];
 };
 
 const AUDIENCE: Record<string, string> = { all: 'Everyone', telegram: 'Telegram', discord: 'Discord' };
@@ -28,12 +30,13 @@ export default async function AnnouncementsPage() {
   if (!(await getSession())) redirect('/login');
   const sql = db();
 
-  const [counts, history] = await Promise.all([
+  const [counts, history, lists] = await Promise.all([
     sql<{ platform: string; n: number }[]>`
       select platform, count(*)::int as n from announcement_targets('all', false, false) group by platform`,
     sql<Row[]>`
       select a.id, a.title, a.body, a.images, a.buttons, a.reel, a.link_preview, a.audience, a.is_test,
              a.recipients, a.created_at, coalesce(ad.display_name, ad.email) as by,
+             cardinality(a.excluded_players)::int as excluded, a.excluded_lists,
              count(n.id) filter (where n.status = 'sent')::int    as delivered,
              count(n.id) filter (where n.status = 'failed')::int  as failed,
              count(n.id) filter (where n.status = 'pending')::int as pending,
@@ -45,6 +48,7 @@ export default async function AnnouncementsPage() {
        group by a.id, ad.display_name, ad.email
        order by a.created_at desc
        limit 40`,
+    loadExclusionLists(),
   ]);
   const initialCounts = {
     telegram: counts.find((c) => c.platform === 'telegram')?.n ?? 0,
@@ -64,7 +68,7 @@ export default async function AnnouncementsPage() {
         </div>
       </div>
 
-      <Composer initialCounts={initialCounts} />
+      <Composer initialCounts={initialCounts} lists={lists} />
 
       <h2>Sent</h2>
       <AutoRefresh active={sending} />
@@ -98,6 +102,11 @@ export default async function AnnouncementsPage() {
                         {h.images.length > 0 && <span>🖼 {h.images.length}</span>}
                         {h.reel && <span>▶️ reel</span>}
                         {h.buttons.length > 0 && <span>🔘 {h.buttons.length}</span>}
+                        {h.excluded > 0 && (
+                          <span title={h.excluded_lists.length ? `Lists: ${h.excluded_lists.join(', ')}` : undefined}>
+                            🚫 {h.excluded} left out{h.excluded_lists.length ? ` (${h.excluded_lists.join(', ')})` : ''}
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td>{h.is_test ? 'Admin group' : AUDIENCE[h.audience] ?? h.audience}</td>
