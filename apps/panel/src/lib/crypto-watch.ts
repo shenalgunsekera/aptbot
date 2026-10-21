@@ -112,11 +112,49 @@ async function sol(address: string, price: number): Promise<void> {
   }
 }
 
+// XRP via the XRP Ledger's own public JSON-RPC (account_tx), with fallbacks. The
+// previous source (xrpscan) answers `{ transactions: [...] }`, not an array, so the
+// old `Array.isArray(list)` check silently saw ZERO payments — XRP detection never
+// worked. Optional XRPL_RPC_URL overrides the first server.
+const XRPL_RPC = [process.env.XRPL_RPC_URL, 'https://xrplcluster.com/', 'https://s1.ripple.com:51234/', 'https://s2.ripple.com:51234/']
+  .filter((u): u is string => !!u);
+const RIPPLE_EPOCH = 946684800;   // XRPL dates are seconds since 2000-01-01
+
+async function xrplAccountTx(address: string): Promise<any[]> {
+  let lastErr: unknown = new Error('no XRPL server answered');
+  for (const url of XRPL_RPC) {
+    try {
+      const j = await tfetch(url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ method: 'account_tx', params: [{ account: address, limit: 30, forward: false }] }),
+      }).then((r) => r.json());
+      const txs = j?.result?.transactions;
+      if (Array.isArray(txs)) return txs;
+      lastErr = new Error(j?.result?.error_message ?? j?.result?.error ?? 'unexpected XRPL response');
+    } catch (err) { lastErr = err; }
+  }
+  throw lastErr;
+}
+
 async function xrp(address: string, price: number): Promise<void> {
-  const list = await tfetch(`https://api.xrpscan.com/api/v1/account/${address}/transactions`).then((r) => r.json());
-  for (const t of Array.isArray(list) ? list : []) {
-    if (t.TransactionType !== 'Payment' || t.Destination !== address || typeof t.Amount !== 'string') continue;   // string Amount = drops of XRP
-    await recordDetection({ source: 'crypto', externalId: `xrp:${t.hash}`, methodCode: 'xrp', amount: cents(Number(t.Amount) / 1e6, price), currency: 'USD', toleranceBps: TOL, raw: { hash: t.hash } });
+  for (const t of await xrplAccountTx(address)) {
+    const tx = t.tx_json ?? t.tx ?? {};        // API v2 / v1
+    const meta = t.meta ?? {};
+    const hash: string | undefined = t.hash ?? tx.hash;
+    if (!t.validated || !hash || tx.TransactionType !== 'Payment' || tx.Destination !== address) continue;
+    if (meta.TransactionResult !== 'tesSUCCESS') continue;
+    // delivered_amount = what ACTUALLY arrived. Using it (not tx.Amount) defeats the
+    // XRPL "partial payment" trick. A string is XRP in drops; an object is a token — skip.
+    const delivered = meta.delivered_amount ?? meta.DeliveredAmount;
+    if (typeof delivered !== 'string') continue;
+    const amountXrp = Number(delivered) / 1e6;
+    if (!(amountXrp > 0)) continue;
+    const ts = typeof tx.date === 'number' ? tx.date + RIPPLE_EPOCH : undefined;
+    await recordDetection({
+      source: 'crypto', externalId: `xrp:${hash}`, methodCode: 'xrp',
+      amount: cents(amountXrp, price), currency: 'USD', toleranceBps: TOL,
+      raw: { hash, xrp: amountXrp, ...(ts ? { ts } : {}), ...(tx.DestinationTag != null ? { tag: tx.DestinationTag } : {}) },
+    });
   }
 }
 
