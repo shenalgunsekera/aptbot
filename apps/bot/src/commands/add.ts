@@ -866,7 +866,13 @@ export async function addDone(ctx: Ctx, fillId: string): Promise<void> {
  * is claimed atomically here, so only the first caller ever posts the card — the
  * rest see the claim is taken and no-op. Returns whether THIS call sent it. */
 async function sendReceiptsToReviewer(fillId: string): Promise<boolean> {
-  const sql = db();
+  // Claim AND queue the card in ONE transaction. The webhook runs serverless: the
+  // function can be frozen or killed mid-way (the 10s grouping timer even fires
+  // after the response). With the claim committed on its own, a kill between the
+  // claim and the card left receipts_sent_at set but no card — and every later
+  // /done saw the claim and silently skipped it (no verify card ever posted). Now a
+  // kill rolls the claim back too, so /done or the cron sweeper still posts it.
+  return db().begin(async (sql) => {
   const [claim] = await sql<{ id: string }[]>`
     update fills set receipts_sent_at = now()
      where id = ${fillId} and receipts_sent_at is null
@@ -913,6 +919,32 @@ async function sendReceiptsToReviewer(fillId: string): Promise<boolean> {
   };
   await sql`select notify_admins('fill.receipt_admin', 'fill', ${fillId}::uuid, ${sql.json(payload)}::jsonb)`;
   return true;
+  });
+}
+
+/** Safety net (run by the cron): any Telegram deposit with a screenshot saved but
+ *  no verify card after a minute gets its card now. Covers a grouping timer that
+ *  never fired (serverless freeze) when the player also never tapped /done.
+ *  Discord deposits are excluded — that bot posts its own cards and doesn't use
+ *  receipts_sent_at, so including them would double-post. */
+export async function flushStrandedReceipts(): Promise<number> {
+  const rows = await db()<{ id: string }[]>`
+    select f.id from fills f
+      join deposit_requests d on d.id = f.deposit_id
+     where f.status = 'awaiting_confirmation'
+       and f.receipts_sent_at is null
+       and f.submitted_at < now() - interval '60 seconds'
+       and f.submitted_at > now() - interval '2 days'
+       and exists (select 1 from receipts r where r.ref_type = 'fill' and r.ref_id = f.id)
+       and not exists (select 1 from discord_players dp where dp.player_id = d.player_id)
+     order by f.submitted_at
+     limit 20`;
+  let sent = 0;
+  for (const r of rows) {
+    try { if (await sendReceiptsToReviewer(r.id)) sent++; }
+    catch (e) { console.error('[receipt] stranded flush failed', r.id, e); }
+  }
+  return sent;
 }
 
 function finishedMessage(): string {

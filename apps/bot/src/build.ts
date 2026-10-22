@@ -616,3 +616,4 @@ export function buildBot(token: string): Bot<Ctx> {
 
   return bot;
 }
+export { flushStrandedReceipts } from './commands/add.js';

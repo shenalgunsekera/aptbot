@@ -60,6 +60,14 @@ export async function GET(req: Request): Promise<Response> {
     const emailConfigured = false;
 
     const bot = await getBot();
+    // Safety net: a deposit with a saved screenshot but no verify card after a
+    // minute gets its card now (queued before the drain so it goes out this run).
+    let strandedReceipts = 0;
+    try {
+      const { flushStrandedReceipts } = await import('@union/bot/build');
+      strandedReceipts = await flushStrandedReceipts();
+    } catch (err) { console.error('[cron] stranded receipt flush failed:', err); }
+
     const delivered = await drainNotifications(bot, 40);
 
     // Self-heal the webhook. Running the bot locally in polling mode (or any
@@ -102,7 +110,7 @@ export async function GET(req: Request): Promise<Response> {
     // (Discord down-alert removed — the owner found it too noisy. discordReady is
     // still surfaced in the response for manual checks, but nothing is messaged.)
 
-    return Response.json({ ok: true, ...swept, delivered, cryptoPolled, cryptoDisabled, paypalSeen, emailBreakdown, emailConfigured, emailError, webhookFixed, discordPinged, discordReady, announced });
+    return Response.json({ ok: true, ...swept, delivered, cryptoPolled, cryptoDisabled, paypalSeen, emailBreakdown, emailConfigured, emailError, webhookFixed, discordPinged, discordReady, announced, strandedReceipts });
   } catch (err) {
     console.error('[cron] failed:', err);
     return Response.json({ ok: false, error: String(err) }, { status: 500 });
