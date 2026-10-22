@@ -72,11 +72,11 @@ function PlayerSearch({ picked, onPick, placeholder }: {
   );
 }
 
-function Chip({ p, onRemove }: { p: PlayerBrief; onRemove: () => void }) {
+function Chip({ p, onRemove, tone = 'exclude' }: { p: PlayerBrief; onRemove: () => void; tone?: 'only' | 'exclude' }) {
   return (
-    <span className="ex-chip" title={p.detail || p.name}>
+    <span className={`ex-chip ${tone === 'only' ? 'only' : ''}`} title={p.detail || p.name}>
       {p.platform === 'discord' ? '💬' : '📱'} {p.name}
-      <button type="button" aria-label={`Put ${p.name} back`} onClick={onRemove}>✕</button>
+      <button type="button" aria-label={`Remove ${p.name}`} onClick={onRemove}>✕</button>
     </span>
   );
 }
@@ -153,44 +153,54 @@ function ListEditor({ list, onClose, onSaved }: {
   );
 }
 
-/** The composer's "Don't send to" section. */
-export function Exclusions({
-  lists, selectedLists, setSelectedLists, picked, setPicked,
+/** One audience section of the composer. Used twice:
+ *  "only"    — ONLY SEND TO: limit recipients to these lists/players (none = everyone)
+ *  "exclude" — DON'T SEND TO: remove these lists/players (always wins)
+ *  Saved lists are shared by both sides; built-in lists update themselves. */
+export function AudienceSet({
+  mode, lists, selectedLists, setSelectedLists, picked, setPicked, otherSideLists,
 }: {
+  mode: 'only' | 'exclude';
   lists: ExclusionList[];
   selectedLists: string[];
   setSelectedLists: (ids: string[]) => void;
   picked: PlayerBrief[];
   setPicked: (p: PlayerBrief[]) => void;
+  /** Lists ticked on the OTHER side — warn when one is ticked on both. */
+  otherSideLists: string[];
 }) {
   const [editing, setEditing] = useState<ExclusionList | null | 'new'>(null);
   const [saving, setSaving] = useState(false);
   const [note, setNote] = useState<{ ok: boolean; msg: string } | null>(null);
   const router = useRouter();
+  const only = mode === 'only';
 
-  // Everyone left out, de-duplicated across lists and one-off picks.
-  const leftOut = new Set<string>([
-    ...lists.filter((l) => selectedLists.includes(l.id)).flatMap((l) => l.members.map((m) => m.id)),
+  // Everyone this side covers, de-duplicated across lists and one-off picks.
+  const covered = new Set<string>([
+    ...lists.filter((l) => selectedLists.includes(l.id)).flatMap((l) => l.memberIds),
     ...picked.map((p) => p.id),
   ]);
+  const clash = lists.filter((l) => selectedLists.includes(l.id) && otherSideLists.includes(l.id));
 
   async function saveAsList() {
-    const name = window.prompt(`Name this list of ${picked.length} player${picked.length === 1 ? '' : 's'} (e.g. "Staff")`);
+    const name = window.prompt(`Name this list of ${picked.length} player${picked.length === 1 ? '' : 's'} (e.g. "VIPs")`);
     if (!name || !name.trim()) return;
     setSaving(true); setNote(null);
     const r = await saveAnnouncementList(null, name, picked.map((p) => p.id));
     setSaving(false);
     if (!r.ok) { setNote({ ok: false, msg: r.error }); return; }
-    // The picks now live in the list — select it and clear the one-offs.
-    if (r.id) setSelectedLists([...selectedLists, r.id]);
+    if (r.id) setSelectedLists([...selectedLists, r.id]);   // the picks now live in the list
     setPicked([]);
     setNote({ ok: true, msg: r.message ?? 'List saved.' });
     router.refresh();
   }
 
   return (
-    <div className="field ex-wrap">
-      <label>Don&apos;t send to <span className="ann-opt">optional</span></label>
+    <div className={`field ex-wrap ${only ? 'ex-only' : 'ex-exclude'}`}>
+      <label>
+        {only ? 'Only send to' : 'Don’t send to'}{' '}
+        <span className="ann-opt">{only ? 'optional · leave empty to send to everyone' : 'optional · always wins'}</span>
+      </label>
 
       {lists.length > 0 && (
         <div className="ex-lists">
@@ -201,9 +211,13 @@ export function Exclusions({
                 <label className="ann-check ex-list-check">
                   <input type="checkbox" checked={on}
                     onChange={(e) => setSelectedLists(e.target.checked ? [...selectedLists, l.id] : selectedLists.filter((x) => x !== l.id))} />
-                  <span><strong>{l.name}</strong> <span className="ex-count">{l.members.length} {l.members.length === 1 ? 'person' : 'people'}</span></span>
+                  <span>
+                    <strong>{l.name}</strong>{' '}
+                    <span className="ex-count">{l.memberIds.length.toLocaleString()} {l.memberIds.length === 1 ? 'player' : 'players'}</span>
+                    {l.builtIn && <span className="badge muted ex-auto" title="Updates itself from who has a confirmed account">auto</span>}
+                  </span>
                 </label>
-                <button type="button" className="ghost sm" onClick={() => setEditing(l)}>Edit</button>
+                {!l.builtIn && <button type="button" className="ghost sm" onClick={() => setEditing(l)}>Edit</button>}
               </div>
             );
           })}
@@ -211,30 +225,40 @@ export function Exclusions({
       )}
 
       <PlayerSearch
-        placeholder="Leave someone out — search name, @username or account"
-        picked={(id) => leftOut.has(id)}
+        placeholder={only ? 'Add a player — name, @username or account' : 'Leave someone out — name, @username or account'}
+        picked={(id) => picked.some((p) => p.id === id)}
         onPick={(p) => setPicked([...picked, p])}
       />
 
       {picked.length > 0 && (
         <>
           <div className="ex-chips">
-            {picked.map((p) => <Chip key={p.id} p={p} onRemove={() => setPicked(picked.filter((x) => x.id !== p.id))} />)}
+            {picked.map((p) => <Chip key={p.id} tone={mode} p={p} onRemove={() => setPicked(picked.filter((x) => x.id !== p.id))} />)}
           </div>
           <div className="btn-row">
             <button type="button" className="sm" disabled={saving} onClick={saveAsList}>
-              {saving ? 'Saving…' : `💾 Save ${picked.length === 1 ? 'this person' : `these ${picked.length}`} as a list`}
+              {saving ? 'Saving…' : `💾 Save ${picked.length === 1 ? 'this player' : `these ${picked.length}`} as a list`}
             </button>
             <button type="button" className="ghost sm" onClick={() => setPicked([])}>Clear</button>
           </div>
         </>
       )}
 
+      {clash.length > 0 && (
+        <div className="alert warn">
+          {clash.map((l) => l.name).join(', ')} is ticked in both sections — &ldquo;Don&rsquo;t send to&rdquo; wins, so nobody on it gets this.
+        </div>
+      )}
+
       <div className="ex-foot">
         <span>
-          {leftOut.size === 0
-            ? 'Everyone in the audience gets it.'
-            : <>Leaving out <strong>{leftOut.size}</strong> player{leftOut.size === 1 ? '' : 's'}.</>}
+          {only
+            ? (covered.size === 0
+                ? 'No limit — everyone in the audience above.'
+                : <>Only these <strong className="ex-only-n">{covered.size.toLocaleString()}</strong> player{covered.size === 1 ? '' : 's'}.</>)
+            : (covered.size === 0
+                ? 'Nobody left out.'
+                : <>Leaving out <strong>{covered.size.toLocaleString()}</strong> player{covered.size === 1 ? '' : 's'}.</>)}
         </span>
         <button type="button" className="ghost sm" onClick={() => setEditing('new')}>+ New list</button>
       </div>

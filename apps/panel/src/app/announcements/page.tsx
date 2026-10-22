@@ -22,6 +22,7 @@ type Row = {
   reel: string | null; link_preview: boolean; audience: string; is_test: boolean; recipients: number;
   created_at: string; by: string | null; delivered: number; failed: number; pending: number; last_error: string | null;
   excluded: number; excluded_lists: string[];
+  only_count: number | null; include_lists: string[];
 };
 
 const AUDIENCE: Record<string, string> = { all: 'Everyone', telegram: 'Telegram', discord: 'Discord' };
@@ -37,6 +38,8 @@ export default async function AnnouncementsPage() {
       select a.id, a.title, a.body, a.images, a.buttons, a.reel, a.link_preview, a.audience, a.is_test,
              a.recipients, a.created_at, coalesce(ad.display_name, ad.email) as by,
              cardinality(a.excluded_players)::int as excluded, a.excluded_lists,
+             case when a.include_players is null then null else cardinality(a.include_players) end::int as only_count,
+             a.include_lists,
              count(n.id) filter (where n.status = 'sent')::int    as delivered,
              count(n.id) filter (where n.status = 'failed')::int  as failed,
              count(n.id) filter (where n.status = 'pending')::int as pending,
@@ -102,6 +105,11 @@ export default async function AnnouncementsPage() {
                         {h.images.length > 0 && <span>🖼 {h.images.length}</span>}
                         {h.reel && <span>▶️ reel</span>}
                         {h.buttons.length > 0 && <span>🔘 {h.buttons.length}</span>}
+                        {h.only_count != null && (
+                          <span title={h.include_lists.length ? `Lists: ${h.include_lists.join(', ')}` : undefined}>
+                            🎯 only {h.include_lists.length ? h.include_lists.join(', ') : `${h.only_count} picked`}
+                          </span>
+                        )}
                         {h.excluded > 0 && (
                           <span title={h.excluded_lists.length ? `Lists: ${h.excluded_lists.join(', ')}` : undefined}>
                             🚫 {h.excluded} left out{h.excluded_lists.length ? ` (${h.excluded_lists.join(', ')})` : ''}

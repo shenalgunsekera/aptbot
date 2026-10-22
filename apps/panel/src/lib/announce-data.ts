@@ -14,6 +14,11 @@ export interface PlayerBrief {
 export interface ExclusionList {
   id: string;
   name: string;
+  /** Built-in (Poker / Sportsbook): members computed live, not editable. */
+  builtIn: boolean;
+  /** Every member's id — used to show overlaps between "only" and "don't" picks. */
+  memberIds: string[];
+  /** Full member details (saved lists only — built-ins can be hundreds). */
   members: PlayerBrief[];
 }
 
@@ -56,11 +61,14 @@ export async function searchPlayerBriefs(q: string): Promise<PlayerBrief[]> {
      limit 20`;
 }
 
-/** Every saved exclusion list with its members, alphabetical. */
+/** Every list — built-in ones first — with members, for the composer. */
 export async function loadExclusionLists(): Promise<ExclusionList[]> {
   const sql = db();
-  const lists = await sql<{ id: string; name: string }[]>`
-    select id, name from announcement_lists order by lower(name)`;
+  const lists = await sql<{ id: string; name: string; built_in: boolean; member_ids: string[] }[]>`
+    select l.id, l.name, (l.system_rule is not null) as built_in,
+           announcement_list_players(array[l.id]) as member_ids
+      from announcement_lists l
+     order by (l.system_rule is null), lower(l.name)`;
   if (!lists.length) return [];
   const members = await sql<(PlayerBrief & { list_id: string })[]>`
     select m.list_id, ${BRIEF(sql)}
@@ -72,7 +80,8 @@ export async function loadExclusionLists(): Promise<ExclusionList[]> {
   return lists.map((l) => ({
     id: l.id,
     name: l.name,
-    members: members.filter((m) => m.list_id === l.id)
-      .map(({ list_id: _l, ...b }) => b),
+    builtIn: l.built_in,
+    memberIds: l.member_ids ?? [],
+    members: l.built_in ? [] : members.filter((m) => m.list_id === l.id).map(({ list_id: _l, ...b }) => b),
   }));
 }

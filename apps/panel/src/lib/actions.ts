@@ -577,19 +577,23 @@ export interface AnnouncementDraft {
   includePending: boolean;
   excludeListIds: string[];                  // saved "don't send to" lists
   excludePlayerIds: string[];                // one-off "don't send to" picks
+  includeListIds: string[];                  // "only send to" lists (none = everyone)
+  includePlayerIds: string[];                // "only send to" one-off picks
 }
 
 /** How many players a broadcast with these options would reach, per platform. */
 export async function announcementRecipients(
   audience: AnnouncementAudience, includeOnHold: boolean, includePending: boolean,
   excludeListIds: string[] = [], excludePlayerIds: string[] = [],
+  includeListIds: string[] = [], includePlayerIds: string[] = [],
 ): Promise<{ telegram: number; discord: number }> {
   await requireAdmin();
   const sql = db();
   const rows = await sql<{ platform: string; n: number }[]>`
     select platform, count(*)::int as n
       from announcement_targets(${audience}, ${includeOnHold}, ${includePending},
-             announcement_exclusions(${sql.array(excludeListIds)}::uuid[], ${sql.array(excludePlayerIds)}::uuid[]))
+             announcement_exclusions(${sql.array(excludeListIds)}::uuid[], ${sql.array(excludePlayerIds)}::uuid[]),
+             announcement_inclusions(${sql.array(includeListIds)}::uuid[], ${sql.array(includePlayerIds)}::uuid[]))
      group by platform`;
   const get = (p: string) => rows.find((r) => r.platform === p)?.n ?? 0;
   return { telegram: get('telegram'), discord: get('discord') };
@@ -611,7 +615,8 @@ export async function broadcastAnnouncement(d: AnnouncementDraft, test: boolean)
         ${d.title ?? ''}, ${d.body ?? ''}, ${sql.json((d.images ?? []) as any)}::jsonb, ${sql.json(buttons as any)}::jsonb,
         ${d.reel ?? ''}, ${d.preview !== false}, ${d.audience ?? 'all'},
         ${!!d.includeOnHold}, ${!!d.includePending}, ${test}, ${s.admin.id}::uuid,
-        ${sql.array(d.excludeListIds ?? [])}::uuid[], ${sql.array(d.excludePlayerIds ?? [])}::uuid[]) as id`;
+        ${sql.array(d.excludeListIds ?? [])}::uuid[], ${sql.array(d.excludePlayerIds ?? [])}::uuid[],
+        ${sql.array(d.includeListIds ?? [])}::uuid[], ${sql.array(d.includePlayerIds ?? [])}::uuid[]) as id`;
     const [{ n }] = await sql<{ n: number }[]>`select announcement_send(${id}::uuid, ${s.admin.id}::uuid) as n`;
 
     if (n === 0) {

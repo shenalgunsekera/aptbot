@@ -7,7 +7,7 @@ import {
   type AnnouncementAudience, type AnnouncementDraft,
 } from '../../lib/actions';
 import { previewHtml, plainLength } from './format';
-import { Exclusions } from './exclusions';
+import { AudienceSet } from './exclusions';
 import type { ExclusionList, PlayerBrief } from '../../lib/announce-data';
 
 type Img = { key: string; url?: string; local: string; name: string; status: 'uploading' | 'ready' | 'error'; error?: string };
@@ -82,6 +82,8 @@ export function Composer({ initialCounts, lists }: { initialCounts: Counts; list
   const [loaded, setLoaded] = useState(false);
   const [exLists, setExLists] = useState<string[]>([]);
   const [exPicked, setExPicked] = useState<PlayerBrief[]>([]);
+  const [inLists, setInLists] = useState<string[]>([]);
+  const [inPicked, setInPicked] = useState<PlayerBrief[]>([]);
 
   // ── Draft: restore on load, autosave on every change (survives a refresh). ──
   useEffect(() => {
@@ -90,9 +92,11 @@ export function Composer({ initialCounts, lists }: { initialCounts: Counts; list
       if (raw) applyDraft(JSON.parse(raw) as ReusableDraft);
       const ex = localStorage.getItem(EXCL_KEY);
       if (ex) {
-        const e = JSON.parse(ex) as { lists?: string[]; picked?: PlayerBrief[] };
+        const e = JSON.parse(ex) as { lists?: string[]; picked?: PlayerBrief[]; inLists?: string[]; inPicked?: PlayerBrief[] };
         setExLists(Array.isArray(e.lists) ? e.lists : []);
         setExPicked(Array.isArray(e.picked) ? e.picked : []);
+        setInLists(Array.isArray(e.inLists) ? e.inLists : []);
+        setInPicked(Array.isArray(e.inPicked) ? e.inPicked : []);
       }
     } catch { /* storage blocked — start empty */ }
     setLoaded(true);
@@ -117,12 +121,13 @@ export function Composer({ initialCounts, lists }: { initialCounts: Counts; list
 
   useEffect(() => {
     if (!loaded) return;
-    try { localStorage.setItem(EXCL_KEY, JSON.stringify({ lists: exLists, picked: exPicked })); } catch { /* ignore */ }
-  }, [loaded, exLists, exPicked]);
+    try { localStorage.setItem(EXCL_KEY, JSON.stringify({ lists: exLists, picked: exPicked, inLists, inPicked })); } catch { /* ignore */ }
+  }, [loaded, exLists, exPicked, inLists, inPicked]);
 
   // A list deleted elsewhere can't stay selected.
   useEffect(() => {
     setExLists((cur) => cur.filter((id) => lists.some((l) => l.id === id)));
+    setInLists((cur) => cur.filter((id) => lists.some((l) => l.id === id)));
   }, [lists]);
 
   function applyDraft(d: ReusableDraft) {
@@ -142,13 +147,15 @@ export function Composer({ initialCounts, lists }: { initialCounts: Counts; list
 
   // ── Live recipient count ──
   const exPlayerIds = exPicked.map((p) => p.id);
-  const exKey = exLists.join(',') + '|' + exPlayerIds.join(',') + '|' + lists.map((l) => l.id + ':' + l.members.length).join(',');
+  const inPlayerIds = inPicked.map((p) => p.id);
+  const exKey = exLists.join(',') + '|' + exPlayerIds.join(',') + '|' + inLists.join(',') + '|' + inPlayerIds.join(',')
+    + '|' + lists.map((l) => l.id + ':' + l.memberIds.length).join(',');
   useEffect(() => {
     let live = true;
-    const noEx = exLists.length === 0 && exPlayerIds.length === 0;
+    const noEx = exLists.length === 0 && exPlayerIds.length === 0 && inLists.length === 0 && inPlayerIds.length === 0;
     if (audience === 'all' && !onHold && !pending && noEx) { setCounts(initialCounts); }
     else setCounts(null);
-    announcementRecipients(audience, onHold, pending, exLists, exPlayerIds)
+    announcementRecipients(audience, onHold, pending, exLists, exPlayerIds, inLists, inPlayerIds)
       .then((c) => { if (live) setCounts(c); })
       .catch(() => { if (live) setCounts(null); });
     return () => { live = false; };
@@ -156,6 +163,27 @@ export function Composer({ initialCounts, lists }: { initialCounts: Counts; list
   }, [audience, onHold, pending, initialCounts, exKey]);
 
   const total = counts ? counts.telegram + counts.discord : null;
+
+  // How "only send to" and "don't send to" combine, in plain words.
+  const resolution = useMemo(() => {
+    const setOf = (ids: string[], picks: PlayerBrief[]) => new Set<string>([
+      ...lists.filter((l) => ids.includes(l.id)).flatMap((l) => l.memberIds), ...picks.map((p) => p.id)]);
+    const inc = setOf(inLists, inPicked);
+    const exc = setOf(exLists, exPicked);
+    if (inc.size === 0 && exc.size === 0) return null;
+    const names = (ids: string[], picks: PlayerBrief[]) => [
+      ...lists.filter((l) => ids.includes(l.id)).map((l) => l.name),
+      ...(picks.length ? [`${picks.length} picked player${picks.length === 1 ? '' : 's'}`] : []),
+    ].join(' + ');
+    if (inc.size === 0) return `Everyone except ${names(exLists, exPicked)}.`;
+    if (exc.size === 0) return `Only ${names(inLists, inPicked)}.`;
+    let overlap = 0;
+    for (const id of exc) if (inc.has(id)) overlap++;
+    return `Only ${names(inLists, inPicked)}, except ${names(exLists, exPicked)} — ` +
+      (overlap === 0
+        ? `nobody is on both, so nothing extra is removed.`
+        : `${overlap.toLocaleString()} player${overlap === 1 ? ' is' : 's are'} on both, so ${overlap === 1 ? 'that player is' : 'they’re'} skipped.`);
+  }, [lists, inLists, inPicked, exLists, exPicked]);
 
   // ── Formatting ──
   function wrap(left: string, right = left, placeholder = 'text') {
@@ -243,6 +271,7 @@ export function Composer({ initialCounts, lists }: { initialCounts: Counts; list
       buttons: buttons.filter((b) => b.label.trim() || b.url.trim()).map((b) => ({ label: b.label.trim(), url: b.url.trim() })),
       reel: reel.trim(), preview, audience, includeOnHold: onHold, includePending: pending,
       excludeListIds: exLists, excludePlayerIds: exPlayerIds,
+      includeListIds: inLists, includePlayerIds: inPlayerIds,
     };
   }
 
@@ -390,16 +419,24 @@ export function Composer({ initialCounts, lists }: { initialCounts: Counts; list
           </div>
         </div>
 
-        <Exclusions
-          lists={lists}
+        <AudienceSet
+          mode="only" lists={lists}
+          selectedLists={inLists} setSelectedLists={setInLists}
+          picked={inPicked} setPicked={setInPicked}
+          otherSideLists={exLists}
+        />
+        <AudienceSet
+          mode="exclude" lists={lists}
           selectedLists={exLists} setSelectedLists={setExLists}
           picked={exPicked} setPicked={setExPicked}
+          otherSideLists={inLists}
         />
+        {resolution && <div className="ann-resolve">{resolution}</div>}
 
         <div className="ann-reach" aria-live="polite">
           {counts == null
             ? 'Counting players…'
-            : <>Reaches <strong>{(total ?? 0).toLocaleString()}</strong> player{total === 1 ? '' : 's'} — {counts.telegram.toLocaleString()} on Telegram, {counts.discord.toLocaleString()} on Discord. Each gets it in their own chat. Banned players never do.{(exLists.length > 0 || exPicked.length > 0) && ' Your “don’t send to” picks are already taken out.'}</>}
+            : <>Reaches <strong>{(total ?? 0).toLocaleString()}</strong> player{total === 1 ? '' : 's'} — {counts.telegram.toLocaleString()} on Telegram, {counts.discord.toLocaleString()} on Discord. Each gets it in their own chat. Banned players never do.</>}
         </div>
 
         {result && <div className={`alert ${result.ok ? 'ok' : 'err'}`} role="status">{result.msg}</div>}
