@@ -4,7 +4,7 @@ import { Bot, session, GrammyError, HttpError } from 'grammy';
 import { db, closeDb, platformTotals, formatMinor } from '@union/core';
 import { type Ctx, type SessionData, initialSession } from './session.js';
 import { currentPlayer } from './player.js';
-import { dmOnly, playerOnly, isAdminGroup } from './guards.js';
+import { dmOnly, playerOnly, isAdminGroup, isStaffChat } from './guards.js';
 import { Notifier } from './notifier.js';
 import { start, me } from './commands/start.js';
 import {
@@ -75,6 +75,7 @@ export const GROUP_COMMANDS = [
   { command: 'setadmingroup', description: 'Make this the admin group (admins only)' },
   { command: 'paymentchannel', description: 'Make this the payments feed (admins only)' },
   { command: 'escalations', description: 'Make this the overdue/small/manual work feed (admins)' },
+  { command: 'cryptochannel', description: 'Make this the crypto cash-outs chat (admins only)' },
   { command: 'setadmin', description: 'Add an admin (owner only)' },
   { command: 'p2p', description: 'Venmo/Zelle backstop handle (admins)' },
   { command: 'totals', description: 'Deposited & cashed-out totals per platform (admins)' },
@@ -139,7 +140,7 @@ export function buildBot(token: string): Bot<Ctx> {
   bot.use(async (ctx, next) => {
     const tg = ctx.from?.id;
     const chatId = ctx.chat?.id;
-    if (tg && chatId && ctx.chat?.type !== 'channel' && !(await isAdminGroup(ctx))) {
+    if (tg && chatId && ctx.chat?.type !== 'channel' && !(await isStaffChat(ctx))) {
       try {
         await db()`update players set chat_id = ${chatId}
                     where telegram_id = ${tg} and coalesce(chat_id, 0) <> ${chatId}`;
@@ -258,6 +259,18 @@ export function buildBot(token: string): Bot<Ctx> {
       select escalation_channel_claim(${ctx.chat.id}::bigint, ${ctx.from!.id}::bigint)`;
     await ctx.reply(row?.escalation_channel_claim
       ? '✅ This channel is now the *staff attention* feed — overdue tasks, small cash-outs and manual cash-outs land here, re-pinged daily until they\'re done.'
+      : '⛔ Only an admin can do that.', { parse_mode: 'Markdown' });
+  });
+
+  // Crypto cash-outs get their own chat (0127): the "💸 Cash-out to pay … ✅ I paid
+  // it" card for a BTC/ETH/LTC/SOL/XRP/USDT/USDC cash-out lands here instead of the
+  // admin group — easier to work from a phone. Paying + the receipt reply work here.
+  bot.command(['cryptochannel', 'cryptocashouts', 'cryptopayouts'], async (ctx) => {
+    if (ctx.chat?.type === 'private') return void (await ctx.reply('Run this inside the group you want crypto cash-outs sent to.'));
+    const [row] = await db()<{ crypto_cashout_channel_claim: boolean }[]>`
+      select crypto_cashout_channel_claim(${ctx.chat.id}::bigint, ${ctx.from!.id}::bigint)`;
+    await ctx.reply(row?.crypto_cashout_channel_claim
+      ? '✅ This chat is now the *crypto cash-outs* chat — every crypto cash-out to pay lands here (tap *I paid it*, then reply with the screenshot or transaction ID).'
       : '⛔ Only an admin can do that.', { parse_mode: 'Markdown' });
   });
 

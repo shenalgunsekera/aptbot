@@ -61,3 +61,20 @@ export function playerOnly(handler: (ctx: Ctx) => Promise<void>) {
 // Kept for compatibility with any remaining callers — now an alias, since a
 // player flow may run in a group too.
 export const dmOnly = playerOnly;
+
+// Every staff chat (admin group + the payments / staff-attention / crypto cash-out
+// feeds), cached briefly. Used so an admin who is ALSO a player doesn't get their
+// personal chat re-pointed at a staff feed just by tapping a button in it.
+let _staffChats: Set<number> | undefined;
+let _staffAt = 0;
+export async function isStaffChat(ctx: Ctx): Promise<boolean> {
+  if (ctx.chat?.type === 'private' || ctx.chat?.id == null) return false;
+  if (!_staffChats || Date.now() - _staffAt > 30_000) {
+    const [c] = await db()<{ a: number | null; p: number | null; e: number | null; k: number | null }[]>`
+      select admin_group_chat_id a, payments_channel_chat_id p, escalation_channel_chat_id e, crypto_cashout_chat_id k
+        from config where id`;
+    _staffChats = new Set([c?.a, c?.p, c?.e, c?.k].filter((x): x is number => x != null).map(Number));
+    _staffAt = Date.now();
+  }
+  return _staffChats.has(Number(ctx.chat.id));
+}

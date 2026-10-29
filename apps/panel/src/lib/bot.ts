@@ -92,8 +92,8 @@ export async function drainNotifications(
   const sql = db();
   const withAnnouncements = opts.announcements !== false;
 
-  const [cfg] = await sql<{ admin_group_chat_id: number | null; payments_channel_chat_id: number | null; escalation_channel_chat_id: number | null }[]>`
-    select admin_group_chat_id, payments_channel_chat_id, escalation_channel_chat_id from config where id`;
+  const [cfg] = await sql<{ admin_group_chat_id: number | null; payments_channel_chat_id: number | null; escalation_channel_chat_id: number | null; crypto_cashout_chat_id: number | null }[]>`
+    select admin_group_chat_id, payments_channel_chat_id, escalation_channel_chat_id, crypto_cashout_chat_id from config where id`;
   // Atomically LEASE the batch (push send_after out) so this drain and the bot's
   // webhook drain can't both grab a row and send it twice — `for update skip
   // locked` alone doesn't prevent that once the SELECT autocommits. See notifier.ts.
@@ -131,7 +131,10 @@ export async function drainNotifications(
     const chatId = n.audience === 'admins'
       ? (n.kind === 'escalation.item'
           ? cfg?.escalation_channel_chat_id
-          : ((n.kind === 'payment.detected' ? cfg?.payments_channel_chat_id : null) ?? cfg?.admin_group_chat_id))
+          : ((n.kind === 'payment.detected' ? cfg?.payments_channel_chat_id
+              // A crypto cash-out to pay goes to its own chat when one is set (0127).
+              : n.kind === 'withdraw.needs_payout' && n.payload?.crypto ? cfg?.crypto_cashout_chat_id
+              : null) ?? cfg?.admin_group_chat_id))
       : (cm?.player_chat ?? cm?.admin_tg);
     // A loader "Claim" card is suppressed the instant a Verify tap claims the task
     // inline. If a concurrent drain reached this row first, the task is no longer
