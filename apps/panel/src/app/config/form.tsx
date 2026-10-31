@@ -41,6 +41,8 @@ export function ConfigForm({ cfg }: { cfg: any }) {
                  hint="Stops someone opening deposits in a loop just to harvest everyone's payout handles." />
           <Field name="max_open_deposits_per_player" label="Max open deposits per player" def={cfg.max_open_deposits_per_player} />
           <Field name="max_open_withdraws_per_player" label="Max open withdrawals per player" def={cfg.max_open_withdraws_per_player} />
+          <Check name="first_p2p_deposit_to_club" label="Send a new player's first Venmo/Zelle to a club tag" def={cfg.first_p2p_deposit_to_club}
+                 hint="Until a player has one Venmo/Zelle deposit completed, they pay our club tag instead of a player cashing out — so the money lands where we can see it. After that they match as usual." />
         </div>
 
         <div className="card">
@@ -161,4 +163,4 @@ const NUMERIC = new Set([
   'min_amount', 'max_amount', 'daily_cap_per_player', 'max_open_deposits_per_player',
   'max_open_withdraws_per_player', 'handle_reveals_per_hour', 'owner_approval_threshold',
 ]);
-const BOOL = new Set(['allow_reversible', 'auto_release_on_expiry', 'dev_notice_enabled', 'split_cashout_enabled']);
+const BOOL = new Set(['allow_reversible', 'auto_release_on_expiry', 'dev_notice_enabled', 'split_cashout_enabled', 'first_p2p_deposit_to_club']);
