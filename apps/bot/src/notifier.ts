@@ -364,6 +364,8 @@ export function renderNotification(n: Notification): Rendered | null {
     // (e.g. the cron's "Discord bot is down / back online" health alert). Routes to
     // admin_group_chat_id like any other admin row; no buttons.
     case 'admin.alert':
+    // Two accounts cashing out to one tag (0129) — the text is pre-rendered in SQL.
+    case 'fraud.shared_tag':
       return { text: String(p.text ?? '') };
 
     // Announcements are delivered by sendAnnouncement (rich HTML / albums / buttons);

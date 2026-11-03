@@ -30,8 +30,34 @@ export default async function PlayersPage({
 
   const search = q
     ? sql`and (p.display_name ilike ${'%' + q + '%'} or p.telegram_username ilike ${'%' + q + '%'}
-            or exists (select 1 from player_platforms x where x.player_id = p.id and x.platform_uid ilike ${'%' + q + '%'}))`
+            or exists (select 1 from player_platforms x where x.player_id = p.id and x.platform_uid ilike ${'%' + q + '%'})
+            or exists (select 1 from v_player_payout_tags t where t.player_id = p.id and t.handle_key = normalize_payout_handle(${q})))`
     : sql``;
+
+  // Cash-out tags used by more than one account (0129) — usually one person
+  // running several accounts for sign-up bonuses.
+  const shared = await sql<{ handle_key: string; methods: string[]; accounts: { id: string; name: string | null; status: string; joined: string }[] }[]>`
+    with t as (
+      select distinct t.handle_key, t.player_id, m.name as method
+        from v_player_payout_tags t
+        join players p on p.id = t.player_id
+        join payment_methods m on m.id = t.method_id
+       where length(t.handle_key) >= 5 and not coalesce(p.is_house, false)
+    ), k as (
+      select handle_key from t group by handle_key having count(distinct player_id) > 1
+    )
+    select k.handle_key,
+           (select array_agg(distinct method) from t where t.handle_key = k.handle_key) as methods,
+           (select jsonb_agg(jsonb_build_object('id', p.id, 'name', p.display_name, 'status', p.status, 'joined', p.created_at) order by p.created_at)
+              from players p where p.id in (select player_id from t where t.handle_key = k.handle_key)) as accounts
+      from k
+     order by (select count(distinct player_id) from t where t.handle_key = k.handle_key) desc, k.handle_key`;
+  const sharedBy = new Map<string, { tag: string; others: string[] }[]>();
+  for (const g of shared) for (const a of g.accounts) {
+    const list = sharedBy.get(a.id) ?? [];
+    list.push({ tag: showTag(g.handle_key), others: g.accounts.filter((o) => o.id !== a.id).map((o) => o.name ?? 'Unnamed') });
+    sharedBy.set(a.id, list);
+  }
 
   const players = await sql<any[]>`
     select p.id, p.display_name, p.telegram_id, p.telegram_username, p.status,
@@ -105,6 +131,42 @@ export default async function PlayersPage({
         </>
       )}
 
+      {shared.length > 0 && (
+        <details open={!q} style={{ marginBottom: 24 }}>
+          <summary><h2 style={{ display: 'inline' }}>Same cash-out tag on several accounts ({shared.length})</h2></summary>
+          <div className="alert warn" style={{ marginTop: 8 }}>
+            These accounts have cashed out to — or saved — the same Zelle / Venmo / wallet. Often one person running several
+            accounts for sign-up bonuses; sometimes family or a shared account. Staff get a 🚩 alert in the group the moment a new one appears.
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr><th style={{ width: 260 }}>Cash-out tag</th><th style={{ width: 140 }}>Method</th><th style={{ width: 80 }}>Accounts</th><th>Who</th></tr>
+              </thead>
+              <tbody>
+                {shared.map((g) => (
+                  <tr key={g.handle_key}>
+                    <td className="mono"><a href={`?q=${encodeURIComponent(g.handle_key)}`}>{showTag(g.handle_key)}</a></td>
+                    <td>{g.methods.join(', ')}</td>
+                    <td><span className={`badge ${g.accounts.length > 2 ? 'red' : 'warn'}`}>{g.accounts.length}</span></td>
+                    <td style={{ fontSize: 13 }}>
+                      {g.accounts.map((a, i) => (
+                        <span key={a.id}>
+                          {i > 0 && ', '}
+                          <a href={`?q=${encodeURIComponent(a.name ?? '')}`}>{a.name ?? 'Unnamed'}</a>
+                          {a.status !== 'active' && <span className="badge muted" style={{ marginLeft: 3 }}>{a.status === 'frozen' ? 'on hold' : a.status}</span>}
+                          <span style={{ color: 'var(--text-faint)', fontSize: 11 }}> · joined {new Date(a.joined).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                        </span>
+                      ))}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
+
       <h2>All players</h2>
       <div className="table-wrap">
         {players.length === 0 ? (
@@ -112,7 +174,7 @@ export default async function PlayersPage({
         ) : (
           <table>
             <thead>
-              <tr><th>Name</th><th>Accounts</th><th style={{ width: 80 }}>Status</th><th style={{ width: 90 }}>Flags</th><th style={{ width: 220 }} /></tr>
+              <tr><th>Name</th><th>Accounts</th><th style={{ width: 80 }}>Status</th><th style={{ width: 130 }}>Flags</th><th style={{ width: 220 }} /></tr>
             </thead>
             <tbody>
               {players.map((p) => (
@@ -129,7 +191,13 @@ export default async function PlayersPage({
                     ))}
                   </td>
                   <td><span className={`badge ${p.status === 'active' ? 'ok' : p.status === 'frozen' ? 'warn' : 'red'}`}>{p.status === 'frozen' ? 'on hold' : p.status}</span></td>
-                  <td>{p.flag_count > 0 ? <span className="badge red">{p.flag_count}</span> : <span className="badge muted">clean</span>}</td>
+                  <td>
+                    {p.flag_count > 0 ? <span className="badge red">{p.flag_count}</span> : !sharedBy.has(p.id) && <span className="badge muted">clean</span>}
+                    {sharedBy.get(p.id)?.map((x) => (
+                      <a key={x.tag} href={`?q=${encodeURIComponent(x.tag)}`} className="badge red" style={{ marginLeft: 4, display: 'inline-block' }}
+                         title={`Cash-out tag ${x.tag} is also on: ${x.others.join(', ')}`}>🚩 shares tag</a>
+                    ))}
+                  </td>
                   <td>
                     <PlayerActions
                       player={{ id: p.id, status: p.status, name: p.display_name ?? 'player', currency }}
@@ -146,4 +214,9 @@ export default async function PlayersPage({
       </div>
     </Shell>
   );
+}
+
+/** A normalised tag for display: phone numbers as 708-616-9009. */
+function showTag(k: string): string {
+  return /^d{10}$/.test(k) ? `${k.slice(0, 3)}-${k.slice(3, 6)}-${k.slice(6)}` : k;
 }
