@@ -53,6 +53,7 @@ async function tronUsdt(address: string): Promise<void> {
 // outside a short window — etherscan tokentx returns in+out mixed, so we read
 // deeper and filter to inbound client-side.
 async function evmToken(chainId: number, contract: string, extId: string, methodCode: string, address: string, label?: string): Promise<void> {
+  if (RPC_CHAINS[chainId]) return evmTokenRpc(chainId, contract, extId, methodCode, address, label);
   const key = process.env.ETHERSCAN_API_KEY;
   if (!key) return;
   const url = `https://api.etherscan.io/v2/api?chainid=${chainId}&module=account&action=tokentx&contractaddress=${contract}&address=${address}&page=1&offset=100&sort=desc&apikey=${key}`;
@@ -64,6 +65,54 @@ async function evmToken(chainId: number, contract: string, extId: string, method
     const ts = Number(t.timeStamp) || undefined;   // epoch seconds — lets old txs stay silent on a re-scan
     await recordDetection({ source: 'crypto', externalId: `${extId}:${t.hash}`, methodCode, amount: usd, currency: 'USD', raw: { hash: t.hash, ts, ...(label ? { source_detail: label } : {}) } });
   }
+}
+
+// Etherscan's free plan dropped Base and Optimism — it answers "Free API access is
+// not supported for this chain" (not an array), so USDC sent on Base was silently
+// never seen. Those chains are read straight from a public node instead: ERC-20
+// Transfer logs into the address. Both are 2-second chains, so 43k blocks ≈ 24h —
+// one eth_getLogs call per token covers a whole day (publicnode caps a call at
+// 50k blocks), and a missed cron catches up. Override with BASE_RPC_URL /
+// OPTIMISM_RPC_URL.
+const RPC_CHAINS: Record<number, { urls: string[]; blockSecs: number }> = {
+  8453: { urls: [process.env.BASE_RPC_URL, 'https://base-rpc.publicnode.com'].filter((u): u is string => !!u), blockSecs: 2 },
+  10: { urls: [process.env.OPTIMISM_RPC_URL, 'https://optimism-rpc.publicnode.com'].filter((u): u is string => !!u), blockSecs: 2 },
+};
+const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+
+async function rpcCall(url: string, method: string, params: unknown[]): Promise<any> {
+  const j = await tfetch(url, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+  }).then((r) => r.json());
+  if (j?.error) throw new Error(String(j.error.message ?? 'rpc error'));
+  return j?.result;
+}
+
+async function evmTokenRpc(chainId: number, contract: string, extId: string, methodCode: string, address: string, label?: string): Promise<void> {
+  const { urls, blockSecs } = RPC_CHAINS[chainId]!;
+  const toTopic = '0x' + address.slice(2).toLowerCase().padStart(64, '0');
+  let lastErr: unknown;
+  for (const url of urls) {
+    try {
+      const head = await rpcCall(url, 'eth_getBlockByNumber', ['latest', false]);
+      const headNum = parseInt(head.number, 16);
+      const headTs = parseInt(head.timestamp, 16);
+      const from = Math.max(0, headNum - 43_000);
+      const logs: any[] = await rpcCall(url, 'eth_getLogs', [{
+        address: contract, topics: [TRANSFER_TOPIC, null, toTopic],
+        fromBlock: '0x' + from.toString(16), toBlock: '0x' + headNum.toString(16),
+      }]);
+      for (const l of logs ?? []) {
+        if (l.removed) continue;
+        const usd = Math.round(Number(BigInt(l.data)) / 1e6 * 100);   // USDC/USDT are 6 decimals on these chains
+        const ts = headTs - (headNum - parseInt(l.blockNumber, 16)) * blockSecs;
+        await recordDetection({ source: 'crypto', externalId: `${extId}:${l.transactionHash}`, methodCode, amount: usd, currency: 'USD', raw: { hash: l.transactionHash, ts, ...(label ? { source_detail: label } : {}) } });
+      }
+      return;
+    } catch (err) { lastErr = err; }
+  }
+  throw lastErr;
 }
 
 // ─── Volatile coins — live price + tolerance ─────────────────────────────────
