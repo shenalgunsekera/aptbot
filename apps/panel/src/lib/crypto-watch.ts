@@ -70,14 +70,17 @@ async function evmToken(chainId: number, contract: string, extId: string, method
 // Etherscan's free plan dropped Base and Optimism — it answers "Free API access is
 // not supported for this chain" (not an array), so USDC sent on Base was silently
 // never seen. Those chains are read straight from a public node instead: ERC-20
-// Transfer logs into the address. Both are 2-second chains, so 43k blocks ≈ 24h —
-// one eth_getLogs call per token covers a whole day (publicnode caps a call at
-// 50k blocks), and a missed cron catches up. Override with BASE_RPC_URL /
-// OPTIMISM_RPC_URL.
-const RPC_CHAINS: Record<number, { urls: string[]; blockSecs: number }> = {
-  8453: { urls: [process.env.BASE_RPC_URL, 'https://base-rpc.publicnode.com'].filter((u): u is string => !!u), blockSecs: 2 },
-  10: { urls: [process.env.OPTIMISM_RPC_URL, 'https://optimism-rpc.publicnode.com'].filter((u): u is string => !!u), blockSecs: 2 },
+// Transfer logs into the address over the last RPC_WINDOW_SECS (so a cron outage
+// of a few hours still catches up). Block time is MEASURED each run (over 1k blocks —
+// older reads count as "archive" on the free node), not assumed —
+// Base runs ~0.2s blocks — and the range is split into chunks under publicnode's
+// 50k-block cap. Override with BASE_RPC_URL / OPTIMISM_RPC_URL.
+const RPC_CHAINS: Record<number, { urls: string[] }> = {
+  8453: { urls: [process.env.BASE_RPC_URL, 'https://base-rpc.publicnode.com'].filter((u): u is string => !!u) },
+  10: { urls: [process.env.OPTIMISM_RPC_URL, 'https://optimism-rpc.publicnode.com'].filter((u): u is string => !!u) },
 };
+const RPC_WINDOW_SECS = 3 * 3600;
+const RPC_CHUNK = 45_000;
 const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 
 async function rpcCall(url: string, method: string, params: unknown[]): Promise<any> {
@@ -90,23 +93,28 @@ async function rpcCall(url: string, method: string, params: unknown[]): Promise<
 }
 
 async function evmTokenRpc(chainId: number, contract: string, extId: string, methodCode: string, address: string, label?: string): Promise<void> {
-  const { urls, blockSecs } = RPC_CHAINS[chainId]!;
+  const { urls } = RPC_CHAINS[chainId]!;
   const toTopic = '0x' + address.slice(2).toLowerCase().padStart(64, '0');
   let lastErr: unknown;
   for (const url of urls) {
     try {
+      const blockTs = async (n: number) => parseInt((await rpcCall(url, 'eth_getBlockByNumber', ['0x' + n.toString(16), false])).timestamp, 16);
       const head = await rpcCall(url, 'eth_getBlockByNumber', ['latest', false]);
       const headNum = parseInt(head.number, 16);
       const headTs = parseInt(head.timestamp, 16);
-      const from = Math.max(0, headNum - 43_000);
-      const logs: any[] = await rpcCall(url, 'eth_getLogs', [{
-        address: contract, topics: [TRANSFER_TOPIC, null, toTopic],
-        fromBlock: '0x' + from.toString(16), toBlock: '0x' + headNum.toString(16),
-      }]);
-      for (const l of logs ?? []) {
+      const secsPerBlock = Math.max(0.05, (headTs - await blockTs(headNum - 1_000)) / 1_000);
+      const from = Math.max(0, headNum - Math.ceil(RPC_WINDOW_SECS / secsPerBlock));
+      const logs: any[] = [];
+      for (let lo = from; lo <= headNum; lo += RPC_CHUNK) {
+        logs.push(...(await rpcCall(url, 'eth_getLogs', [{
+          address: contract, topics: [TRANSFER_TOPIC, null, toTopic],
+          fromBlock: '0x' + lo.toString(16), toBlock: '0x' + Math.min(headNum, lo + RPC_CHUNK - 1).toString(16),
+        }]) ?? []));
+      }
+      for (const l of logs) {
         if (l.removed) continue;
         const usd = Math.round(Number(BigInt(l.data)) / 1e6 * 100);   // USDC/USDT are 6 decimals on these chains
-        const ts = headTs - (headNum - parseInt(l.blockNumber, 16)) * blockSecs;
+        const ts = l.blockTimestamp ? parseInt(l.blockTimestamp, 16) : await blockTs(parseInt(l.blockNumber, 16));
         await recordDetection({ source: 'crypto', externalId: `${extId}:${l.transactionHash}`, methodCode, amount: usd, currency: 'USD', raw: { hash: l.transactionHash, ts, ...(label ? { source_detail: label } : {}) } });
       }
       return;
